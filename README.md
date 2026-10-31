@@ -1,8 +1,8 @@
-# Config Moodle
+# Gestor UFU
 
 **Configurador de disciplinas Moodle com recálculo automático de datas.**
 
-Config Moodle é uma aplicação Flutter multiplataforma (Windows, Android, Web, macOS, Linux, iOS) que permite planejar a estrutura completa de uma disciplina — seções, atividades, datas, visibilidade e ordenação — e sincronizar tudo diretamente com o Moodle, eliminando o trabalho manual repetitivo de configurar cursos a cada semestre.
+Gestor UFU é uma aplicação Flutter multiplataforma (Windows, Android, Web, macOS, Linux, iOS) que permite planejar a estrutura completa de uma disciplina — seções, atividades, datas, visibilidade e ordenação — e sincronizar tudo diretamente com o Moodle, eliminando o trabalho manual repetitivo de configurar cursos a cada semestre.
 
 ---
 
@@ -35,7 +35,7 @@ Config Moodle é uma aplicação Flutter multiplataforma (Windows, Android, Web,
 
 ## Visão Geral
 
-Como professor ou coordenador, você provavelmente já enfrentou o trabalho tedioso de configurar dezenas de atividades no Moodle a cada início de semestre: ajustar datas de abertura e fechamento, renomear seções, ordenar módulos, definir visibilidades. O **Config Moodle** resolve isso:
+Como professor ou coordenador, você provavelmente já enfrentou o trabalho tedioso de configurar dezenas de atividades no Moodle a cada início de semestre: ajustar datas de abertura e fechamento, renomear seções, ordenar módulos, definir visibilidades. O **Gestor UFU** resolve isso:
 
 1. **Você define a estrutura da disciplina uma única vez** — seja criando do zero, importando de uma planilha Excel ou buscando de um curso Moodle existente.
 2. **Altera a data de início do semestre** — e todas as datas são recalculadas automaticamente usando offsets relativos e macros inteligentes.
@@ -92,7 +92,7 @@ Para que a sincronização funcione, o administrador do Moodle precisa garantir:
 2. **Habilitar Mobile Services:** `Administração > Plugins > Mobile app > Mobile services` (necessário para obtenção de token)
 3. **Verificar capacidades do usuário:** O usuário precisa ter a role de **Editing Teacher** ou **Manager** no curso
 
-> **Nota:** O Config Moodle tenta autenticar primeiro via serviço customizado (`config_moodle_service`) e depois via `moodle_mobile_app`. Se nenhum funcionar, verifique se o web service está habilitado para o protocolo REST.
+> **Nota:** O Gestor UFU tenta autenticar primeiro via serviço customizado (`config_moodle_service`) e depois via `moodle_mobile_app`. Se nenhum funcionar, verifique se o web service está habilitado para o protocolo REST.
 
 ---
 
@@ -101,14 +101,14 @@ Para que a sincronização funcione, o administrador do Moodle precisa garantir:
 ### Windows (MSI)
 
 1. Acesse a página de [Releases](https://github.com/josuemoraisgh/config_moodle/releases)
-2. Baixe o arquivo `ConfigMoodle-X.Y.Z-windows.msi`
+2. Baixe o arquivo `GestorUFU-X.Y.Z-windows.msi`
 3. Execute o instalador e siga as instruções
 4. O aplicativo ficará disponível no Menu Iniciar e na Área de Trabalho
 
 ### Android (APK)
 
 1. Acesse a página de [Releases](https://github.com/josuemoraisgh/config_moodle/releases)
-2. Baixe o arquivo `ConfigMoodle-X.Y.Z-android.apk`
+2. Baixe o arquivo `GestorUFU-X.Y.Z-android.apk`
 3. No dispositivo, habilite "Instalar de fontes desconhecidas"
 4. Instale o APK
 
@@ -131,7 +131,7 @@ Aqui está um guia completo para configurar sua primeira disciplina:
 
 ### Passo 1: Faça login no Moodle
 
-1. Abra o Config Moodle
+1. Abra o Gestor UFU
 2. Clique no ícone de conexão no canto superior direito da tela inicial
 3. Preencha:
    - **URL do Moodle**: ex. `https://moodle.suainstituicao.edu.br`
@@ -187,7 +187,7 @@ A tela inicial é o painel central do aplicativo, onde todas as configurações 
 
 | Elemento | Função |
 |----------|--------|
-| **Título** | "Config Moodle" |
+| **Título** | "Gestor UFU" |
 | **Status de conexão** | Exibe o nome do usuário logado (verde) ou "Desconectado" (cinza) |
 | **Botão de login** | Abre o diálogo de autenticação Moodle |
 
@@ -283,7 +283,7 @@ Cada atividade é uma linha individual com:
 
 ## Sistema de Macros de Data
 
-Um dos recursos mais poderosos do Config Moodle é o sistema de macros. Em vez de digitar datas fixas nos nomes de atividades, você usa marcadores que são resolvidos automaticamente quando a data do semestre muda.
+Um dos recursos mais poderosos do Gestor UFU é o sistema de macros. Em vez de digitar datas fixas nos nomes de atividades, você usa marcadores que são resolvidos automaticamente quando a data do semestre muda.
 
 ### Macros Disponíveis
 
@@ -339,7 +339,7 @@ Com openDate = 16/02/2026 e closeDate = 23/02/2026:
 
 ### Substituição Reversa
 
-Quando você importa de uma planilha ou do Moodle, o Config Moodle detecta datas no formato `dd/MM/yyyy` nos nomes e as substitui automaticamente por macros. A prioridade de detecção é:
+Quando você importa de uma planilha ou do Moodle, o Gestor UFU detecta datas no formato `dd/MM/yyyy` nos nomes e as substitui automaticamente por macros. A prioridade de detecção é:
 
 1. Data exata da abertura da atividade → `<DD/MM/YYYY>AI`
 2. Data exata do fechamento da atividade → `<DD/MM/YYYY>AF`
@@ -465,7 +465,7 @@ Após a sincronização, um log detalhado é gerado mostrando:
 
 ### Formato da Planilha (.xlsx)
 
-O Config Moodle espera planilhas no seguinte formato:
+O Gestor UFU espera planilhas no seguinte formato:
 
 #### Cabeçalho (linhas iniciais)
 
@@ -523,7 +523,7 @@ Uma alternativa à planilha é importar diretamente do Moodle:
 2. Clique no `+` → "Importar do Moodle"
 3. Selecione o curso na lista de cursos onde você é editor
 4. Escolha a data de início do semestre via DatePicker
-5. O Config Moodle busca:
+5. O Gestor UFU busca:
    - Todas as seções do curso
    - Todos os módulos de cada seção (com IDs, nomes, tipos, datas)
    - Restrições de data (abertura/fechamento) de cada módulo
@@ -537,7 +537,7 @@ Uma alternativa à planilha é importar diretamente do Moodle:
 
 ## Visibilidade de Atividades
 
-O Config Moodle suporta 3 estados de visibilidade, espelhando o comportamento do Moodle:
+O Gestor UFU suporta 3 estados de visibilidade, espelhando o comportamento do Moodle:
 
 | Valor | Estado | No Moodle |
 |-------|--------|-----------|
@@ -562,7 +562,7 @@ O Config Moodle suporta 3 estados de visibilidade, espelhando o comportamento do
 
 ### No Moodle (Sincronização)
 
-Na sincronização, o Config Moodle compara a ordem local com a ordem do Moodle e move módulos que estão fora de posição:
+Na sincronização, o Gestor UFU compara a ordem local com a ordem do Moodle e move módulos que estão fora de posição:
 
 1. Determina a `desiredOrder` (IDs dos módulos na ordem local)
 2. Obtém a `currentOrder` do Moodle (filtrada para módulos vinculados)
@@ -576,7 +576,7 @@ Na sincronização, o Config Moodle compara a ordem local com a ordem do Moodle 
 
 ## Tipos de Atividade Suportados
 
-O Config Moodle reconhece todos os tipos de módulo do Moodle. Os mais comuns:
+O Gestor UFU reconhece todos os tipos de módulo do Moodle. Os mais comuns:
 
 | Tipo (modname) | Nome Exibido | Possui Datas |
 |----------------|--------------|--------------|
@@ -601,7 +601,7 @@ O Config Moodle reconhece todos os tipos de módulo do Moodle. Os mais comuns:
 
 ## Referência de API Moodle
 
-O Config Moodle utiliza as seguintes APIs do Moodle:
+O Gestor UFU utiliza as seguintes APIs do Moodle:
 
 | Endpoint | Tipo | Finalidade |
 |----------|------|------------|
@@ -684,7 +684,7 @@ O projeto inclui um workflow GitHub Actions para build e release automatizados.
 
 ### Disparando uma Release
 
-1. Vá em **Actions** → **"Flutter Build & Release (Config Moodle)"**
+1. Vá em **Actions** → **"Flutter Build & Release (Gestor UFU)"**
 2. Clique em **"Run workflow"**
 3. Preencha:
    - **Versão**: ex. `v1.0.0`, `V1.2.3-RC1`
@@ -699,8 +699,8 @@ O projeto inclui um workflow GitHub Actions para build e release automatizados.
 
 | Artefato | Nome | Descrição |
 |----------|------|-----------|
-| **MSI** | `ConfigMoodle-X.Y.Z-windows.msi` | Instalador Windows com atalhos no Menu Iniciar e Área de Trabalho |
-| **APK** | `ConfigMoodle-X.Y.Z-android.apk` | Pacote Android instalável |
+| **MSI** | `GestorUFU-X.Y.Z-windows.msi` | Instalador Windows com atalhos no Menu Iniciar e Área de Trabalho |
+| **APK** | `GestorUFU-X.Y.Z-android.apk` | Pacote Android instalável |
 
 ---
 

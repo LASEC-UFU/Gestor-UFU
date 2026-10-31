@@ -104,6 +104,13 @@ class _HomePageState extends State<HomePage> {
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
       child: Row(
         children: [
+          IconButton(
+            tooltip: 'Voltar ao painel de funcionalidades',
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.dashboard_outlined),
+            color: AppTheme.textSecondary,
+          ),
+          const SizedBox(width: 4),
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -118,7 +125,7 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(width: 12),
           const Text(
-            'Config Moodle',
+            'Gestão do Moodle',
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
@@ -916,7 +923,7 @@ class _HomePageState extends State<HomePage> {
       final uint8Bytes = Uint8List.fromList(bytes);
       final result = await FilePicker.platform.saveFile(
         dialogTitle: 'Salvar planilha modelo',
-        fileName: 'template_config_moodle.xlsx',
+        fileName: 'template_gestor_ufu.xlsx',
         type: FileType.custom,
         allowedExtensions: ['xlsx'],
         bytes: uint8Bytes,

@@ -1,5 +1,7 @@
 import 'package:go_router/go_router.dart';
+import 'package:config_moodle/presentation/pages/dashboard_page.dart';
 import 'package:config_moodle/presentation/pages/home_page.dart';
+import 'package:config_moodle/presentation/pages/sei_tree_page.dart';
 import 'package:config_moodle/presentation/pages/table_editor_page.dart';
 import 'package:config_moodle/presentation/pages/sync_preview_page.dart';
 
@@ -7,7 +9,9 @@ class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: '/',
     routes: [
-      GoRoute(path: '/', builder: (context, state) => const HomePage()),
+      GoRoute(path: '/', builder: (context, state) => const DashboardPage()),
+      GoRoute(path: '/moodle', builder: (context, state) => const HomePage()),
+      GoRoute(path: '/sei', builder: (context, state) => const SeiTreePage()),
       GoRoute(
         path: '/editor/:id',
         builder: (context, state) {

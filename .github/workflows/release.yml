@@ -1,4 +1,4 @@
-name: Flutter Build & Release (Config Moodle)
+name: Flutter Build & Release (Gestor UFU)
 
 on:
   workflow_dispatch:
@@ -46,8 +46,8 @@ jobs:
           fi
           echo "base_version=$BASE"                             >> "$GITHUB_OUTPUT"
           echo "wix_version=$WIX"                              >> "$GITHUB_OUTPUT"
-          echo "msi_name=ConfigMoodle-${BASE}-windows.msi"     >> "$GITHUB_OUTPUT"
-          echo "apk_name=ConfigMoodle-${BASE}-android.apk"     >> "$GITHUB_OUTPUT"
+          echo "msi_name=GestorUFU-${BASE}-windows.msi"     >> "$GITHUB_OUTPUT"
+          echo "apk_name=GestorUFU-${BASE}-android.apk"     >> "$GITHUB_OUTPUT"
 
   # ─── 2. Compilar e empacotar Windows MSI ──────────────────────────────
   build-windows-msi:
@@ -223,7 +223,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
-          name: "Config Moodle ${{ inputs.version }}"
+          name: "Gestor UFU ${{ inputs.version }}"
           body: ${{ inputs.notes }}
           prerelease: false
           target_commitish: ${{ github.sha }}

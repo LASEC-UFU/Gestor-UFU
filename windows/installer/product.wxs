@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  product.wxs — Definição do instalador MSI para Config Moodle (WiX v3/x64)
+  product.wxs — Definição do instalador MSI para Gestor UFU (WiX v3/x64)
 
   UpgradeCode é IMUTÁVEL: não altere após a primeira publicação,
   pois identifica a família do produto para atualizações e remoções.
@@ -9,7 +9,7 @@
 
   <Product
     Id="*"
-    Name="Config Moodle"
+    Name="Gestor UFU"
     Language="1033"
     Version="$(var.ProductVersion)"
     Manufacturer="Josue Morais"
@@ -20,11 +20,11 @@
       Compressed="yes"
       InstallScope="perMachine"
       Platform="x64"
-      Description="Config Moodle — Instalador Windows" />
+      Description="Gestor UFU — Instalador Windows" />
 
     <!-- Impede instalação de versão mais antiga sobre mais nova -->
     <MajorUpgrade
-      DowngradeErrorMessage="Uma versão mais recente do Config Moodle já está instalada." />
+      DowngradeErrorMessage="Uma versão mais recente do Gestor UFU já está instalada." />
 
     <MediaTemplate EmbedCab="yes" />
 
@@ -38,12 +38,12 @@
 
       <!-- Arquivos do aplicativo em C:\Program Files\ -->
       <Directory Id="ProgramFiles64Folder">
-        <Directory Id="INSTALLFOLDER" Name="Config Moodle" />
+        <Directory Id="INSTALLFOLDER" Name="Gestor UFU" />
       </Directory>
 
       <!-- Atalho no Menu Iniciar -->
       <Directory Id="ProgramMenuFolder">
-        <Directory Id="AppMenuFolder" Name="Config Moodle" />
+        <Directory Id="AppMenuFolder" Name="Gestor UFU" />
       </Directory>
 
       <!-- Atalho na Área de Trabalho -->
@@ -57,8 +57,8 @@
                  Guid="{E5F6A7B8-C9D0-5E3F-A4B5-2C3D4E5F6A7B}">
         <Shortcut
           Id="StartMenuEntry"
-          Name="Config Moodle"
-          Description="Configurador de disciplinas Moodle"
+          Name="Gestor UFU"
+          Description="Ferramentas acadêmicas UFU"
           Target="[INSTALLFOLDER]config_moodle.exe"
           WorkingDirectory="INSTALLFOLDER" />
         <!-- Remove a pasta ao desinstalar -->
@@ -79,8 +79,8 @@
                  Guid="{F6A7B8C9-D0E1-6F4A-B5C6-3D4E5F6A7B8C}">
         <Shortcut
           Id="DesktopEntry"
-          Name="Config Moodle"
-          Description="Configurador de disciplinas Moodle"
+          Name="Gestor UFU"
+          Description="Ferramentas acadêmicas UFU"
           Target="[INSTALLFOLDER]config_moodle.exe"
           WorkingDirectory="INSTALLFOLDER" />
         <RegistryValue Root="HKCU"
@@ -92,7 +92,7 @@
     </DirectoryRef>
 
     <!-- ─── Feature principal ───────────────────────────────────────── -->
-    <Feature Id="Complete" Title="Config Moodle" Level="1">
+    <Feature Id="Complete" Title="Gestor UFU" Level="1">
       <!-- Arquivos colhidos automaticamente pelo heat.exe -->
       <ComponentGroupRef Id="HarvestedFiles" />
       <!-- Atalhos -->

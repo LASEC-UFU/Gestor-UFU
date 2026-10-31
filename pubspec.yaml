@@ -1,5 +1,5 @@
 name: config_moodle
-description: "Configurador de disciplinas Moodle com recálculo automático de datas."
+description: "Ferramentas acadêmicas UFU, incluindo gestão de disciplinas Moodle."
 publish_to: 'none'
 version: 1.0.0+1
 

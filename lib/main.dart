@@ -33,18 +33,18 @@ void main() {
         ChangeNotifierProvider.value(value: configCtrl),
         ChangeNotifierProvider.value(value: syncCtrl),
       ],
-      child: const ConfigMoodleApp(),
+      child: const GestorUfuApp(),
     ),
   );
 }
 
-class ConfigMoodleApp extends StatelessWidget {
-  const ConfigMoodleApp({super.key});
+class GestorUfuApp extends StatelessWidget {
+  const GestorUfuApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Config Moodle',
+      title: 'Gestor UFU',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
       routerConfig: AppRouter.router,

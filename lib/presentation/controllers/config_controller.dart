@@ -677,8 +677,9 @@ class ConfigController extends ChangeNotifier {
           d.year == normalized.year &&
           d.month == normalized.month &&
           d.day == normalized.day,
-    ))
+    )) {
       return;
+    }
     final updated = [..._current!.holidayDates, normalized]
       ..sort((a, b) => a.compareTo(b));
     _current = _current!.copyWith(holidayDates: updated);
