@@ -113,7 +113,7 @@ class _InlineEditTextState extends State<InlineEditText> {
             maxLines: widget.maxLines,
             style:
                 widget.style?.copyWith(fontSize: 13) ??
-                const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+                TextStyle(fontSize: 13, color: AppTheme.textPrimary),
             decoration: InputDecoration(
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
@@ -177,7 +177,7 @@ class _InlineEditTextState extends State<InlineEditText> {
           onTap: _startEditing,
           borderRadius: BorderRadius.circular(10),
           child: Padding(
-            padding: const EdgeInsets.all(2),
+            padding: EdgeInsets.all(2),
             child: Icon(
               Icons.edit,
               size: widget.iconSize,

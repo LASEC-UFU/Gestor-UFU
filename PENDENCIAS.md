@@ -9,6 +9,8 @@ Objetivo: transformar o Gestor UFU em um aplicativo Flutter para Windows que re�
 - [ ] Criar navegação, estados de carregamento, mensagens de erro/sucesso e área de logs apropriados para cada módulo.
 - [ ] Manter as funcionalidades atuais de gestão do Moodle acessíveis como módulo integrado.
 - [ ] Usar `SharedPreferences` como armazenamento local unificado para os dados de todos os módulos, incluindo Moodle, Diário, SEI, Planos de Ensino e Planos de Trabalho.
+- [x] Manter histórico imutável e backups nomeados das configurações Moodle no mesmo SharedPreferences, preservando versões anteriores à edição ou exclusão e permitindo restaurá-las ou usá-las no Preenche Diários.
+- [x] Manter hist?rico imut?vel e backups nomeados das configura??es Moodle no mesmo SharedPreferences, preservando vers?es anteriores ? edi??o ou exclus?o e permitindo restaur?-las ou us?-las no Preenche Di?rios.
 - [ ] Compartilhar os dados do módulo Moodle com os Planos de Ensino, sem duplicar o cadastro da disciplina; o plano deve poder referenciar a configuração Moodle correspondente no armazenamento unificado.
 - [ ] Organizar os dados por chaves/estruturas versionadas dentro do armazenamento compartilhado, sem criar bancos SQLite independentes por módulo.
 - [ ] Migrar para `SharedPreferences` as configurações atuais de Moodle e os cadastros, preferências e dados que hoje ficam nos bancos SQLite do PreencheDiario-UFU.
@@ -19,24 +21,26 @@ Objetivo: transformar o Gestor UFU em um aplicativo Flutter para Windows que re�
 
 ### Dados e edição
 
-- [ ] Carregar dados de arquivos JSON no formato `{ "DD/MM/AAAA -P": "conteúdo da aula" }`.
-- [ ] Normalizar datas, espaços e variações de traço das chaves e ordenar os itens por data.
-- [ ] Exibir os lançamentos em lista/tabela e permitir inserir, editar e remover itens.
-- [ ] Salvar os dados novamente em JSON, permitindo escolher o destino.
-- [ ] Importar planilhas Excel, localizar e mapear cabeçalhos mesmo quando não estiverem na primeira linha, interpretar datas e modalidades e validar valores.
-- [ ] Ajustar datas por dias, meses ou anos, com filtros por modalidade; preservar corretamente o último dia do mês e anos bissextos.
-- [ ] Mostrar prévia ou resultado do ajuste antes de gravar alterações nos dados.
+- [x] Carregar dados de arquivos JSON no formato `{ "DD/MM/AAAA -P": "conteúdo da aula" }`.
+- [x] Normalizar datas, espaços e variações de traço das chaves e ordenar os itens por data.
+- [x] Exibir os lançamentos em lista/tabela e permitir inserir, editar e remover itens.
+- [x] Salvar os dados novamente em JSON, permitindo escolher o destino.
+- [x] Importar planilhas Excel, localizar e mapear cabeçalhos mesmo quando não estiverem na primeira linha, interpretar datas e modalidades e validar valores.
+- [x] Ajustar datas por dias, meses ou anos, com filtros por modalidade; preservar corretamente o último dia do mês e anos bissextos.
+- [x] Mostrar prévia ou resultado do ajuste antes de gravar alterações nos dados.
+
+- [x] Permitir escolher uma configuração do Gestão do Moodle e importar suas seções, datas, modalidades e atividades para os lançamentos do Diário, mesclando ou substituindo com revisão pela lista editável.
 
 ### Preenchimento no portal
 
-- [ ] Abrir o Edge visível para que a pessoa faça login manualmente e navegue até a turma e o diário desejados.
-- [ ] Localizar no DOM o campo de texto associado a cada rótulo/data e preencher os lançamentos, sem usar fallback global que possa atingir campo errado.
-- [ ] Permitir destacar visualmente os campos preenchidos e, quando solicitado, não sobrescrever campos que já tenham conteúdo.
-- [ ] Registrar por item o que foi preenchido, ignorado ou não localizado.
-- [ ] Tentar acionar Salvar/Gravar e informar se o controle foi encontrado; confirmar o resultado quando a página oferecer indicação verificável.
-- [ ] Criar protótipo e comparar com o Selenium atual para avaliar estabilidade diante de pequenas mudanças na página.
+- [x] Abrir o Edge visível para que a pessoa faça login manualmente e navegue até a turma e o diário desejados.
+- [x] Localizar no DOM o campo de texto associado a cada rótulo/data e preencher os lançamentos, sem usar fallback global que possa atingir campo errado.
+- [x] Permitir destacar visualmente os campos preenchidos e, quando solicitado, não sobrescrever campos que já tenham conteúdo.
+- [x] Registrar por item o que foi preenchido, ignorado ou não localizado.
+- [x] Tentar acionar Salvar/Gravar e informar se o controle foi encontrado; confirmar o resultado quando a página oferecer indicação verificável.
+- [x] Migrar a automação do Diário de Selenium/Python para Puppeteer em Dart, mantendo o Edge visível, o login manual, a localização contextual dos campos e o registro do resultado.
 - [ ] Preferir seletores estáveis, verificar a tela e o resultado a cada etapa, aguardar carregamentos e interromper com erro claro quando o estado não for confiável.
-- [ ] Só migrar o preenchimento completo após validar o protótipo no uso real.
+- [ ] Validar o preenchimento, o comportamento de salvamento e os indicadores de confirmação no portal real após login manual.
 
 ## 3. SEI: fichas de componentes curriculares
 
@@ -131,6 +135,6 @@ Objetivo: transformar o Gestor UFU em um aplicativo Flutter para Windows que re�
 - [ ] Tratar erros de navegador, Excel, arquivo, banco e modelo sem indicar sucesso quando a operação não foi confirmada.
 - [ ] Revisar visualmente as telas Windows de todos os módulos e garantir que listas, formulários, prévias, diálogos e logs sejam adequados para desktop.
 
-**Observação sobre confiabilidade:** reescrever Selenium em Dart/Flutter não torna a automação do portal automaticamente mais resistente. A estabilidade depende dos seletores e das verificações de estado e resultado. O protótipo do Edge é uma etapa de validação obrigatória antes de migrar as operações completas do diário e do SEI.
+**Observação sobre confiabilidade:** o Preenche Diários agora usa Puppeteer em Dart com Edge/Chromium. A troca de biblioteca não torna seletores automaticamente resistentes: ainda falta validar a localização e a confirmação de gravação no portal real. A extração da árvore do SEI ainda usa a ponte Selenium/Python.
 
 **Observação sobre armazenamento:** a decisão de arquitetura é usar `SharedPreferences` como persistência local unificada, aproveitando a base já usada pelo módulo Moodle e migrando os dados estruturados dos SQLite do PreencheDiario-UFU. Os documentos continuam em arquivos no disco, referenciados pelos dados persistidos. Como `SharedPreferences` é armazenamento de chave/valor, a implementação deve manter estruturas versionadas, migrações e backups para proteger os dados.

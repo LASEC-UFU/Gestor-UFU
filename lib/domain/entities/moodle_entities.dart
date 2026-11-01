@@ -43,18 +43,35 @@ class MoodleCourse {
   final int id;
   final String shortname;
   final String fullname;
+  final DateTime? startDate;
 
   MoodleCourse({
     required this.id,
     required this.shortname,
     required this.fullname,
+    this.startDate,
   });
 
-  factory MoodleCourse.fromJson(Map<String, dynamic> json) => MoodleCourse(
-    id: json['id'] as int,
-    shortname: json['shortname'] as String? ?? '',
-    fullname: json['fullname'] as String? ?? '',
-  );
+  factory MoodleCourse.fromJson(Map<String, dynamic> json) {
+    final rawStart = json['startdate'];
+    DateTime? startDate;
+    if (rawStart is int && rawStart > 0) {
+      startDate = DateTime.fromMillisecondsSinceEpoch(rawStart * 1000);
+    } else if (rawStart is String && rawStart.trim().isNotEmpty) {
+      final timestamp = int.tryParse(rawStart);
+      if (timestamp != null && timestamp > 0) {
+        startDate = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+      } else {
+        startDate = DateTime.tryParse(rawStart);
+      }
+    }
+    return MoodleCourse(
+      id: json['id'] as int,
+      shortname: json['shortname'] as String? ?? '',
+      fullname: json['fullname'] as String? ?? '',
+      startDate: startDate,
+    );
+  }
 }
 
 class MoodleSection {

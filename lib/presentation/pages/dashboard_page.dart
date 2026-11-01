@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:config_moodle/data/services/preferences_backup_service.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
 
   static const _modules = <_ModuleInfo>[
     _ModuleInfo(
-      title: 'Gestão do Moodle',
+      title: 'Config Moodle',
       description:
           'Planeje disciplinas, organize atividades e sincronize cursos.',
       icon: Icons.settings_suggest_rounded,
@@ -17,15 +20,17 @@ class DashboardPage extends StatelessWidget {
       category: 'PLANEJAMENTO DE DISCIPLINAS',
     ),
     _ModuleInfo(
-      title: 'Diário',
+      title: 'Preenche Diários',
       description:
-          'Organize os conteúdos das aulas e prepare os lançamentos do diário.',
+          'Prepare lançamentos de aula usando planilhas ou dados do Moodle.',
       icon: Icons.edit_calendar_rounded,
       accent: AppTheme.accent,
+      enabled: true,
+      route: '/diario',
       category: 'ROTINA ACADÊMICA',
     ),
     _ModuleInfo(
-      title: 'Extrair Árvore de Processo',
+      title: 'Extrair \u00c1rvore de Processo',
       description:
           'Consulte os documentos de um processo e gere um inventário revisável.',
       icon: Icons.account_tree_rounded,
@@ -34,19 +39,15 @@ class DashboardPage extends StatelessWidget {
       route: '/sei',
       category: 'PROCESSOS E DOCUMENTOS',
     ),
-    _ModuleInfo(
-      title: 'Fichas de Componentes Curriculares',
-      description: 'Compare fichas HTML e carregue versões no processo do SEI.',
-      icon: Icons.topic_rounded,
-      accent: Color(0xFFFFB454),
-      category: 'PROCESSOS E DOCUMENTOS',
-    ),
+
     _ModuleInfo(
       title: 'Planos de Ensino',
       description:
           'Cadastre planos, organize cronogramas e prepare documentos para o SEI.',
       icon: Icons.menu_book_rounded,
       accent: Color(0xFF5DD39E),
+      enabled: true,
+      route: '/planos-ensino',
       category: 'ENSINO',
     ),
     _ModuleInfo(
@@ -55,15 +56,35 @@ class DashboardPage extends StatelessWidget {
           'Organize atividades, preencha planilhas e prepare PDFs para o SEI.',
       icon: Icons.assignment_turned_in_rounded,
       accent: Color(0xFFFF7B8B),
+      enabled: true,
+      route: '/planos-trabalho',
       category: 'GESTÃO DO TRABALHO',
+    ),
+    _ModuleInfo(
+      title: 'Ajusta Horários',
+      description: 'Monte grades semanais por curso, período e docente.',
+      icon: Icons.schedule_rounded,
+      accent: AppTheme.primary,
+      enabled: true,
+      route: '/ajusta-horarios',
+      category: 'PLANEJAMENTO DE DISCIPLINAS',
+    ),
+    _ModuleInfo(
+      title: 'Inserir Documentos no SEI',
+      description:
+          'Insira fichas de componentes curriculares no processo do SEI.',
+      icon: Icons.topic_rounded,
+      accent: Color(0xFFFFB454),
+      category: 'PROCESSOS E DOCUMENTOS',
     ),
   ];
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -73,26 +94,10 @@ class DashboardPage extends StatelessWidget {
               return CustomScrollView(
                 slivers: [
                   SliverToBoxAdapter(child: _DashboardHeader(compact: compact)),
-                  SliverToBoxAdapter(
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1240),
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(
-                            horizontalPadding,
-                            compact ? 34 : 48,
-                            horizontalPadding,
-                            18,
-                          ),
-                          child: _WelcomeBlock(compact: compact),
-                        ),
-                      ),
-                    ),
-                  ),
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(
                       horizontalPadding,
-                      8,
+                      compact ? 24 : 36,
                       horizontalPadding,
                       28,
                     ),
@@ -152,6 +157,7 @@ class _DashboardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.watch<ThemeController>();
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 22, compact ? 20 : 36, 0),
       child: Row(
@@ -172,11 +178,11 @@ class _DashboardHeader extends StatelessWidget {
             ),
             child: const Icon(Icons.auto_awesome_rounded, color: Colors.white),
           ),
-          const SizedBox(width: 13),
+          SizedBox(width: 13),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Gestor UFU',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
@@ -185,7 +191,7 @@ class _DashboardHeader extends StatelessWidget {
                 ),
               ),
               Text(
-                'FERRAMENTAS ACADÊMICAS',
+                'CENTRAL DE UTILIDADES',
                 style: TextStyle(
                   color: AppTheme.textSecondary.withAlpha(210),
                   fontSize: 9,
@@ -196,91 +202,67 @@ class _DashboardHeader extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: AppTheme.glassDecoration(opacity: 0.06),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.desktop_windows_rounded,
-                  size: 15,
-                  color: AppTheme.textSecondary,
+          PopupMenuButton<bool>(
+            tooltip: 'Selecionar tema',
+            initialValue: theme.isLight,
+            onSelected: (isLight) => theme.setLight(isLight),
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem(
+                value: false,
+                checked: !theme.isLight,
+                child: const Row(
+                  children: [
+                    Icon(Icons.dark_mode_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('Escuro'),
+                  ],
                 ),
-                SizedBox(width: 8),
-                Text(
-                  'Windows',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              CheckedPopupMenuItem(
+                value: true,
+                checked: theme.isLight,
+                child: const Row(
+                  children: [
+                    Icon(Icons.light_mode_rounded, size: 18),
+                    SizedBox(width: 10),
+                    Text('Claro'),
+                  ],
                 ),
-              ],
+              ),
+            ],
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: AppTheme.glassDecoration(opacity: 0.06),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    theme.isLight
+                        ? Icons.light_mode_rounded
+                        : Icons.dark_mode_rounded,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    theme.isLight ? 'Tema claro' : 'Tema escuro',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                  SizedBox(width: 4),
+                  Icon(
+                    Icons.expand_more_rounded,
+                    size: 16,
+                    color: AppTheme.textSecondary,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _WelcomeBlock extends StatelessWidget {
-  const _WelcomeBlock({required this.compact});
-
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            color: AppTheme.primary.withAlpha(28),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: AppTheme.primary.withAlpha(75)),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.dashboard_customize_rounded,
-                color: AppTheme.primaryLight,
-                size: 15,
-              ),
-              SizedBox(width: 7),
-              Text(
-                'CENTRAL DE FUNCIONALIDADES',
-                style: TextStyle(
-                  color: AppTheme.primaryLight,
-                  fontSize: 10,
-                  letterSpacing: 1.1,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 18),
-        Text(
-          'Tudo o que você precisa\npara sua rotina acadêmica.',
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: compact ? 30 : 40,
-            height: 1.15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -1.1,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          'Escolha uma ferramenta para começar. Os outros módulos serão '
-          'liberados conforme forem incorporados ao aplicativo.',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: compact ? 13 : 14,
-            height: 1.55,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -307,7 +289,7 @@ class _ModuleCardState extends State<_ModuleCard> {
       onEnter: enabled ? (_) => setState(() => _hovered = true) : null,
       onExit: enabled ? (_) => setState(() => _hovered = false) : null,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: Duration(milliseconds: 180),
         transform: Matrix4.translationValues(0, _hovered ? -4 : 0, 0),
         decoration: BoxDecoration(
           gradient: enabled ? AppTheme.cardGradient : null,
@@ -361,7 +343,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                       _ModuleStatus(enabled: enabled),
                     ],
                   ),
-                  const Spacer(),
+                  Spacer(),
                   Text(
                     module.category,
                     style: TextStyle(
@@ -371,7 +353,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 7),
+                  SizedBox(height: 7),
                   Text(
                     module.title,
                     style: TextStyle(
@@ -382,7 +364,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 7),
+                  SizedBox(height: 7),
                   Text(
                     module.description,
                     maxLines: 2,
@@ -395,7 +377,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                       height: 1.45,
                     ),
                   ),
-                  const SizedBox(height: 15),
+                  SizedBox(height: 15),
                   Row(
                     children: [
                       Text(
@@ -406,7 +388,7 @@ class _ModuleCardState extends State<_ModuleCard> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      const Spacer(),
+                      Spacer(),
                       Icon(
                         enabled
                             ? Icons.arrow_forward_rounded
@@ -469,34 +451,125 @@ class _DashboardFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      runSpacing: 12,
       children: [
-        Container(
-          width: 5,
-          height: 5,
-          decoration: const BoxDecoration(
-            color: AppTheme.accentGreen,
-            shape: BoxShape.circle,
+        SizedBox(
+          width: 620,
+          child: Row(
+            children: [
+              Container(
+                width: 5,
+                height: 5,
+                decoration: const BoxDecoration(
+                  color: AppTheme.accentGreen,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Seus dados ficam armazenados localmente neste computador.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 9),
-        const Expanded(
-          child: Text(
-            'Seus dados ficam armazenados localmente neste computador.',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-          ),
-        ),
-        const Text(
-          'VERSÃO WINDOWS',
-          style: TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 9,
-            letterSpacing: 1.1,
-            fontWeight: FontWeight.w600,
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextButton.icon(
+              onPressed: () => _export(context),
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('Exportar dados'),
+            ),
+            const SizedBox(width: 6),
+            TextButton.icon(
+              onPressed: () => _import(context),
+              icon: const Icon(Icons.upload_file_rounded, size: 18),
+              label: const Text('Importar backup'),
+            ),
+          ],
         ),
       ],
     );
+  }
+
+  Future<void> _export(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exportar todos os dados?'),
+        content: const Text(
+          'O backup inclui configurações, históricos, dados dos diários e credenciais Moodle salvas. Guarde o arquivo em local seguro.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Exportar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      final path = await PreferencesBackupService().exportBackup();
+      if (path == null || !context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Backup exportado: $path')));
+    } catch (error) {
+      if (context.mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao exportar backup: $error')),
+        );
+    }
+  }
+
+  Future<void> _import(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Importar backup completo?'),
+        content: const Text(
+          'A importação substitui todos os dados locais atuais pelos dados do arquivo, inclusive configurações, histórico, diários e credenciais Moodle. Exporte um backup atual antes de continuar, se precisar preservá-lo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Selecionar arquivo'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      final result = await PreferencesBackupService().importBackup();
+      if (result == null || !context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Backup ${result.fileName} restaurado. Reinicie o Gestor UFU para recarregar ${result.importedCount} itens.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (context.mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Falha ao importar backup: $error')),
+        );
+    }
   }
 }
 

@@ -1,0 +1,4568 @@
+[
+    {
+        "id":  "2026-2-ca-0001",
+        "code":  "FAMAT31011",
+        "acronym":  "C1",
+        "name":  "Cálculo Diferencial e Integral I",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  6,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0002",
+        "code":  "INFIS39032",
+        "acronym":  "E-FMEC",
+        "name":  "Experimental de Física Básica: Mecânica",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0003",
+        "code":  "INFIS39032",
+        "acronym":  "E-FMEC",
+        "name":  "Experimental de Física Básica: Mecânica",
+        "className":  "5",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0004",
+        "code":  "FEMEC39101",
+        "acronym":  "EXPG",
+        "name":  "Expressão Gráfica",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E13",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0005",
+        "code":  "INFIS39031",
+        "acronym":  "FMEC",
+        "name":  "Física Básica: Mecânica",
+        "className":  "2",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0006",
+        "code":  "FAMAT31021",
+        "acronym":  "GA",
+        "name":  "Geometria Analítica",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0007",
+        "code":  "FEELT31105",
+        "acronym":  "IECA",
+        "name":  "Introdução à Engenharia de Controle e Automação",
+        "className":  "A",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0008",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "A",
+        "teacher":  "Pedro Cunha Carneiro",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0009",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "A1",
+        "teacher":  "Pedro Cunha Carneiro",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0010",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "A2",
+        "teacher":  "Pedro Cunha Carneiro",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0011",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "C",
+        "teacher":  "Luiz Arthur Tarralo Passatuto",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0012",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "C1",
+        "teacher":  "Luiz Arthur Tarralo Passatuto",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0013",
+        "code":  "FEELT31107",
+        "acronym":  "PS",
+        "name":  "Programação Script",
+        "className":  "C2",
+        "teacher":  "Luiz Arthur Tarralo Passatuto",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0014",
+        "code":  "FEELT00000",
+        "acronym":  "R",
+        "name":  "Reforço",
+        "className":  "2",
+        "teacher":  "Lorenço Santos Vasconcelos",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  1
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0015",
+        "code":  "FAMAT31012",
+        "acronym":  "C2",
+        "name":  "Cálculo Diferencial e Integral II",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  6,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  12
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  12
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0016",
+        "code":  "INFIS39056",
+        "acronym":  "EFIS-3O",
+        "name":  "Experimental de Física Básica:Oscilações, Ondas e �\"ptica",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0017",
+        "code":  "FEELT31410",
+        "acronym":  "E-SD",
+        "name":  "Experimental de Sistemas Digitais",
+        "className":  "1",
+        "teacher":  "Carlos Augusto Bissochi Júnior",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0018",
+        "code":  "FEELT31410",
+        "acronym":  "E-SD",
+        "name":  "Experimental de Sistemas Digitais",
+        "className":  "2",
+        "teacher":  "Carlos Augusto Bissochi Júnior",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0019",
+        "code":  "FEELT31410",
+        "acronym":  "E-SD",
+        "name":  "Experimental de Sistemas Digitais",
+        "className":  "3",
+        "teacher":  "Carlos Augusto Bissochi Júnior",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0020",
+        "code":  "FEELT31410",
+        "acronym":  "E-SD",
+        "name":  "Experimental de Sistemas Digitais",
+        "className":  "4",
+        "teacher":  "Daniel Pereira de Carvalho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0021",
+        "code":  "FEELT31410",
+        "acronym":  "E-SD",
+        "name":  "Experimental de Sistemas Digitais",
+        "className":  "6",
+        "teacher":  "Carlos Augusto Bissochi Júnior",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0022",
+        "code":  "INFIS31402",
+        "acronym":  "FIS3O",
+        "name":  "Física Básica: Oscilações, Ondas e �\"ptica",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0023",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "A",
+        "teacher":  "Wellington Maycon Santos Bernardes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0024",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "A1",
+        "teacher":  "Adriano de Oliveira Andrade",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0025",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "A4",
+        "teacher":  "Adriano Alves Pereira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0026",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "B",
+        "teacher":  "Wellington Maycon Santos Bernardes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0027",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "B1",
+        "teacher":  "Selma Terezinha Milagre",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0028",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "B2",
+        "teacher":  "Gabriel Andrade Queiroz",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0029",
+        "code":  "FEELT31204",
+        "acronym":  "METRO",
+        "name":  "Metrologia",
+        "className":  "B3",
+        "teacher":  "Luiz Arthur Tarralo Passatuto",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0030",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "A",
+        "teacher":  "Augusto W. Fleury Veloso da Silveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0031",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "A1",
+        "teacher":  "Augusto W. Fleury Veloso da Silveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0032",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "A2",
+        "teacher":  "Augusto W. Fleury Veloso da Silveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0033",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "B",
+        "teacher":  "Isaque Nogueira Gondim",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0034",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "B1",
+        "teacher":  "Isaque Nogueira Gondim",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0035",
+        "code":  "FEELT31201",
+        "acronym":  "PP",
+        "name":  "Programação Procedimental",
+        "className":  "B2",
+        "teacher":  "Isaque Nogueira Gondim",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E30",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0036",
+        "code":  "FEELT31409",
+        "acronym":  "SD",
+        "name":  "Sistemas Digitais",
+        "className":  "A",
+        "teacher":  "Ernane Antônio Alves Coelho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0037",
+        "code":  "FEELT31409",
+        "acronym":  "SD",
+        "name":  "Sistemas Digitais",
+        "className":  "B",
+        "teacher":  "Davi Sabbag Roveri",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0038",
+        "code":  "FAMAT31022",
+        "acronym":  "ALG",
+        "name":  "Álgebra Linear",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  2
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0039",
+        "code":  "FEELT31301",
+        "acronym":  "CE-I",
+        "name":  "Circuitos Elétricos I",
+        "className":  "1",
+        "teacher":  "Carlos Eduardo Tavares",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  5,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0040",
+        "code":  "FEELT31301",
+        "acronym":  "CE-I",
+        "name":  "Circuitos Elétricos I",
+        "className":  "2",
+        "teacher":  "Fabrício Augusto Matheus Moura",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  5,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0041",
+        "code":  "FAMAT31013",
+        "acronym":  "C3",
+        "name":  "Cálculo Diferencial e Integral III",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  6,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0042",
+        "code":  "FAMAT31033",
+        "acronym":  "EST",
+        "name":  "Estatística",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0043",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "1.1",
+        "teacher":  "Carlos Eduardo Tavares",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0044",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "1.2",
+        "teacher":  "Carlos Eduardo Tavares",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0045",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "2.1",
+        "teacher":  "Carlos Eduardo Tavares",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0046",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "2.2",
+        "teacher":  "Carlos Eduardo Tavares",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0047",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "3.1",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0048",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "3.2",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0049",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "4.1",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0050",
+        "code":  "FEELT31302",
+        "acronym":  "ECE-I",
+        "name":  "Experimental de Circuitos Elétricos I",
+        "className":  "4.2",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0051",
+        "code":  "FEQUI39401",
+        "acronym":  "FT",
+        "name":  "Fenômenos de Transporte",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  12
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0052",
+        "code":  "FEQUI39401",
+        "acronym":  "FT",
+        "name":  "Fenômenos de Transporte",
+        "className":  "2",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0053",
+        "code":  "FEELT32301",
+        "acronym":  "IFIND-I",
+        "name":  "Informática Industrial I",
+        "className":  "A",
+        "teacher":  "Renato Ferreira Fernandes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0054",
+        "code":  "FEELT32301",
+        "acronym":  "IFIND-I",
+        "name":  "Informática Industrial I",
+        "className":  "A1",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0055",
+        "code":  "FEELT32301",
+        "acronym":  "IFIND-I",
+        "name":  "Informática Industrial I",
+        "className":  "A2",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0056",
+        "code":  "FEELT32301",
+        "acronym":  "IFIND-I",
+        "name":  "Informática Industrial I",
+        "className":  "A3",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0057",
+        "code":  "FEMEC39102",
+        "acronym":  "MECS",
+        "name":  "Mecânica dos Sólidos",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  3
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0058",
+        "code":  "FEELT31403",
+        "acronym":  "CE-II",
+        "name":  "Circuitos Elétricos II",
+        "className":  "A",
+        "teacher":  "Paulo Henrique Oliveira Rezende",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0059",
+        "code":  "FEELT31401",
+        "acronym":  "ELA-I",
+        "name":  "Eletrônica Analógica I",
+        "className":  "A",
+        "teacher":  "Luciano Xavier Medeiros",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0060",
+        "code":  "FEELT31401",
+        "acronym":  "ELA-I",
+        "name":  "Eletrônica Analógica I",
+        "className":  "B",
+        "teacher":  "André Luiz Aguiar da Costa",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0061",
+        "code":  "FEELT31404",
+        "acronym":  "ECE-II",
+        "name":  "Experimental de Circuitos Elétricos II",
+        "className":  "A",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0062",
+        "code":  "FEELT31404",
+        "acronym":  "ECE-II",
+        "name":  "Experimental de Circuitos Elétricos II",
+        "className":  "B",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0063",
+        "code":  "FEELT31404",
+        "acronym":  "ECE-II",
+        "name":  "Experimental de Circuitos Elétricos II",
+        "className":  "C",
+        "teacher":  "Aídson Antônio de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E16",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0064",
+        "code":  "FEELT31402",
+        "acronym":  "E-ELA-I",
+        "name":  "Experimental de Eletrônica Analógica I",
+        "className":  "4",
+        "teacher":  "Sérgio Ricardo de Jesus Oliveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E11",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0065",
+        "code":  "FEELT31402",
+        "acronym":  "E-ELA-I",
+        "name":  "Experimental de Eletrônica Analógica I",
+        "className":  "5",
+        "teacher":  "Jeovane Vicente de Sousa",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E11",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0066",
+        "code":  "INFIS39034",
+        "acronym":  "E-EMAG",
+        "name":  "Experimental de Física Básica: Eletricidade e Magnetismo",
+        "className":  "2",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0067",
+        "code":  "INFIS39034",
+        "acronym":  "E-EMAG",
+        "name":  "Experimental de Física Básica: Eletricidade e Magnetismo",
+        "className":  "3",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0068",
+        "code":  "INFIS39034",
+        "acronym":  "E-EMAG",
+        "name":  "Experimental de Física Básica: Eletricidade e Magnetismo",
+        "className":  "5",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0069",
+        "code":  "INFIS39034",
+        "acronym":  "E-EMAG",
+        "name":  "Experimental de Física Básica: Eletricidade e Magnetismo",
+        "className":  "6",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0070",
+        "code":  "INFIS39033",
+        "acronym":  "EMAG",
+        "name":  "Física Básica: Eletricidade e Magnetismo",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0071",
+        "code":  "INFIS39033",
+        "acronym":  "EMAG",
+        "name":  "Física Básica: Eletricidade e Magnetismo",
+        "className":  "2",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0072",
+        "code":  "FEELT32401",
+        "acronym":  "IFIND-II",
+        "name":  "Informática Industrial II",
+        "className":  "A",
+        "teacher":  "Renato Ferreira Fernandes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0073",
+        "code":  "FEELT32401",
+        "acronym":  "IFIND-II",
+        "name":  "Informática Industrial II",
+        "className":  "A1",
+        "teacher":  "Renato Ferreira Fernandes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0074",
+        "code":  "FEELT32401",
+        "acronym":  "IFIND-II",
+        "name":  "Informática Industrial II",
+        "className":  "A2",
+        "teacher":  "Renato Ferreira Fernandes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0075",
+        "code":  "FEELT32401",
+        "acronym":  "IFIND-II",
+        "name":  "Informática Industrial II",
+        "className":  "A3",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0076",
+        "code":  "FAMAT31031",
+        "acronym":  "MM",
+        "name":  "Métodos Matemáticos",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  5,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  4
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  12
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  9
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0077",
+        "code":  "FEELT36501",
+        "acronym":  "CVRM",
+        "name":  "Conversão de Energia e Máquinas Elétricas",
+        "className":  "T",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0078",
+        "code":  "FEELT36501",
+        "acronym":  "CVRM",
+        "name":  "Conversão de Energia e Máquinas Elétricas",
+        "className":  "T1",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1P05",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0079",
+        "code":  "FEELT36501",
+        "acronym":  "CVRM",
+        "name":  "Conversão de Energia e Máquinas Elétricas",
+        "className":  "T2",
+        "teacher":  "Fernando Bento Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1P05",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0080",
+        "code":  "FEELT32502",
+        "acronym":  "ELA II",
+        "name":  "Eletrônica Analógica II",
+        "className":  "1",
+        "teacher":  "Gustavo Brito de Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0081",
+        "code":  "FEELT31502",
+        "acronym":  "E-ELA-II",
+        "name":  "Experimental de Eletrônica Analógica II",
+        "className":  "2",
+        "teacher":  "Gustavo Brito de Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E11",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0082",
+        "code":  "FEELT31502",
+        "acronym":  "E-ELA-II",
+        "name":  "Experimental de Eletrônica Analógica II",
+        "className":  "3",
+        "teacher":  "Gustavo Brito de Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E11",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0083",
+        "code":  "FEELT31502",
+        "acronym":  "E-ELA-II",
+        "name":  "Experimental de Eletrônica Analógica II",
+        "className":  "4",
+        "teacher":  "Gustavo Brito de Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E11",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0084",
+        "code":  "FEELT32503",
+        "acronym":  "ININD I",
+        "name":  "Instrumentação Industrial I",
+        "className":  "A",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0085",
+        "code":  "FEELT32503",
+        "acronym":  "ININD I",
+        "name":  "Instrumentação Industrial I",
+        "className":  "A1",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204A",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0086",
+        "code":  "FEELT32503",
+        "acronym":  "ININD I",
+        "name":  "Instrumentação Industrial I",
+        "className":  "A3",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204A",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0087",
+        "code":  "FEELT32503",
+        "acronym":  "ININD I",
+        "name":  "Instrumentação Industrial I",
+        "className":  "A4",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204A",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0088",
+        "code":  "FEELT32504",
+        "acronym":  "SSIS",
+        "name":  "Sinais e Sistemas",
+        "className":  "A",
+        "teacher":  "Gabriela Vieira Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0089",
+        "code":  "FEELT31523",
+        "acronym":  "SEMB I",
+        "name":  "Sistemas Embarcados I",
+        "className":  "A",
+        "teacher":  "Daniel Pereira de Carvalho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  11
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0090",
+        "code":  "FEELT31523",
+        "acronym":  "SEMB I",
+        "name":  "Sistemas Embarcados I",
+        "className":  "A1",
+        "teacher":  "Daniel Pereira de Carvalho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0091",
+        "code":  "FEELT31523",
+        "acronym":  "SEMB I",
+        "name":  "Sistemas Embarcados I",
+        "className":  "A2",
+        "teacher":  "Daniel Pereira de Carvalho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0092",
+        "code":  "FEELT31523",
+        "acronym":  "SEMB I",
+        "name":  "Sistemas Embarcados I",
+        "className":  "A3",
+        "teacher":  "Daniel Pereira de Carvalho",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  5
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0093",
+        "code":  "FEELT31604",
+        "acronym":  "E-ITEL",
+        "name":  "Experimental de Instalações Elétricas",
+        "className":  "3",
+        "teacher":  "Bárbara Morais Gianesini",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E13",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0094",
+        "code":  "FEELT31604",
+        "acronym":  "E-ITEL",
+        "name":  "Experimental de Instalações Elétricas",
+        "className":  "4",
+        "teacher":  "Bárbara Morais Gianesini",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E13",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0095",
+        "code":  "FEELT32601",
+        "acronym":  "E-SR",
+        "name":  "Experimental de Sistemas de Controle Realimentado",
+        "className":  "2",
+        "teacher":  "Gabriela Vieira Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0096",
+        "code":  "FEELT32601",
+        "acronym":  "E-SR",
+        "name":  "Experimental de Sistemas de Controle Realimentado",
+        "className":  "3",
+        "teacher":  "Gabriela Vieira Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0097",
+        "code":  "FEELT32601",
+        "acronym":  "E-SR",
+        "name":  "Experimental de Sistemas de Controle Realimentado",
+        "className":  "4",
+        "teacher":  "�?der Alves de Moura",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0098",
+        "code":  "FEELT31603",
+        "acronym":  "ITEL",
+        "name":  "Instalações Elétricas",
+        "className":  "U",
+        "teacher":  "Bárbara Morais Gianesini",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0099",
+        "code":  "FEELT32602",
+        "acronym":  "ININD2",
+        "name":  "Instrumentação Industrial II",
+        "className":  "A",
+        "teacher":  "Josué Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204A, 1P07",
+        "theoryHours":  3,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0100",
+        "code":  "FEELT31605",
+        "acronym":  "MEL",
+        "name":  "Máquinas Elétricas",
+        "className":  "1",
+        "teacher":  "Augusto W. Fleury Veloso da Silveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1P05",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0101",
+        "code":  "FEELT31605",
+        "acronym":  "MEL",
+        "name":  "Máquinas Elétricas",
+        "className":  "2",
+        "teacher":  "Augusto W. Fleury Veloso da Silveira",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1P05",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0102",
+        "code":  "FEELT31605",
+        "acronym":  "MEL",
+        "name":  "Máquinas Elétricas",
+        "className":  "A",
+        "teacher":  "Luciano Coutinho Gomes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0103",
+        "code":  "FEELT32603",
+        "acronym":  "SR",
+        "name":  "Sistemas de Controle Realimentado",
+        "className":  "1",
+        "teacher":  "Gabriela Vieira Lima",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0104",
+        "code":  "FEELT39015",
+        "acronym":  "SEMB II",
+        "name":  "Sistemas Embarcados II",
+        "className":  "A",
+        "teacher":  "Fábio Vincenzi Romualdo da Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0105",
+        "code":  "FEELT39015",
+        "acronym":  "SEMB II",
+        "name":  "Sistemas Embarcados II",
+        "className":  "A1",
+        "teacher":  "Fábio Vincenzi Romualdo da Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0106",
+        "code":  "FEELT39015",
+        "acronym":  "SEMB II",
+        "name":  "Sistemas Embarcados II",
+        "className":  "A2",
+        "teacher":  "Fábio Vincenzi Romualdo da Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0107",
+        "code":  "FEELT39015",
+        "acronym":  "SEMB II",
+        "name":  "Sistemas Embarcados II",
+        "className":  "A3",
+        "teacher":  "Fábio Vincenzi Romualdo da Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-204B",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  6
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0108",
+        "code":  "FEELT31701",
+        "acronym":  "IIND",
+        "name":  "Instalações Industriais",
+        "className":  "1",
+        "teacher":  "Hélder de Paula",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0109",
+        "code":  "FEMEC42073",
+        "acronym":  "PFM",
+        "name":  "Processos de Fabricação Mecânica",
+        "className":  "V",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  12
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0110",
+        "code":  "FEMEC42073",
+        "acronym":  "PFM",
+        "name":  "Processos de Fabricação Mecânica",
+        "className":  "VA",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0111",
+        "code":  "FEMEC42073",
+        "acronym":  "PFM",
+        "name":  "Processos de Fabricação Mecânica",
+        "className":  "VB",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0112",
+        "code":  "FEELT32702",
+        "acronym":  "PIEAU",
+        "name":  "Projeto Interdisciplinar de Engenharia de Controle e Automação",
+        "className":  "A",
+        "teacher":  "�?der Alves de Moura",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0113",
+        "code":  "FEQUI39048",
+        "acronym":  "QT",
+        "name":  "Química Tecnológica",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0114",
+        "code":  "FEQUI39048",
+        "acronym":  "QT",
+        "name":  "Química Tecnológica",
+        "className":  "A1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0115",
+        "code":  "FEQUI39048",
+        "acronym":  "QT",
+        "name":  "Química Tecnológica",
+        "className":  "A2",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0116",
+        "code":  "FEELT31713",
+        "acronym":  "RICA-I",
+        "name":  "Redes Industriais para Controle e Automação I",
+        "className":  "A",
+        "teacher":  "Fábio Vincenzi Romualdo da Silva",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  4,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0117",
+        "code":  "FEELT32701",
+        "acronym":  "SCM",
+        "name":  "Sistemas de Controle Moderno",
+        "className":  "A",
+        "teacher":  "Aniel Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203B",
+        "theoryHours":  3,
+        "practiceHours":  3,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  7
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0118",
+        "code":  "FEELT31811",
+        "acronym":  "EIA",
+        "name":  "Eletrônica Industrial e Acionamentos",
+        "className":  "A",
+        "teacher":  "Carlos Augusto Bissochi Júnior",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1P05",
+        "theoryHours":  4,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0119",
+        "code":  "FEELT32801",
+        "acronym":  "RICA-II",
+        "name":  "Redes Industriais para Controle e Automação II",
+        "className":  "A",
+        "teacher":  "Renato Ferreira Fernandes",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  2,
+        "practiceHours":  4,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0120",
+        "code":  "FEELT31722",
+        "acronym":  "ROB",
+        "name":  "Robótica",
+        "className":  "1",
+        "teacher":  "�?der Alves de Moura",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1E13",
+        "theoryHours":  3,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  8
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0121",
+        "code":  "FEMEC41080",
+        "acronym":  "SCHP",
+        "name":  "Sistemas de Controle Hidráulicos e Pneumáticos",
+        "className":  "V",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  11
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0122",
+        "code":  "FEMEC41080",
+        "acronym":  "SCHP",
+        "name":  "Sistemas de Controle Hidráulicos e Pneumáticos",
+        "className":  "VA",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0123",
+        "code":  "FEMEC41080",
+        "acronym":  "SCHP",
+        "name":  "Sistemas de Controle Hidráulicos e Pneumáticos",
+        "className":  "VC",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0124",
+        "code":  "FEMEC41080",
+        "acronym":  "SCHP",
+        "name":  "Sistemas de Controle Hidráulicos e Pneumáticos",
+        "className":  "VG",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0125",
+        "code":  "FEMEC41080",
+        "acronym":  "SCHP",
+        "name":  "Sistemas de Controle Hidráulicos e Pneumáticos",
+        "className":  "VH",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  0,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  8
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0126",
+        "code":  "FAGEN39901",
+        "acronym":  "ADM",
+        "name":  "Administração",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  9
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0127",
+        "code":  "IERI39001",
+        "acronym":  "CECO",
+        "name":  "Ciências Econômicas",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  9
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0128",
+        "code":  "FADIR39901",
+        "acronym":  "CSJ",
+        "name":  "Ciências Sociais e Jurídicas",
+        "className":  "1",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  9
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  6
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0129",
+        "code":  "FEELT32901",
+        "acronym":  "SEDS",
+        "name":  "Modelagem e Simulação de Sistemas a Eventos Discretos",
+        "className":  "A",
+        "teacher":  "Aniel Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203A",
+        "theoryHours":  3,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  9
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  4
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0130",
+        "code":  "FEELT39045",
+        "acronym":  "ARP",
+        "name":  "Automação Residencial e Predial",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  2,
+        "practiceHours":  2,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  2
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  6
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0131",
+        "code":  "FEMEC41094",
+        "acronym":  "FAC",
+        "name":  "Fabricação Assistida por Computador",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  3,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  3,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0132",
+        "code":  "FEELT39019F",
+        "acronym":  "TTECA:CP",
+        "name":  "TEECA I: Controle Preditivo",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  4,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  11
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0133",
+        "code":  "FEELT39020E",
+        "acronym":  "MAI",
+        "name":  "TEECA II: Máquinas e Acionamentos Industriais",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203A",
+        "theoryHours":  3,
+        "practiceHours":  1,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  2,
+                          "slot":  9
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  2,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0134",
+        "code":  "FEELT39052XXX",
+        "acronym":  "TECAIII:CAP",
+        "name":  "TEECA III: Controle Automático de Processos",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  1,
+                          "slot":  10
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  11
+                      },
+                      {
+                          "weekday":  1,
+                          "slot":  12
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0135",
+        "code":  "FEELT39053e",
+        "acronym":  "CAME",
+        "name":  "TEECA IV: Introdução ao Controle Avançado de Máquinas Elétricas",
+        "className":  "C",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  4,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  4,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0136",
+        "code":  "FEELT39053F",
+        "acronym":  "SSIA",
+        "name":  "TEECA IV: Sistemas de Supervisão em Indústria Avançada I",
+        "className":  "C",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-205",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  1
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  2
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0137",
+        "code":  "FEELT39019J",
+        "acronym":  "MPEC",
+        "name":  "Tópicos Especiais em Engenharia de Controle e Automação I: Metodologia da Pesquisa e Escrita Científica",
+        "className":  "A",
+        "teacher":  "Aniel Silva de Morais",
+        "coTeachers":  [
+
+                       ],
+        "room":  "",
+        "theoryHours":  3,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  7
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  8
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  9
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0138",
+        "code":  "FEELT39053D",
+        "acronym":  "IMPEC",
+        "name":  "Tópicos Especiais em Engenharia de Controle e Automação IV: Introdução à Metodologia da Pesquisa e Escrita Científica",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203A",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  3
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  4
+                      }
+                  ]
+    },
+    {
+        "id":  "2026-2-ca-0139",
+        "code":  "FEELT39053B",
+        "acronym":  "SDD1",
+        "name":  "Tópicos Especiais em Engenharia de Controle e Automação IV: Sistemas Distribuídos em Domótica I",
+        "className":  "A",
+        "teacher":  "",
+        "coTeachers":  [
+
+                       ],
+        "room":  "1C-203A",
+        "theoryHours":  2,
+        "practiceHours":  0,
+        "coursePeriods":  [
+                              {
+                                  "program":  2,
+                                  "period":  11
+                              }
+                          ],
+        "slots":  [
+                      {
+                          "weekday":  5,
+                          "slot":  5
+                      },
+                      {
+                          "weekday":  5,
+                          "slot":  6
+                      }
+                  ]
+    }
+]

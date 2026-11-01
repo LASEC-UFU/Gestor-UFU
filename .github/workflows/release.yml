@@ -1,6 +1,10 @@
 name: Flutter Build & Release (Gestor UFU)
 
 on:
+  push:
+    tags:
+      - 'v*'
+      - 'V*'
   workflow_dispatch:
     inputs:
       version:
@@ -32,7 +36,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RAW="${{ inputs.version }}"
+          RAW="${{ inputs.version || github.ref_name }}"
           RAW="${RAW//[[:space:]]/}"
           CLEAN="${RAW#[vV]}"
           # Remove sufixo (ex.: -RC5) do número de versão
@@ -222,8 +226,8 @@ jobs:
       - name: Criar Release e anexar artefatos
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.version }}
-          name: "Gestor UFU ${{ inputs.version }}"
+          tag_name: ${{ inputs.version || github.ref_name }}
+          name: "Gestor UFU ${{ inputs.version || github.ref_name }}"
           body: ${{ inputs.notes }}
           prerelease: false
           target_commitish: ${{ github.sha }}

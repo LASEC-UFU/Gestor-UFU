@@ -6,6 +6,7 @@ import 'package:config_moodle/core/utils/date_calculator.dart';
 import 'package:config_moodle/core/utils/macro_resolver.dart';
 import 'package:config_moodle/data/datasources/local_datasource.dart';
 import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
 import 'package:config_moodle/domain/repositories/i_config_repository.dart';
 
 /// Padrão para referência de célula com operação: E2+3, B7+1, B10-5
@@ -31,6 +32,18 @@ class ConfigRepositoryImpl implements IConfigRepository {
 
   @override
   Future<void> delete(String id) => _local.delete(id);
+
+  @override
+  Future<List<MoodleConfigSnapshot>> getSnapshots({String? configId}) =>
+      _local.getSnapshots(configId: configId);
+
+  @override
+  Future<void> createSnapshot(String configId, {required String label}) =>
+      _local.createSnapshot(configId, label: label);
+
+  @override
+  Future<void> restoreSnapshot(String configId, String snapshotId) =>
+      _local.restoreSnapshot(configId, snapshotId);
 
   @override
   Future<CourseConfig> importFromSpreadsheet(

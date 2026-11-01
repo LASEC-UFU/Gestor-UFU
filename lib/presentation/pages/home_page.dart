@@ -15,8 +15,10 @@ import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 import 'package:config_moodle/presentation/widgets/word_table_dialog.dart';
+import 'package:config_moodle/presentation/widgets/moodle_config_history_dialog.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -39,6 +41,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     final configCtrl = context.watch<ConfigController>();
     final authCtrl = context.watch<AuthController>();
     final df = DateFormat('dd/MM/yyyy');
@@ -58,7 +61,7 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: Column(
             children: [
@@ -105,9 +108,9 @@ class _HomePageState extends State<HomePage> {
       child: Row(
         children: [
           IconButton(
-            tooltip: 'Voltar ao painel de funcionalidades',
+            tooltip: 'Voltar',
             onPressed: () => context.go('/'),
-            icon: const Icon(Icons.dashboard_outlined),
+            icon: const Icon(Icons.arrow_back_rounded),
             color: AppTheme.textSecondary,
           ),
           const SizedBox(width: 4),
@@ -124,8 +127,8 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
           const SizedBox(width: 12),
-          const Text(
-            'Gestão do Moodle',
+          Text(
+            'Config Moodle',
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
@@ -135,7 +138,7 @@ class _HomePageState extends State<HomePage> {
           const Spacer(),
           // Status Moodle
           GlassCard(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             onTap: () => authCtrl.isLoggedIn
                 ? _showMoodleStatus(context, authCtrl)
                 : _showLoginDialog(context),
@@ -149,7 +152,7 @@ class _HomePageState extends State<HomePage> {
                       : AppTheme.textSecondary,
                   size: 18,
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Text(
                   authCtrl.isLoggedIn
                       ? authCtrl.credential!.fullname
@@ -192,16 +195,13 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: Text(
                 _importStatus!,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 13,
-                ),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
               ),
             ),
             IconButton(
               tooltip: 'Fechar',
               onPressed: () => setState(() => _importStatus = null),
-              icon: const Icon(Icons.close, size: 18),
+              icon: Icon(Icons.close, size: 18),
               color: AppTheme.textSecondary,
               constraints: const BoxConstraints.tightFor(width: 32, height: 32),
               padding: EdgeInsets.zero,
@@ -274,7 +274,7 @@ class _HomePageState extends State<HomePage> {
               ),
               const Spacer(),
               PopupMenuButton<String>(
-                icon: const Icon(
+                icon: Icon(
                   Icons.more_vert,
                   color: AppTheme.textSecondary,
                   size: 20,
@@ -311,6 +311,14 @@ class _HomePageState extends State<HomePage> {
                     showWordTableDialog(context, config);
                   } else if (value == 'sync') {
                     context.push('/sync/${config.id}');
+                  } else if (value == 'history') {
+                    showDialog<void>(
+                      context: context,
+                      builder: (_) => MoodleConfigHistoryDialog(
+                        config: config,
+                        controller: ctrl,
+                      ),
+                    );
                   }
                 },
                 itemBuilder: (_) => [
@@ -353,6 +361,20 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const PopupMenuItem(
+                    value: 'history',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.history_rounded,
+                          size: 18,
+                          color: AppTheme.accent,
+                        ),
+                        SizedBox(width: 8),
+                        Text('Histórico e backups'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [
@@ -369,7 +391,7 @@ class _HomePageState extends State<HomePage> {
           const Spacer(),
           Text(
             config.name,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary,
@@ -380,7 +402,7 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 4),
           Text(
             'Início: ${df.format(config.semesterStartDate)}',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 6),
           Row(
@@ -469,7 +491,7 @@ class _HomePageState extends State<HomePage> {
                 _showCreateDialog(context);
               },
             ),
-            const Divider(color: AppTheme.divider),
+            Divider(color: AppTheme.divider),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
@@ -494,7 +516,7 @@ class _HomePageState extends State<HomePage> {
                 await _importSpreadsheet(this.context);
               },
             ),
-            const Divider(color: AppTheme.divider),
+            Divider(color: AppTheme.divider),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
@@ -514,7 +536,7 @@ class _HomePageState extends State<HomePage> {
                 _downloadTemplate(context);
               },
             ),
-            const Divider(color: AppTheme.divider),
+            Divider(color: AppTheme.divider),
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
@@ -1022,13 +1044,24 @@ class _HomePageState extends State<HomePage> {
 
   void _showLoginDialog(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
-    final savedUrl = prefs.getString('last_moodle_url') ?? 'https://';
-    final urlCtrl = TextEditingController(text: savedUrl);
-    final userCtrl = TextEditingController();
-    final passCtrl = TextEditingController();
-
     if (!context.mounted) return;
-    showDialog(
+    final authController = context.read<AuthController>();
+    await authController.init();
+    if (!context.mounted) return;
+    final savedCredential = authController.credential;
+    final savedUrl =
+        prefs.getString('last_moodle_url') ??
+        savedCredential?.moodleUrl ??
+        'https://';
+    final urlCtrl = TextEditingController(text: savedUrl);
+    final userCtrl = TextEditingController(
+      text: savedCredential?.username ?? '',
+    );
+    final passCtrl = TextEditingController(
+      text: savedCredential?.password ?? '',
+    );
+
+    await showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setState) {
@@ -1042,6 +1075,9 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   TextField(
                     controller: urlCtrl,
+                    keyboardType: TextInputType.url,
+                    onChanged: (value) =>
+                        prefs.setString('last_moodle_url', value.trim()),
                     decoration: const InputDecoration(
                       labelText: 'URL do Moodle',
                       prefixIcon: Icon(Icons.link),
@@ -1107,6 +1143,9 @@ class _HomePageState extends State<HomePage> {
         },
       ),
     );
+    urlCtrl.dispose();
+    userCtrl.dispose();
+    passCtrl.dispose();
   }
 
   void _showMoodleStatus(BuildContext context, AuthController auth) {
@@ -1220,7 +1259,7 @@ class _MoodleCoursePickerDialogState extends State<_MoodleCoursePickerDialog> {
             const SizedBox(height: 12),
             Expanded(
               child: _filtered.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'Nenhum curso encontrado.',
                         style: TextStyle(color: AppTheme.textSecondary),
@@ -1253,7 +1292,7 @@ class _MoodleCoursePickerDialogState extends State<_MoodleCoursePickerDialog> {
                           ),
                           subtitle: Text(
                             course.shortname,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11,
                               color: AppTheme.textSecondary,
                             ),

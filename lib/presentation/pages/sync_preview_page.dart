@@ -7,6 +7,7 @@ import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class SyncPreviewPage extends StatefulWidget {
@@ -102,6 +103,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     final auth = context.watch<AuthController>();
     final configCtrl = context.watch<ConfigController>();
     final syncCtrl = context.watch<SyncController>();
@@ -109,7 +111,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: Column(
             children: [
@@ -153,13 +155,14 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+            tooltip: 'Voltar',
+            icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
             onPressed: () => context.go('/editor/${widget.courseConfigId}'),
           ),
           const SizedBox(width: 8),
           Text(
             'Sincronizar — $stepLabel',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w600,
               color: AppTheme.textPrimary,
@@ -184,7 +187,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
           child: Text(
             'Itens sem vínculo encontrados. Confirme ou altere as sugestões abaixo:',
             style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
@@ -260,7 +263,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                     children: [
                       Text(
                         isSection ? 'SEÇÃO' : 'ATIVIDADE',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
                           color: AppTheme.textSecondary,
                           fontWeight: FontWeight.w700,
@@ -287,7 +290,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
             const SizedBox(height: 8),
             Row(
               children: [
-                const Icon(
+                Icon(
                   Icons.arrow_forward,
                   size: 16,
                   color: AppTheme.textSecondary,
@@ -297,7 +300,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                   child: InkWell(
                     onTap: () => _showMoodlePicker(suggestion, sync, index),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
+                      padding: EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 8,
                       ),
@@ -319,7 +322,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                                 ? AppTheme.accentGreen
                                 : AppTheme.textSecondary,
                           ),
-                          const SizedBox(width: 8),
+                          SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               hasMatch
@@ -334,7 +337,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const Icon(
+                          Icon(
                             Icons.arrow_drop_down,
                             size: 18,
                             color: AppTheme.textSecondary,
@@ -598,13 +601,13 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
               Text(
                 syncCtrl.progressMessage,
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: AppTheme.textPrimary,
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: 16),
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
@@ -617,7 +620,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
               const SizedBox(height: 8),
               Text(
                 '${(syncCtrl.progress * 100).toStringAsFixed(0)}%',
-                style: const TextStyle(color: AppTheme.textSecondary),
+                style: TextStyle(color: AppTheme.textSecondary),
               ),
               if (syncCtrl.error != null) ...[
                 const SizedBox(height: 12),
@@ -648,7 +651,7 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
                     );
                   },
                   icon: const Icon(Icons.copy, size: 16),
-                  label: const Text('Copiar log'),
+                  label: Text('Copiar log'),
                   style: TextButton.styleFrom(
                     foregroundColor: AppTheme.textSecondary,
                   ),

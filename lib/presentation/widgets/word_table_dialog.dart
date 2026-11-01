@@ -81,7 +81,7 @@ class _WordTableDialogState extends State<WordTableDialog> {
               const SizedBox(height: 16),
               Text(
                 'Linhas encontradas: $_rowCount',
-                style: const TextStyle(color: AppTheme.textSecondary),
+                style: TextStyle(color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 12),
               const Text(

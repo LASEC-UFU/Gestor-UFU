@@ -6,7 +6,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:provider/provider.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 
 class SeiTreePage extends StatefulWidget {
   const SeiTreePage({super.key});
@@ -16,7 +19,9 @@ class SeiTreePage extends StatefulWidget {
 }
 
 class _SeiTreePageState extends State<SeiTreePage> {
+  static const _addressKey = 'sei_tree_address_url';
   final _urlController = TextEditingController(text: 'https://sei.ufu.br');
+  final _documentTableScroll = ScrollController();
   final List<_SeiDocument> _documents = [];
   final List<String> _logs = [];
   Process? _bridge;
@@ -33,8 +38,28 @@ class _SeiTreePageState extends State<SeiTreePage> {
   bool get _browserOpened => _bridge != null && _browserReady;
 
   @override
+  void initState() {
+    super.initState();
+    _loadAddress();
+  }
+
+  Future<void> _loadAddress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_addressKey);
+    if (mounted && saved != null && saved.trim().isNotEmpty) {
+      _urlController.text = saved;
+    }
+  }
+
+  Future<void> _saveAddress(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_addressKey, value.trim());
+  }
+
+  @override
   void dispose() {
     _urlController.dispose();
+    _documentTableScroll.dispose();
     _stdoutSubscription?.cancel();
     final process = _bridge;
     if (process != null) {
@@ -69,6 +94,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
       _browserReady = false;
       _status = 'Iniciando Edge e automação…';
     });
+    await _saveAddress(uri.toString());
     _addLog(
       'Abrindo o SEI no Edge. Faça login e navegue até o processo desejado.',
     );
@@ -330,10 +356,11 @@ class _SeiTreePageState extends State<SeiTreePage> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     final canExtract = _browserOpened && !_extracting && !_openingBrowser;
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: Column(
             children: [
@@ -383,7 +410,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
         IconButton(
           tooltip: 'Voltar ao painel de funcionalidades',
           onPressed: () => context.go('/'),
-          icon: const Icon(Icons.arrow_back_rounded),
+          icon: Icon(Icons.arrow_back_rounded),
           color: AppTheme.textSecondary,
         ),
         const SizedBox(width: 8),
@@ -400,7 +427,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
           ),
         ),
         const SizedBox(width: 12),
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
@@ -431,7 +458,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
   Widget _buildIntro() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      const Text(
+      Text(
         'Extrair Árvore de Processo',
         style: TextStyle(
           color: AppTheme.textPrimary,
@@ -439,7 +466,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
           fontWeight: FontWeight.w700,
         ),
       ),
-      const SizedBox(height: 7),
+      SizedBox(height: 7),
       Text(
         'Leia os documentos da árvore aberta no SEI e gere uma relação '
         'revisável para apoiar seus relatórios.',
@@ -467,8 +494,9 @@ class _SeiTreePageState extends State<SeiTreePage> {
             final stack = constraints.maxWidth < 700;
             final address = TextField(
               controller: _urlController,
-              enabled: !_openingBrowser && !_extracting,
               keyboardType: TextInputType.url,
+              onChanged: _saveAddress,
+              enabled: !_openingBrowser && !_extracting,
               decoration: const InputDecoration(
                 labelText: 'Endereço do SEI',
                 hintText: 'https://sei.ufu.br',
@@ -600,7 +628,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                 _progressTotal > 0
                     ? 'Documento $_progress de $_progressTotal'
                     : 'Preparando a árvore…',
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontWeight: FontWeight.w600,
                 ),
@@ -609,14 +637,14 @@ class _SeiTreePageState extends State<SeiTreePage> {
             if (_progressTotal > 0)
               Text(
                 '${((_progress / _progressTotal) * 100).round()}%',
-                style: const TextStyle(color: AppTheme.textSecondary),
+                style: TextStyle(color: AppTheme.textSecondary),
               ),
           ],
         ),
         const SizedBox(height: 12),
         LinearProgressIndicator(
           value: _progressTotal > 0 ? _progress / _progressTotal : null,
-          color: const Color(0xFFFFB454),
+          color: Color(0xFFFFB454),
           backgroundColor: AppTheme.divider,
           borderRadius: BorderRadius.circular(8),
         ),
@@ -626,7 +654,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
             _progressLabel,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
           ),
         ],
       ],
@@ -654,7 +682,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                   const SizedBox(width: 10),
                   Text(
                     'Documentos encontrados · ${_documents.length}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontWeight: FontWeight.w600,
                       fontSize: 15,
@@ -691,7 +719,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
           width: double.infinity,
           color: AppTheme.warning.withAlpha(18),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-          child: const Row(
+          child: Row(
             children: [
               Icon(
                 Icons.warning_amber_rounded,
@@ -710,7 +738,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
         ),
         const Divider(height: 1),
         if (_documents.isEmpty)
-          const Padding(
+          Padding(
             padding: EdgeInsets.all(22),
             child: Text(
               'A consulta terminou, mas não encontrou documentos na árvore.',
@@ -722,7 +750,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
             padding: const EdgeInsets.all(16),
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppTheme.bgDark.withAlpha(150),
                 borderRadius: BorderRadius.circular(12),
@@ -730,7 +758,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
               ),
               child: SelectableText(
                 _formatReport(),
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 13,
                   height: 1.6,
@@ -740,7 +768,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
             ),
           ),
           ExpansionTile(
-            title: const Text(
+            title: Text(
               'Ver campos identificados por documento',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
             ),
@@ -754,37 +782,44 @@ class _SeiTreePageState extends State<SeiTreePage> {
   );
 
   Widget _buildDocumentTable() => LayoutBuilder(
-    builder: (context, constraints) => SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(minWidth: constraints.maxWidth),
-        child: DataTable(
-          headingRowColor: WidgetStatePropertyAll(AppTheme.bgCardAlt),
-          dataRowMinHeight: 56,
-          dataRowMaxHeight: 92,
-          columnSpacing: 24,
-          columns: const [
-            DataColumn(label: Text('#')),
-            DataColumn(label: Text('Nome na árvore')),
-            DataColumn(label: Text('Tipo / número')),
-            DataColumn(label: Text('Código SEI')),
-            DataColumn(label: Text('Data')),
-            DataColumn(label: Text('Resumo')),
-          ],
-          rows: _documents.map((document) {
-            return DataRow(
-              cells: [
-                DataCell(Text('${document.order}')),
-                DataCell(_LimitedCell(document.treeName, width: 210)),
-                DataCell(_LimitedCell(document.typeNumber, width: 220)),
-                DataCell(
-                  Text(document.seiCode.isEmpty ? '—' : document.seiCode),
-                ),
-                DataCell(_LimitedCell(document.date, width: 150)),
-                DataCell(_LimitedCell(document.summary, width: 320)),
-              ],
-            );
-          }).toList(),
+    builder: (context, constraints) => Scrollbar(
+      controller: _documentTableScroll,
+      thumbVisibility: true,
+      notificationPredicate: (notification) =>
+          notification.metrics.axis == Axis.horizontal,
+      child: SingleChildScrollView(
+        controller: _documentTableScroll,
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+          child: DataTable(
+            headingRowColor: WidgetStatePropertyAll(AppTheme.bgCardAlt),
+            dataRowMinHeight: 56,
+            dataRowMaxHeight: 92,
+            columnSpacing: 24,
+            columns: const [
+              DataColumn(label: Text('#')),
+              DataColumn(label: Text('Nome na árvore')),
+              DataColumn(label: Text('Tipo / número')),
+              DataColumn(label: Text('Código SEI')),
+              DataColumn(label: Text('Data')),
+              DataColumn(label: Text('Resumo')),
+            ],
+            rows: _documents.map((document) {
+              return DataRow(
+                cells: [
+                  DataCell(Text('${document.order}')),
+                  DataCell(_LimitedCell(document.treeName, width: 210)),
+                  DataCell(_LimitedCell(document.typeNumber, width: 220)),
+                  DataCell(
+                    Text(document.seiCode.isEmpty ? '—' : document.seiCode),
+                  ),
+                  DataCell(_LimitedCell(document.date, width: 150)),
+                  DataCell(_LimitedCell(document.summary, width: 320)),
+                ],
+              );
+            }).toList(),
+          ),
         ),
       ),
     ),
@@ -809,13 +844,13 @@ class _SeiTreePageState extends State<SeiTreePage> {
         Expanded(
           child: Text(
             message,
-            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 12),
+            style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
           ),
         ),
         IconButton(
           tooltip: 'Fechar',
           onPressed: () => setState(() => _error = null),
-          icon: const Icon(Icons.close_rounded, size: 17),
+          icon: Icon(Icons.close_rounded, size: 17),
           color: AppTheme.textSecondary,
           visualDensity: VisualDensity.compact,
         ),
@@ -825,7 +860,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
 
   Widget _buildLogPanel() => ExpansionTile(
     initiallyExpanded: _logs.isNotEmpty,
-    tilePadding: const EdgeInsets.symmetric(horizontal: 18),
+    tilePadding: EdgeInsets.symmetric(horizontal: 18),
     collapsedShape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(14),
     ),
@@ -834,13 +869,13 @@ class _SeiTreePageState extends State<SeiTreePage> {
     collapsedBackgroundColor: AppTheme.bgSurface.withAlpha(190),
     iconColor: AppTheme.textSecondary,
     collapsedIconColor: AppTheme.textSecondary,
-    title: const Text(
+    title: Text(
       'Registro da consulta',
       style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
     ),
     subtitle: Text(
       '${_logs.length} mensagens',
-      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+      style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
     ),
     children: [
       Container(
@@ -854,7 +889,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Text(
               _logs[index],
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 11,
                 height: 1.4,
@@ -944,7 +979,7 @@ class _SectionHeading extends StatelessWidget {
           children: [
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontWeight: FontWeight.w600,
                 fontSize: 14,
@@ -953,7 +988,7 @@ class _SectionHeading extends StatelessWidget {
             const SizedBox(height: 3),
             Text(
               subtitle,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 11,
                 height: 1.4,
@@ -981,7 +1016,7 @@ class _HintRow extends StatelessWidget {
       Expanded(
         child: Text(
           text,
-          style: const TextStyle(
+          style: TextStyle(
             color: AppTheme.textSecondary,
             fontSize: 11,
             height: 1.4,
@@ -1013,13 +1048,13 @@ class _StatusPill extends StatelessWidget {
             child: CircularProgressIndicator(strokeWidth: 1.8),
           )
         else
-          const Icon(Icons.circle, color: AppTheme.textSecondary, size: 9),
+          Icon(Icons.circle, color: AppTheme.textSecondary, size: 9),
         const SizedBox(width: 8),
         Flexible(
           child: Text(
             label,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
           ),
         ),
       ],
@@ -1042,7 +1077,7 @@ class _LimitedCell extends StatelessWidget {
         text.isEmpty ? '—' : text,
         maxLines: 3,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 11),
+        style: TextStyle(color: AppTheme.textPrimary, fontSize: 11),
       ),
     ),
   );

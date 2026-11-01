@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:config_moodle/core/utils/date_calculator.dart';
 import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
 import 'package:config_moodle/domain/repositories/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
@@ -144,6 +145,19 @@ class ConfigController extends ChangeNotifier {
   Future<void> deleteConfig(String id) async {
     await _repo.delete(id);
     if (_current?.id == id) _current = null;
+    await loadAll();
+  }
+
+  Future<List<MoodleConfigSnapshot>> getSnapshots({String? configId}) =>
+      _repo.getSnapshots(configId: configId);
+
+  Future<void> createSnapshot(String configId, {required String label}) async {
+    await _repo.createSnapshot(configId, label: label);
+    notifyListeners();
+  }
+
+  Future<void> restoreSnapshot(String configId, String snapshotId) async {
+    await _repo.restoreSnapshot(configId, snapshotId);
     await loadAll();
   }
 

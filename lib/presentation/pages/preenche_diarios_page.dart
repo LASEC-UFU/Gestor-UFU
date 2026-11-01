@@ -1,0 +1,2491 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:excel/excel.dart' hide Border;
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:config_moodle/core/utils/macro_resolver.dart';
+import 'package:config_moodle/core/utils/text_encoding.dart';
+import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
+import 'package:config_moodle/domain/entities/moodle_entities.dart';
+import 'package:config_moodle/data/services/diary_automation_service.dart';
+import 'package:config_moodle/presentation/controllers/auth_controller.dart';
+import 'package:config_moodle/presentation/controllers/config_controller.dart';
+import 'package:config_moodle/presentation/controllers/sync_controller.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
+
+const _entriesStorageKey = 'preenche_diarios_entries_v1';
+const _portalCredentialsKey = 'portal_docente_credentials_v1';
+const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
+const _portalAddressKey = 'portal_docente_url';
+
+class PreencheDiariosPage extends StatefulWidget {
+  const PreencheDiariosPage({super.key});
+
+  @override
+  State<PreencheDiariosPage> createState() => _PreencheDiariosPageState();
+}
+
+class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
+  final _urlController = TextEditingController(text: _portalDefaultUrl);
+  final Map<String, String> _entries = {};
+  final List<String> _logs = [];
+  final _automation = DiaryAutomationService();
+  String? _selectedSnapshotId;
+  List<MoodleConfigSnapshot> _moodleSnapshots = [];
+  String? _sourceLabel;
+  String _portalUsername = '';
+  String _portalPassword = '';
+  bool _portalCredentialsFromMoodle = false;
+  bool _searchingPortalDates = false;
+  List<String> _missingPortalDates = [];
+  bool _loading = true;
+  bool _openingBrowser = false;
+  bool _browserReady = false;
+  bool _filling = false;
+  bool _loadingMoodleCourses = false;
+  bool _requireEmpty = false;
+  bool _highlight = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final controller = context.read<ConfigController>();
+      await controller.loadAll();
+      final snapshots = await controller.getSnapshots();
+      if (mounted) setState(() => _moodleSnapshots = snapshots);
+      await _loadPortalAddress();
+      await _loadPortalCredentials();
+      await _loadSavedEntries();
+    });
+  }
+
+  Future<void> _loadPortalAddress() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_portalAddressKey);
+    if (mounted && saved != null && saved.trim().isNotEmpty) {
+      _urlController.text = saved;
+    }
+  }
+
+  Future<void> _saveAddress(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value.trim());
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    unawaited(_automation.close());
+    super.dispose();
+  }
+
+  Future<void> _loadSavedEntries() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_entriesStorageKey);
+      if (raw != null) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          final parsed = _validateMap(decoded);
+          _entries
+            ..clear()
+            ..addAll(_sortMap(parsed.valid));
+          if (parsed.errors.isNotEmpty) {
+            _log(
+              '${parsed.errors.length} registro(s) inválido(s) no armazenamento foram ignorados.',
+            );
+          }
+          _sourceLabel = 'Dados locais salvos';
+        }
+      }
+    } catch (error) {
+      _log('Não foi possível carregar os dados locais: $error');
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _loadPortalCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_portalCredentialsKey);
+    if (raw != null) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) {
+          _portalUsername = decoded['username'] as String? ?? '';
+          _portalPassword = decoded['password'] as String? ?? '';
+        }
+      } catch (_) {}
+    } else {
+      final moodleRaw = prefs.getString('moodle_credential');
+      if (moodleRaw != null) {
+        try {
+          final credential = jsonDecode(moodleRaw) as Map<String, dynamic>;
+          _portalUsername = credential['username'] as String? ?? '';
+          _portalPassword = credential['password'] as String? ?? '';
+          _portalCredentialsFromMoodle =
+              _portalUsername.isNotEmpty && _portalPassword.isNotEmpty;
+        } catch (_) {}
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _configurePortalCredentials() async {
+    final username = TextEditingController(text: _portalUsername);
+    final password = TextEditingController(text: _portalPassword);
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Acesso ao Portal do Docente'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: username,
+                autofocus: true,
+                autofillHints: const [AutofillHints.username],
+                decoration: const InputDecoration(
+                  labelText: 'Usuário',
+                  prefixIcon: Icon(Icons.person_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: password,
+                obscureText: true,
+                autofillHints: const [AutofillHints.password],
+                decoration: const InputDecoration(
+                  labelText: 'Senha',
+                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'As credenciais ficam salvas localmente no Gestor UFU e são usadas ao abrir o portal no Edge.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (_portalUsername.isNotEmpty || _portalPassword.isNotEmpty)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'clear'),
+              child: const Text('Remover'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'save'),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) {
+      username.dispose();
+      password.dispose();
+      return;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) {
+      username.dispose();
+      password.dispose();
+      return;
+    }
+    if (action == 'save') {
+      final savedUsername = username.text.trim();
+      final savedPassword = password.text;
+      if (savedUsername.isEmpty || savedPassword.isEmpty) {
+        _showMessage('Dados incompletos', 'Informe o usuário e a senha.');
+      } else {
+        await prefs.setString(
+          _portalCredentialsKey,
+          jsonEncode({'username': savedUsername, 'password': savedPassword}),
+        );
+        setState(() {
+          _portalUsername = savedUsername;
+          _portalPassword = savedPassword;
+          _portalCredentialsFromMoodle = false;
+        });
+        _log('Credenciais do Portal do Docente salvas neste computador.');
+      }
+    } else if (action == 'clear') {
+      await prefs.setString(
+        _portalCredentialsKey,
+        jsonEncode({'username': '', 'password': ''}),
+      );
+      setState(() {
+        _portalUsername = '';
+        _portalPassword = '';
+        _portalCredentialsFromMoodle = false;
+      });
+      _log('Credenciais do Portal do Docente removidas.');
+    }
+    username.dispose();
+    password.dispose();
+  }
+
+  Future<void> _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_entriesStorageKey, jsonEncode(_entries));
+  }
+
+  void _log(String message) {
+    if (!mounted) return;
+    setState(() {
+      _logs.add('${DateFormat('HH:mm:ss').format(DateTime.now())}  $message');
+      if (_logs.length > 300) _logs.removeRange(0, _logs.length - 300);
+    });
+  }
+
+  Future<void> _selectExcel() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['xlsx', 'xlsm', 'xltx', 'xltm'],
+        withData: true,
+        dialogTitle: 'Importar planilha do diário',
+      );
+      if (result == null || result.files.isEmpty) return;
+      final picked = result.files.single;
+      final bytes =
+          picked.bytes ??
+          (picked.path == null ? null : await File(picked.path!).readAsBytes());
+      if (bytes == null)
+        throw StateError('Não foi possível ler o arquivo selecionado.');
+      final workbook = Excel.decodeBytes(bytes);
+      if (workbook.tables.isEmpty)
+        throw const FormatException('O arquivo não contém abas legíveis.');
+      String? sheetName = workbook.tables.keys.first;
+      if (workbook.tables.length > 1) {
+        sheetName = await _chooseSheet(workbook.tables.keys.toList());
+      }
+      if (sheetName == null || !mounted) return;
+      final sheet = workbook.tables[sheetName];
+      if (sheet == null)
+        throw const FormatException('A aba selecionada não foi encontrada.');
+      final resultMap = _parseWorksheet(sheet);
+      if (resultMap.valid.isEmpty) {
+        _showMessage(
+          'Nenhum lançamento válido',
+          'Não encontrei linhas com Data, Modalidade e Matéria Lecionada (ou Conteúdo). Confira os cabeçalhos e os dados da aba.',
+        );
+        _log('Planilha ${picked.name}: nenhum lançamento válido.');
+        return;
+      }
+      final overwritten = resultMap.valid.keys
+          .where(_entries.containsKey)
+          .length;
+      final mergedEntries = _sortMap({..._entries, ...resultMap.valid});
+      setState(() {
+        _entries
+          ..clear()
+          ..addAll(mergedEntries);
+        _sourceLabel = 'Excel · ${picked.name} · $sheetName';
+      });
+      await _persist();
+      _log(
+        'Planilha importada: ${resultMap.valid.length} válido(s), ${resultMap.skipped} ignorado(s), ${resultMap.duplicates} repetido(s) na planilha e $overwritten sobrescrito(s) na mesclagem.',
+      );
+      if (resultMap.errors.isNotEmpty)
+        _log('Chaves inválidas descartadas: ${resultMap.errors.length}.');
+    } catch (error) {
+      _showMessage('Falha na importação Excel', '$error');
+      _log('Falha ao importar Excel: $error');
+    }
+  }
+
+  Future<String?> _chooseSheet(List<String> names) async {
+    String selected = names.first;
+    return showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Escolher aba da planilha'),
+          content: DropdownButtonFormField<String>(
+            value: selected,
+            items: names
+                .map((name) => DropdownMenuItem(value: name, child: Text(name)))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setDialogState(() => selected = value);
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, selected),
+              child: const Text('Importar aba'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  _ImportResult _parseWorksheet(Sheet sheet) {
+    final rows = sheet.rows;
+    final int? headerIndex = _findHeaderRow(rows);
+    final header = headerIndex == null
+        ? const {'data': 0, 'modality': 1, 'content': 3}
+        : _columnMap(rows[headerIndex]);
+    if (headerIndex == null)
+      _log(
+        'Cabeçalho não encontrado nas 10 primeiras linhas; tentando o formato original (colunas A, B e D).',
+      );
+    final imported = <String, String>{};
+    final errors = <String, String>{};
+    var skipped = 0;
+    var duplicates = 0;
+    for (
+      var rowIndex = (headerIndex ?? 0) + 1;
+      rowIndex < rows.length;
+      rowIndex++
+    ) {
+      final row = rows[rowIndex];
+      final date = _parseExcelDate(_cell(row, header['data']!));
+      final modality = _cellText(_cell(row, header['modality']!)).toLowerCase();
+      final content = _cellText(_cell(row, header['content']!)).trim();
+      final suffix = _stripAccents(modality).contains('teor')
+          ? 'T'
+          : _stripAccents(modality).contains('prat')
+          ? 'P'
+          : null;
+      if (date == null || suffix == null || content.isEmpty) {
+        if (row.any((cell) => cell?.value != null)) skipped++;
+        continue;
+      }
+      final key = '${_formatDate(date)} -$suffix';
+      if (imported.containsKey(key)) duplicates++;
+      imported[key] = content;
+    }
+    final validated = _validateMap(imported);
+    errors.addAll(validated.errors);
+    return _ImportResult(validated.valid, errors, skipped, duplicates);
+  }
+
+  int? _findHeaderRow(List<List<Data?>> rows) {
+    for (var i = 0; i < rows.length && i < 10; i++) {
+      final map = _columnMap(rows[i]);
+      if (map.containsKey('data') &&
+          map.containsKey('modality') &&
+          map.containsKey('content'))
+        return i;
+    }
+    return null;
+  }
+
+  Map<String, int> _columnMap(List<Data?> row) {
+    final map = <String, int>{};
+    for (var i = 0; i < row.length; i++) {
+      final text = _stripAccents(
+        _cellText(row[i]).toLowerCase().trim(),
+      ).replaceAll(RegExp(r'\s+'), ' ');
+      if (text == 'data' || text == 'dia') map['data'] = i;
+      if (text.startsWith('modalidade')) map['modality'] = i;
+      if ({
+        'materia lecionada',
+        'materia',
+        'conteudo',
+        'conteudo lecionado',
+        'descricao',
+      }.contains(text))
+        map['content'] = i;
+    }
+    return map;
+  }
+
+  Data? _cell(List<Data?> row, int column) =>
+      column < row.length ? row[column] : null;
+
+  String _cellText(Data? cell) {
+    final value = cell?.value;
+    if (value == null) return '';
+    if (value is TextCellValue) return value.value.text ?? '';
+    if (value is FormulaCellValue) return value.formula;
+    return value.toString();
+  }
+
+  DateTime? _parseExcelDate(Data? cell) {
+    final value = cell?.value;
+    if (value is DateCellValue) return value.asDateTimeLocal();
+    if (value is DateTimeCellValue) return value.asDateTimeLocal();
+    if (value is IntCellValue)
+      return DateTime(1899, 12, 30).add(Duration(days: value.value));
+    if (value is DoubleCellValue)
+      return DateTime(1899, 12, 30).add(Duration(days: value.value.floor()));
+    final text = _cellText(cell).trim();
+    final match = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{2,4})$').firstMatch(text);
+    if (match == null) return null;
+    final day = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    var year = int.parse(match.group(3)!);
+    if (year < 100) year += 2000;
+    final date = DateTime(year, month, day);
+    return date.year == year && date.month == month && date.day == day
+        ? date
+        : null;
+  }
+
+  Future<void> _importJson() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        withData: true,
+        dialogTitle: 'Carregar dados do diário (JSON)',
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.single;
+      final bytes =
+          file.bytes ??
+          (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null) throw StateError('Não foi possível ler o arquivo.');
+      final raw = jsonDecode(utf8.decode(bytes));
+      final validated = _validateMap(raw);
+      if (validated.valid.isEmpty && validated.errors.isNotEmpty)
+        throw FormatException(
+          validated.errors.entries
+              .map((e) => '${e.key}: ${e.value}')
+              .join('\n'),
+        );
+      setState(() {
+        _entries
+          ..clear()
+          ..addAll(_sortMap(validated.valid));
+        _sourceLabel = 'JSON · ${file.name}';
+      });
+      await _persist();
+      _log(
+        'JSON carregado: ${validated.valid.length} item(ns) válido(s), ${validated.errors.length} inválido(s).',
+      );
+      if (validated.errors.isNotEmpty)
+        _showMessage(
+          'Alguns registros foram ignorados',
+          validated.errors.entries
+              .take(12)
+              .map((e) => '${e.key}: ${e.value}')
+              .join('\n'),
+        );
+    } catch (error) {
+      _showMessage('Falha ao carregar JSON', '$error');
+      _log('Falha ao carregar JSON: $error');
+    }
+  }
+
+  Future<void> _exportJson() async {
+    if (_entries.isEmpty) return;
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Salvar dados do diário',
+      fileName: 'dados_diario.json',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (path == null) return;
+    try {
+      final filePath = path.toLowerCase().endsWith('.json')
+          ? path
+          : '$path.json';
+      await File(filePath).writeAsString(
+        const JsonEncoder.withIndent('  ').convert(_entries),
+        encoding: utf8,
+      );
+      _log('JSON exportado para $filePath.');
+    } catch (error) {
+      _showMessage('Falha ao salvar JSON', '$error');
+    }
+  }
+
+  _ValidationResult _validateMap(dynamic raw) {
+    if (raw is! Map)
+      return const _ValidationResult({}, {
+        '__root__':
+            'O JSON precisa ser um objeto {"DD/MM/AAAA -P": "conteúdo"}.',
+      });
+    final valid = <String, String>{};
+    final errors = <String, String>{};
+    for (final entry in raw.entries) {
+      final originalKey = '${entry.key}';
+      if (entry.value is! String) {
+        errors[originalKey] = 'O conteúdo precisa ser texto.';
+        continue;
+      }
+      final normalized = _normalizeKey(originalKey);
+      if (normalized == null) {
+        errors[originalKey] =
+            'Use uma data válida no formato DD/MM/AAAA -P (ou -T).';
+      } else if (valid.containsKey(normalized)) {
+        errors[originalKey] =
+            'A chave duplicou após a normalização: $normalized.';
+      } else {
+        valid[normalized] = entry.value as String;
+      }
+    }
+    return _ValidationResult(valid, errors);
+  }
+
+  String? _normalizeKey(String key) {
+    final normalized = key
+        .replaceAll(RegExp('[\\u2013\\u2014\\u2212]'), '-')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final match = RegExp(
+      r'^(\d{1,2})/(\d{1,2})/(\d{2,4})(?:\s*-\s*(.*))?$',
+    ).firstMatch(normalized);
+    if (match == null) return null;
+    final day = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    var year = int.parse(match.group(3)!);
+    if (year < 100) year += 2000;
+    final date = DateTime(year, month, day);
+    if (date.year != year || date.month != month || date.day != day)
+      return null;
+    final suffix = (match.group(4) ?? '').trim();
+    return '${_formatDate(date)} -${suffix.isEmpty ? 'P' : suffix}';
+  }
+
+  String _stripAccents(String value) => repairMojibake(value)
+      .toLowerCase()
+      .replaceAll(RegExp(r'[\u00e1\u00e0\u00e2\u00e3\u00e4]'), 'a')
+      .replaceAll(RegExp(r'[\u00e9\u00e8\u00ea\u00eb]'), 'e')
+      .replaceAll(RegExp(r'[\u00ed\u00ec\u00ee\u00ef]'), 'i')
+      .replaceAll(RegExp(r'[\u00f3\u00f2\u00f4\u00f5\u00f6]'), 'o')
+      .replaceAll(RegExp(r'[\u00fa\u00f9\u00fb\u00fc]'), 'u')
+      .replaceAll('\u00e7', 'c');
+
+  String? _lessonModality(ActivityEntry activity) {
+    final normalizedName = _stripAccents(activity.name);
+    final normalizedModality = _stripAccents(activity.modality ?? '');
+    if (normalizedModality.contains('teor') ||
+        RegExp(r'^\s*(?:aula\s+)?teor').hasMatch(normalizedName)) {
+      return 'T';
+    }
+    if (normalizedModality.contains('prat') ||
+        RegExp(r'^\s*(?:aula\s+)?prat').hasMatch(normalizedName)) {
+      return 'P';
+    }
+    return null;
+  }
+
+  DateTime? _lessonDate(
+    ActivityEntry activity,
+    SectionEntry section,
+    CourseConfig config,
+  ) {
+    final resolvedName = MacroResolver.resolve(
+      activity.name,
+      config.semesterStartDate,
+      section.date,
+      activity.computeOpenDate(section.date),
+      activity.computeCloseDate(section.date),
+    );
+    final dateMatch = RegExp(
+      r'realizar-se-a\s*:\s*(\d{1,2}/\d{1,2}/\d{4})',
+      caseSensitive: false,
+    ).firstMatch(_stripAccents(resolvedName));
+    if (dateMatch != null) {
+      final parts = dateMatch.group(1)!.split('/').map(int.parse).toList();
+      final date = DateTime(parts[2], parts[1], parts[0]);
+      if (date.year == parts[2] &&
+          date.month == parts[1] &&
+          date.day == parts[0]) {
+        return date;
+      }
+    }
+
+    final weekdayMatch = RegExp(
+      r'\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:-feira)?\b',
+    ).firstMatch(_stripAccents(activity.name));
+    final weekday = weekdayMatch == null
+        ? activity.expectedWeekday
+        : const {
+            'segunda': DateTime.monday,
+            'terca': DateTime.tuesday,
+            'quarta': DateTime.wednesday,
+            'quinta': DateTime.thursday,
+            'sexta': DateTime.friday,
+            'sabado': DateTime.saturday,
+            'domingo': DateTime.sunday,
+          }[weekdayMatch.group(1)];
+    if (weekday == null ||
+        weekday < DateTime.monday ||
+        weekday > DateTime.sunday) {
+      return null;
+    }
+    final offset = (weekday - section.date.weekday + 7) % 7;
+    return DateTime(
+      section.date.year,
+      section.date.month,
+      section.date.day,
+    ).add(Duration(days: offset));
+  }
+
+  String _lessonDescription(String name) {
+    var description = repairMojibake(name.trim());
+    description = description.replaceFirst(
+      RegExp(r'\s*\([^)]*realizar-se-.[^)]*\)\.?\s*$', caseSensitive: false),
+      '',
+    );
+    description = description.replaceFirst(
+      RegExp(
+        r'\s*[-\u2013\u2014]?\s*realizar-se-.\s*:.*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    final separator = description.indexOf(':');
+    if (separator >= 0) description = description.substring(separator + 1);
+    return description
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[.\s]+$'), '')
+        .trim();
+  }
+
+  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
+
+  Map<String, String> _sortMap(Map<String, String> map) {
+    final entries = map.entries.toList()
+      ..sort((a, b) {
+        final aDate = _dateFromKey(a.key);
+        final bDate = _dateFromKey(b.key);
+        if (aDate == null) return bDate == null ? a.key.compareTo(b.key) : 1;
+        if (bDate == null) return -1;
+        final cmp = aDate.compareTo(bDate);
+        return cmp == 0 ? a.key.compareTo(b.key) : cmp;
+      });
+    return Map.fromEntries(entries);
+  }
+
+  DateTime? _dateFromKey(String key) {
+    final match = RegExp(r'^(\d{2})/(\d{2})/(\d{4})\s*-').firstMatch(key);
+    if (match == null) return null;
+    return DateTime(
+      int.parse(match.group(3)!),
+      int.parse(match.group(2)!),
+      int.parse(match.group(1)!),
+    );
+  }
+
+  Future<void> _useMoodleConfig(
+    CourseConfig config, {
+    String? sourceLabel,
+  }) async {
+    final generated = <String, String>{};
+    for (final section in config.sections.where((item) => item.visible)) {
+      for (final activity in section.activities.where(
+        (item) => item.visibility != 0,
+      )) {
+        final normalizedName = _stripAccents(activity.name);
+        // Moodle sections are weekly folders; only explicitly scheduled class activities become diary rows.
+        if (!normalizedName.contains('realizar-se-a')) continue;
+        final modality = _lessonModality(activity);
+        final date = _lessonDate(activity, section, config);
+        final description = _lessonDescription(activity.name);
+        if (modality == null || date == null || description.isEmpty) continue;
+
+        final key = '${_formatDate(date)} -$modality';
+        final previous = generated[key];
+        generated[key] = previous == null
+            ? description
+            : '$previous\n$description';
+      }
+    }
+    if (generated.isEmpty) {
+      await _showMessage(
+        'Nenhuma aula encontrada',
+        'N\u00e3o encontrei aulas com modalidade Te\u00f3rica/Pr\u00e1tica e data "Realizar-se-\u00e1" no cronograma desta disciplina. Os blocos semanais n\u00e3o s\u00e3o importados como aulas.',
+      );
+      return;
+    }
+    final ordered = _sortMap(generated);
+    final overwrite = _entries.isEmpty
+        ? true
+        : await _askReplaceOrMerge(config.name, ordered.length);
+    if (overwrite == null) return;
+    setState(() {
+      if (overwrite) _entries.clear();
+      _entries.addAll(ordered);
+      final sorted = _sortMap(_entries);
+      _entries
+        ..clear()
+        ..addAll(sorted);
+      _sourceLabel = '${sourceLabel ?? 'Config Moodle'} \u00b7 ${config.name}';
+    });
+    await _persist();
+    _log(
+      'Aulas importadas: ${ordered.length} lan\u00e7amento(s), ${overwrite ? 'substituindo' : 'mesclando'} os dados anteriores.',
+    );
+  }
+
+  Future<void> _importFromSavedConfig() async {
+    final configs = context.read<ConfigController>().configs;
+    if (configs.isEmpty) {
+      await _showMessage(
+        'Nenhuma configuração disponível',
+        'Crie ou importe uma disciplina em Config Moodle para usá-la aqui.',
+      );
+      return;
+    }
+    final config = await showDialog<CourseConfig>(
+      context: context,
+      builder: (_) => _SavedMoodleConfigDialog(configs: configs),
+    );
+    if (config == null || !mounted) return;
+    await _useMoodleConfig(config, sourceLabel: 'Config Moodle');
+  }
+
+  Future<void> _importFromLiveMoodle() async {
+    final auth = context.read<AuthController>();
+    if (!auth.isLoggedIn) {
+      final loggedIn = await _showMoodleLoginDialog();
+      if (!loggedIn || !mounted) return;
+    }
+
+    setState(() => _loadingMoodleCourses = true);
+    final sync = context.read<SyncController>();
+    try {
+      await sync.loadCourses(auth.token, auth.baseUrl);
+      if (!mounted) return;
+      if (sync.error != null) {
+        await _showMessage('Falha ao consultar Moodle', sync.error!);
+        return;
+      }
+      if (sync.courses.isEmpty) {
+        await _showMessage(
+          'Nenhuma disciplina encontrada',
+          'A conta conectada não possui disciplinas disponíveis no Moodle.',
+        );
+        return;
+      }
+
+      final course = await showDialog<MoodleCourse>(
+        context: context,
+        builder: (dialogContext) =>
+            _MoodleDiaryCourseDialog(courses: sync.courses),
+      );
+      if (course == null || !mounted) return;
+
+      final configs = context.read<ConfigController>().configs;
+      final matching = configs.where(
+        (item) => item.moodleCourseId == course.id,
+      );
+      final semesterStart =
+          course.startDate ??
+          (matching.isNotEmpty ? matching.first.semesterStartDate : null);
+      if (semesterStart == null) {
+        await _showMessage(
+          'Data de início não encontrada',
+          'O Moodle não retornou a data de início desta disciplina e não existe uma configuração local correspondente. Configure a data de início do curso no Moodle e tente novamente.',
+        );
+        return;
+      }
+
+      final config = await sync.buildConfigFromMoodle(
+        auth.token,
+        auth.baseUrl,
+        course,
+        semesterStart,
+      );
+      if (!mounted) return;
+      setState(() => _loadingMoodleCourses = false);
+      await _useMoodleConfig(config, sourceLabel: 'Moodle ao vivo');
+    } catch (error) {
+      if (mounted) {
+        await _showMessage('Falha ao importar do Moodle', '$error');
+      }
+    } finally {
+      if (mounted) setState(() => _loadingMoodleCourses = false);
+    }
+  }
+
+  Future<bool> _showMoodleLoginDialog() async {
+    final auth = context.read<AuthController>();
+    await auth.init();
+    if (!mounted) return false;
+    final savedCredential = auth.credential;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return false;
+    final url = TextEditingController(
+      text:
+          prefs.getString('last_moodle_url') ??
+          savedCredential?.moodleUrl ??
+          'https://moodle.ufu.br',
+    );
+    final username = TextEditingController(
+      text: savedCredential?.username ?? '',
+    );
+    final password = TextEditingController(
+      text: savedCredential?.password ?? '',
+    );
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Conectar ao Moodle'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: url,
+                  keyboardType: TextInputType.url,
+                  onChanged: (value) =>
+                      prefs.setString('last_moodle_url', value.trim()),
+                  decoration: const InputDecoration(
+                    labelText: 'Endereço do Moodle',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: username,
+                  decoration: const InputDecoration(labelText: 'Usuário'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: password,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Senha'),
+                  onSubmitted: (_) async {
+                    final ok = await auth.login(
+                      url.text.trim(),
+                      username.text.trim(),
+                      password.text,
+                    );
+                    if (ok && dialogContext.mounted)
+                      Navigator.pop(dialogContext, true);
+                    setDialogState(() {});
+                  },
+                ),
+                if (auth.error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    auth.error!,
+                    style: const TextStyle(color: AppTheme.danger),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: auth.loading
+                  ? null
+                  : () async {
+                      final ok = await auth.login(
+                        url.text.trim(),
+                        username.text.trim(),
+                        password.text,
+                      );
+                      if (ok) {
+                        await prefs.setString(
+                          'last_moodle_url',
+                          url.text.trim(),
+                        );
+                        if (dialogContext.mounted)
+                          Navigator.pop(dialogContext, true);
+                      } else {
+                        setDialogState(() {});
+                      }
+                    },
+              child: auth.loading
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Entrar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    url.dispose();
+    username.dispose();
+    password.dispose();
+    return result == true;
+  }
+
+  Future<bool?> _askReplaceOrMerge(
+    String configName,
+    int count,
+  ) => showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Como aplicar os dados?'),
+      content: Text(
+        'A configuração "$configName" contém $count lançamento(s). Mesclar mantém os itens atuais e substitui chaves iguais. Substituir remove a lista atual antes da importação.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Mesclar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Substituir'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _addOrEdit({String? oldKey}) async {
+    final dateController = TextEditingController(
+      text: oldKey == null
+          ? _formatDate(DateTime.now())
+          : oldKey.substring(0, 10),
+    );
+    final textController = TextEditingController(
+      text: oldKey == null ? '' : _entries[oldKey] ?? '',
+    );
+    var modality = oldKey?.toUpperCase().endsWith('-T') == true ? 'T' : 'P';
+    final result = await showDialog<(String, String, String)>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(oldKey == null ? 'Adicionar aula' : 'Editar aula'),
+          content: SizedBox(
+            width: 540,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: dateController,
+                        keyboardType: TextInputType.datetime,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Data da aula',
+                          prefixIcon: Icon(Icons.calendar_month_rounded),
+                          hintText: 'DD/MM/AAAA',
+                          suffixIcon: IconButton(
+                            tooltip: 'Escolher no calendário',
+                            icon: const Icon(Icons.edit_calendar_rounded),
+                            onPressed: () async {
+                              final selected = await showDatePicker(
+                                context: context,
+                                initialDate:
+                                    _parseDate(dateController.text) ??
+                                    DateTime.now(),
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime(2100),
+                              );
+                              if (selected != null) {
+                                dateController.text = _formatDate(selected);
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: modality,
+                        decoration: const InputDecoration(
+                          labelText: 'Modalidade',
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'T', child: Text('Teórica')),
+                          DropdownMenuItem(value: 'P', child: Text('Prática')),
+                        ],
+                        onChanged: (value) {
+                          if (value != null)
+                            setDialogState(() => modality = value);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: textController,
+                  minLines: 4,
+                  maxLines: 10,
+                  decoration: const InputDecoration(
+                    labelText: 'Descrição da aula',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, (
+                dateController.text,
+                modality,
+                textController.text,
+              )),
+              child: const Text('Salvar aula'),
+            ),
+          ],
+        ),
+      ),
+    );
+    dateController.dispose();
+    textController.dispose();
+    if (result == null) return;
+    final date = _parseDate(result.$1);
+    final normalized = date == null
+        ? null
+        : '${_formatDate(date)} -${result.$2}';
+    if (normalized == null) {
+      _showMessage('Data inválida', 'Escolha uma data válida para a aula.');
+      return;
+    }
+    if (normalized != oldKey && _entries.containsKey(normalized)) {
+      _showMessage('Aula duplicada', 'Já existe uma aula em $normalized.');
+      return;
+    }
+    setState(() {
+      if (oldKey != null) _entries.remove(oldKey);
+      _entries[normalized] = result.$3;
+      final sorted = _sortMap(_entries);
+      _entries
+        ..clear()
+        ..addAll(sorted);
+    });
+    await _persist();
+    _log(
+      oldKey == null
+          ? 'Aula adicionada: $normalized.'
+          : 'Aula atualizada: $normalized.',
+    );
+  }
+
+  DateTime? _parseDate(String value) {
+    final parts = value.trim().split('/');
+    if (parts.length != 3) return null;
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+    if (day == null || month == null || year == null) return null;
+    final date = DateTime(year, month, day);
+    return date.day == day && date.month == month && date.year == year
+        ? date
+        : null;
+  }
+
+  Future<void> _findMissingPortalDates() async {
+    if (_searchingPortalDates || !_browserReady) return;
+    setState(() => _searchingPortalDates = true);
+    try {
+      final portalDates = await _automation.findPortalDiaryDates();
+      final known = _entries.keys
+          .map(_normalizeKey)
+          .whereType<String>()
+          .toSet();
+      final missing =
+          portalDates
+              .map(_normalizeKey)
+              .whereType<String>()
+              .where((date) => !known.contains(date))
+              .toSet()
+              .toList()
+            ..sort((a, b) {
+              final aDate = _dateFromKey(a);
+              final bDate = _dateFromKey(b);
+              return aDate == null || bDate == null
+                  ? a.compareTo(b)
+                  : aDate.compareTo(bDate);
+            });
+      setState(() => _missingPortalDates = missing);
+      if (missing.isEmpty) {
+        _log('Busca concluída: nenhuma data ausente da lista atual.');
+      } else {
+        _log('Datas encontradas no portal que não estão na lista atual:');
+        for (final date in missing) {
+          _log(date);
+        }
+      }
+    } catch (error) {
+      _log('Não foi possível buscar datas no portal: $error');
+    } finally {
+      if (mounted) setState(() => _searchingPortalDates = false);
+    }
+  }
+
+  Future<void> _copyMissingPortalDates() async {
+    if (_missingPortalDates.isEmpty) return;
+    await Clipboard.setData(
+      ClipboardData(text: _missingPortalDates.join('\n')),
+    );
+    _log('Datas ausentes copiadas para a área de transferência.');
+  }
+
+  Future<void> _clearEntries() async {
+    if (_entries.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Limpar lançamentos?'),
+        content: Text(
+          'Serão removidos ${_entries.length} lançamento(s) do diário.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: const Text('Limpar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _entries.clear();
+      _sourceLabel = null;
+      _selectedSnapshotId = null;
+    });
+    await _persist();
+    _log('Lançamentos do diário limpos.');
+  }
+
+  Future<void> _remove(String key) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remover lançamento?'),
+        content: Text('A entrada $key será removida.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    setState(() => _entries.remove(key));
+    await _persist();
+    _log('Lançamento removido: $key.');
+  }
+
+  Future<void> _shiftDates() async {
+    if (_entries.isEmpty) return;
+    final amountController = TextEditingController(text: '1');
+    var unit = 'Dias';
+    var filter = 'Todas';
+    final params = await showDialog<(String, int, String)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Ajustar datas'),
+          content: SizedBox(
+            width: 430,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: unit,
+                  decoration: const InputDecoration(labelText: 'Unidade'),
+                  items: const ['Dias', 'Meses', 'Anos']
+                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setDialogState(() => unit = v);
+                  },
+                ),
+                TextField(
+                  controller: amountController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^-?\d*')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Quantidade (pode ser negativa)',
+                  ),
+                ),
+                DropdownButtonFormField<String>(
+                  value: filter,
+                  decoration: const InputDecoration(labelText: 'Aplicar em'),
+                  items: const ['Todas', 'Só T (Teóricas)', 'Só P (Práticas)']
+                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setDialogState(() => filter = v);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final amount = int.tryParse(amountController.text);
+                if (amount != null)
+                  Navigator.pop(context, (unit, amount, filter));
+              },
+              child: const Text('Pré-visualizar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    amountController.dispose();
+    if (params == null) return;
+    final preview = _shiftMap(_entries, params.$1, params.$2, params.$3);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Prévia do ajuste'),
+        content: SizedBox(
+          width: 540,
+          height: 420,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${preview.changed} alterada(s) · ${preview.filtered} fora do filtro · ${preview.overwritten} chave(s) combinada(s)',
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: preview.entries.length,
+                  itemBuilder: (context, i) {
+                    final entry = preview.entries.entries.elementAt(i);
+                    return ListTile(
+                      dense: true,
+                      title: Text(entry.key),
+                      subtitle: Text(
+                        entry.value,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Aplicar ajuste'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() {
+      _entries
+        ..clear()
+        ..addAll(preview.entries);
+    });
+    await _persist();
+    _log(
+      'Datas ajustadas: ${preview.changed} alterada(s), ${preview.filtered} filtrada(s), ${preview.overwritten} mesclada(s).',
+    );
+  }
+
+  _ShiftResult _shiftMap(
+    Map<String, String> map,
+    String unit,
+    int amount,
+    String filter,
+  ) {
+    final output = <String, String>{};
+    var changed = 0;
+    var filtered = 0;
+    var overwritten = 0;
+    for (final entry in map.entries) {
+      final date = _dateFromKey(entry.key);
+      final suffixMatch = RegExp(r'\s*-\s*(.+)$').firstMatch(entry.key);
+      if (date == null || suffixMatch == null) {
+        output[entry.key] = entry.value;
+        continue;
+      }
+      final suffix = suffixMatch.group(1)!.trim();
+      final first = suffix.isEmpty ? '' : suffix[0].toUpperCase();
+      if ((filter.startsWith('Só T') && first != 'T') ||
+          (filter.startsWith('Só P') && first != 'P')) {
+        output[entry.key] = entry.value;
+        filtered++;
+        continue;
+      }
+      DateTime target;
+      if (unit == 'Dias') {
+        target = date.add(Duration(days: amount));
+      } else if (unit == 'Meses') {
+        final monthIndex = date.year * 12 + date.month - 1 + amount;
+        final year = monthIndex ~/ 12;
+        final month = monthIndex % 12 + 1;
+        target = DateTime(
+          year,
+          month,
+          date.day.clamp(1, DateUtils.getDaysInMonth(year, month)),
+        );
+      } else {
+        final year = date.year + amount;
+        target = DateTime(
+          year,
+          date.month,
+          date.day.clamp(1, DateUtils.getDaysInMonth(year, date.month)),
+        );
+      }
+      final key = '${_formatDate(target)} -$suffix';
+      if (output.containsKey(key)) overwritten++;
+      output[key] = entry.value;
+      changed++;
+    }
+    return _ShiftResult(_sortMap(output), changed, filtered, overwritten);
+  }
+
+  Future<void> _openBrowser() async {
+    final uri = Uri.tryParse(_urlController.text.trim());
+    if (uri == null ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty) {
+      setState(
+        () => _error =
+            'Informe um endereço válido, iniciado por http:// ou https://.',
+      );
+      return;
+    }
+    setState(() {
+      _error = null;
+      _openingBrowser = true;
+      _browserReady = false;
+    });
+    await _saveAddress(_portalAddressKey, uri.toString());
+    _log(
+      'Abrindo o Edge. Faça login manualmente e entre na turma e no diário desejados.',
+    );
+    try {
+      final openedUrl = await _automation.openBrowser(
+        uri.toString(),
+        username: _portalUsername,
+        password: _portalPassword,
+        log: _log,
+      );
+      if (!mounted) return;
+      setState(() {
+        _openingBrowser = false;
+        _browserReady = true;
+      });
+      _log('Edge/Puppeteer aberto em $openedUrl. Faça login manualmente.');
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _openingBrowser = false;
+        _error = '$error';
+      });
+      _log('Falha ao iniciar o Edge com Puppeteer/Dart: $error');
+    }
+  }
+
+  Future<void> _fillPortal() async {
+    if (!_browserReady || !_automation.isConnected || _entries.isEmpty) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmar preenchimento'),
+        content: Text(
+          'O Gestor UFU vai preencher ${_entries.length} campo(s) no formulário atualmente aberto no Edge. Confira a turma, o diário e o conteúdo antes de continuar.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Preencher diário'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true) return;
+    if (!mounted) return;
+    setState(() => _filling = true);
+    try {
+      _log('Iniciando Puppeteer para ${_entries.length} lançamento(s).');
+      final result = await _automation.fillEntries(
+        _sortMap(_entries),
+        requireEmpty: _requireEmpty,
+        highlight: _highlight,
+        log: _log,
+      );
+      _log(
+        'Concluído: ${result.filled} preenchido(s), ${result.notFound} não localizado(s), ${result.skipped} preservado(s).',
+      );
+    } catch (error) {
+      _log('Falha no preenchimento: $error');
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _filling = false);
+    }
+  }
+
+  Future<void> _showMessage(String title, String message) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: SingleChildScrollView(child: Text(message)),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('OK'),
+        ),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    context.watch<ThemeController>();
+    MoodleConfigSnapshot? selectedSnapshot;
+    for (final snapshot in _moodleSnapshots) {
+      if (snapshot.id == _selectedSnapshotId) selectedSnapshot = snapshot;
+    }
+    final moodleSource = selectedSnapshot?.toCourseConfig();
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _PageHeader(
+                onBack: () => context.go('/'),
+                entryCount: _entries.length,
+              ),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final compact = constraints.maxWidth < 1000;
+                          final left = _WorkspacePanel(
+                            entryCount: _entries.length,
+                            browserReady: _browserReady,
+                            sourceLabel: _sourceLabel,
+                            entries: _entries,
+                            snapshots: _moodleSnapshots,
+                            selectedSnapshotId: _selectedSnapshotId,
+                            onSelectSnapshot: (id) => setState(() {
+                              _selectedSnapshotId = id;
+                            }),
+                            onUseMoodle: moodleSource == null
+                                ? null
+                                : () => _useMoodleConfig(
+                                    moodleSource,
+                                    sourceLabel: selectedSnapshot == null
+                                        ? null
+                                        : 'Backup · ${selectedSnapshot.label}',
+                                  ),
+                            onImportExcel: _selectExcel,
+                            onImportJson: _importJson,
+                            onImportLiveMoodle: _importFromLiveMoodle,
+                            onImportSavedConfig: _importFromSavedConfig,
+                            loadingMoodleCourses: _loadingMoodleCourses,
+                            onExportJson: _exportJson,
+                            onAdd: () => _addOrEdit(),
+                            onClear: _clearEntries,
+                            onFindPortalDates: _findMissingPortalDates,
+                            onCopyMissingPortalDates: _copyMissingPortalDates,
+                            searchingPortalDates: _searchingPortalDates,
+                            missingPortalDates: _missingPortalDates,
+                            onEdit: (key) => _addOrEdit(oldKey: key),
+                            onRemove: _remove,
+                            onShift: _shiftDates,
+                          );
+                          final browser = _BrowserPanel(
+                            urlController: _urlController,
+                            onAddressChanged: (value) =>
+                                _saveAddress(_portalAddressKey, value),
+                            credentialsSaved:
+                                _portalUsername.isNotEmpty &&
+                                _portalPassword.isNotEmpty,
+                            credentialsFromMoodle: _portalCredentialsFromMoodle,
+                            logs: _logs,
+                            entryCount: _entries.length,
+                            opening: _openingBrowser,
+                            browserReady: _browserReady,
+                            filling: _filling,
+                            highlight: _highlight,
+                            requireEmpty: _requireEmpty,
+                            error: _error,
+                            onOpen: _openBrowser,
+                            onConfigureCredentials: _configurePortalCredentials,
+                            onFill: _fillPortal,
+                            onHighlight: (value) =>
+                                setState(() => _highlight = value),
+                            onRequireEmpty: (value) =>
+                                setState(() => _requireEmpty = value),
+                          );
+                          if (compact)
+                            return ListView(
+                              padding: const EdgeInsets.fromLTRB(
+                                24,
+                                12,
+                                24,
+                                28,
+                              ),
+                              children: [
+                                SizedBox(height: 680, child: left),
+                                const SizedBox(height: 18),
+                                SizedBox(height: 610, child: browser),
+                              ],
+                            );
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(28, 12, 28, 28),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Expanded(flex: 6, child: left),
+                                const SizedBox(width: 18),
+                                Expanded(flex: 4, child: browser),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PageHeader extends StatelessWidget {
+  const _PageHeader({required this.onBack, required this.entryCount});
+  final VoidCallback onBack;
+  final int entryCount;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(28, 16, 28, 8),
+    child: Row(
+      children: [
+        IconButton(
+          onPressed: onBack,
+          tooltip: 'Voltar ao início',
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: AppTheme.accent.withAlpha(27),
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: const Icon(
+            Icons.edit_calendar_rounded,
+            color: AppTheme.accent,
+          ),
+        ),
+        const SizedBox(width: 13),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Preenche Diários',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            Text(
+              'PREPARAÇÃO E LANÇAMENTO DE AULAS',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 9,
+                letterSpacing: 1.3,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        const Spacer(),
+        _StatusPill(count: entryCount),
+      ],
+    ),
+  );
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.count});
+  final int count;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: AppTheme.glassDecoration(opacity: .06),
+      child: Text(
+        '$count lançamento${count == 1 ? '' : 's'}',
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      ),
+    );
+  }
+}
+
+class _WorkspacePanel extends StatelessWidget {
+  const _WorkspacePanel({
+    required this.entryCount,
+    required this.browserReady,
+    required this.sourceLabel,
+    required this.entries,
+    required this.snapshots,
+    required this.selectedSnapshotId,
+    required this.onSelectSnapshot,
+    required this.onUseMoodle,
+    required this.onImportExcel,
+    required this.onImportJson,
+    required this.onImportLiveMoodle,
+    required this.onImportSavedConfig,
+    required this.loadingMoodleCourses,
+    required this.onExportJson,
+    required this.onAdd,
+    required this.onClear,
+    required this.onFindPortalDates,
+    required this.onCopyMissingPortalDates,
+    required this.searchingPortalDates,
+    required this.missingPortalDates,
+    required this.onEdit,
+    required this.onRemove,
+    required this.onShift,
+  });
+  final int entryCount;
+  final bool browserReady;
+  final String? sourceLabel;
+  final Map<String, String> entries;
+  final List<MoodleConfigSnapshot> snapshots;
+  final String? selectedSnapshotId;
+  final ValueChanged<String?> onSelectSnapshot;
+  final VoidCallback? onUseMoodle;
+  final VoidCallback onImportExcel, onImportJson, onExportJson, onAdd, onShift;
+  final VoidCallback onImportLiveMoodle;
+  final VoidCallback onImportSavedConfig;
+  final VoidCallback onClear;
+  final VoidCallback onFindPortalDates, onCopyMissingPortalDates;
+  final bool searchingPortalDates;
+  final List<String> missingPortalDates;
+  final bool loadingMoodleCourses;
+  final ValueChanged<String> onEdit, onRemove;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      gradient: AppTheme.cardGradient,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: AppTheme.divider),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(22, 20, 22, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.source_rounded, color: AppTheme.accent),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Dados do diário',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$entryCount itens',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              if (sourceLabel != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 7),
+                  child: Text(
+                    'Fonte atual: $sourceLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.accent,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 15),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onImportJson,
+                      icon: const Icon(Icons.data_object_rounded, size: 17),
+                      label: const Text(
+                        'Carregar JSON',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: loadingMoodleCourses
+                          ? null
+                          : onImportLiveMoodle,
+                      icon: loadingMoodleCourses
+                          ? const SizedBox.square(
+                              dimension: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_download_rounded, size: 17),
+                      label: Text(
+                        loadingMoodleCourses
+                            ? 'Buscando...'
+                            : 'Buscar no Moodle',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onImportSavedConfig,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.green,
+                        foregroundColor: AppTheme.isLight
+                            ? Colors.white
+                            : const Color(0xFF10251C),
+                      ),
+                      icon: const Icon(Icons.school_rounded, size: 17),
+                      label: const Text(
+                        'Buscar Config Moodle',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onImportExcel,
+                    icon: const Icon(Icons.table_view_rounded, size: 17),
+                    label: const Text('Importar Excel'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: entryCount == 0 ? null : onExportJson,
+                    icon: const Icon(Icons.save_alt_rounded, size: 17),
+                    label: const Text('Salvar JSON'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onShift,
+                    icon: const Icon(Icons.event_repeat_rounded, size: 17),
+                    label: const Text('Ajustar datas'),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: onAdd,
+                    tooltip: 'Adicionar aula manualmente',
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: searchingPortalDates || !browserReady
+                        ? null
+                        : onFindPortalDates,
+                    tooltip: 'Buscar datas ausentes no diário aberto',
+                    icon: searchingPortalDates
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.manage_search_rounded),
+                  ),
+                  if (missingPortalDates.isNotEmpty)
+                    IconButton.filledTonal(
+                      onPressed: onCopyMissingPortalDates,
+                      tooltip: 'Copiar datas ausentes',
+                      icon: const Icon(Icons.copy_rounded),
+                    ),
+                  IconButton.filledTonal(
+                    onPressed: entryCount == 0 ? null : onClear,
+                    tooltip: 'Limpar todos os lançamentos',
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.danger,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 13),
+              if (snapshots.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: selectedSnapshotId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText:
+                              'Vers\u00e3o hist\u00f3rica / backup de outro semestre',
+                          prefixIcon: Icon(Icons.history_rounded),
+                        ),
+                        hint: const Text(
+                          'Selecionar vers\u00e3o hist\u00f3rica',
+                        ),
+                        items: snapshots
+                            .map(
+                              (snapshot) => DropdownMenuItem(
+                                value: snapshot.id,
+                                child: Text(
+                                  '${snapshot.courseName} ? ${snapshot.label} ? ${DateFormat('dd/MM/yyyy').format(snapshot.semesterStartDate)}',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: onSelectSnapshot,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton.tonalIcon(
+                      onPressed: onUseMoodle,
+                      icon: const Icon(Icons.history_rounded),
+                      label: const Text('Usar vers\u00e3o'),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 9),
+              Text(
+                'O cronograma é convertido em data, modalidade e conteúdo; você pode revisar cada item antes do preenchimento.',
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 10,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: entries.isEmpty
+              ? const _EmptyEntries()
+              : ListView.separated(
+                  padding: const EdgeInsets.all(14),
+                  itemCount: entries.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = entries.entries.elementAt(index);
+                    return _EntryTile(
+                      entry: item,
+                      onEdit: () => onEdit(item.key),
+                      onRemove: () => onRemove(item.key),
+                    );
+                  },
+                ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _EntryTile extends StatelessWidget {
+  const _EntryTile({
+    required this.entry,
+    required this.onEdit,
+    required this.onRemove,
+  });
+  final MapEntry<String, String> entry;
+  final VoidCallback onEdit, onRemove;
+  @override
+  Widget build(BuildContext context) {
+    final practical = entry.key.toUpperCase().contains('-P');
+    return Container(
+      padding: EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.divider.withAlpha(160)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 58,
+            padding: const EdgeInsets.symmetric(vertical: 7),
+            decoration: BoxDecoration(
+              color: (practical ? AppTheme.accent : AppTheme.primaryLight)
+                  .withAlpha(22),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  entry.key.substring(0, 10),
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  practical ? 'PRÁTICA' : 'TEÓRICA',
+                  style: TextStyle(
+                    color: practical ? AppTheme.accent : AppTheme.primaryLight,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Text(
+              entry.value,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 12,
+                height: 1.5,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Editar',
+            onPressed: onEdit,
+            icon: const Icon(Icons.edit_rounded, size: 18),
+          ),
+          IconButton(
+            tooltip: 'Remover',
+            onPressed: onRemove,
+            icon: const Icon(
+              Icons.delete_outline_rounded,
+              size: 18,
+              color: AppTheme.danger,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyEntries extends StatelessWidget {
+  const _EmptyEntries();
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.event_note_rounded,
+            size: 44,
+            color: AppTheme.textSecondary.withAlpha(130),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Nenhum lançamento carregado',
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            'Importe uma planilha ou JSON, escolha dados do Moodle ou adicione itens manualmente.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _BrowserPanel extends StatelessWidget {
+  const _BrowserPanel({
+    required this.urlController,
+    required this.onAddressChanged,
+    required this.credentialsSaved,
+    required this.credentialsFromMoodle,
+    required this.logs,
+    required this.entryCount,
+    required this.opening,
+    required this.browserReady,
+    required this.filling,
+    required this.highlight,
+    required this.requireEmpty,
+    required this.error,
+    required this.onOpen,
+    required this.onConfigureCredentials,
+    required this.onFill,
+    required this.onHighlight,
+    required this.onRequireEmpty,
+  });
+  final TextEditingController urlController;
+  final ValueChanged<String> onAddressChanged;
+  final bool credentialsSaved;
+  final bool credentialsFromMoodle;
+  final List<String> logs;
+  final int entryCount;
+  final bool opening, browserReady, filling, highlight, requireEmpty;
+  final String? error;
+  final VoidCallback onOpen, onConfigureCredentials, onFill;
+  final ValueChanged<bool> onHighlight, onRequireEmpty;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: AppTheme.bgCardAlt,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: AppTheme.divider),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.web_rounded,
+                    color: browserReady ? Colors.greenAccent : AppTheme.accent,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Portal do docente',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  _ConnectionLabel(opening: opening, ready: browserReady),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: urlController,
+                keyboardType: TextInputType.url,
+                onChanged: onAddressChanged,
+                decoration: const InputDecoration(
+                  labelText: 'Endereço do portal',
+                  prefixIcon: Icon(Icons.link_rounded),
+                ),
+                onSubmitted: (_) => onOpen(),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: onConfigureCredentials,
+                  icon: Icon(
+                    credentialsSaved
+                        ? Icons.key_rounded
+                        : Icons.key_off_rounded,
+                    size: 17,
+                  ),
+                  label: Text(
+                    credentialsSaved
+                        ? credentialsFromMoodle
+                              ? 'Usando login salvo do Moodle · Editar'
+                              : 'Login do portal salvo · Editar'
+                        : 'Configurar login do portal',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: opening ? null : onOpen,
+                  icon: opening
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.open_in_browser_rounded),
+                  label: Text(
+                    opening
+                        ? 'Abrindo Edge…'
+                        : browserReady
+                        ? 'Abrir endereço no Edge'
+                        : 'Abrir Edge e entrar no portal',
+                  ),
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.only(top: 9),
+                child: Text(
+                  credentialsSaved
+                      ? credentialsFromMoodle
+                            ? 'O Gestor UFU usa as credenciais já salvas do Moodle. Se o Portal usar outro login, edite acima.'
+                            : 'O Gestor UFU tenta preencher o login salvo ao abrir o portal. Depois, abra a turma e deixe visível o formulário do diário.'
+                      : 'Configure o login do portal ou entre manualmente no Edge. Depois, abra a turma e deixe visível o formulário do diário.',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 10,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: requireEmpty,
+                onChanged: onRequireEmpty,
+                title: const Text(
+                  'Não sobrescrever campos preenchidos',
+                  style: TextStyle(fontSize: 12),
+                ),
+                subtitle: const Text(
+                  'Mantém o que já estiver preenchido no portal.',
+                  style: TextStyle(fontSize: 10),
+                ),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: highlight,
+                onChanged: onHighlight,
+                title: const Text(
+                  'Destacar campos preenchidos',
+                  style: TextStyle(fontSize: 12),
+                ),
+                subtitle: Text(
+                  'Realça cada campo durante o preenchimento.',
+                  style: TextStyle(fontSize: 10),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: browserReady && !filling && entryCount > 0
+                      ? onFill
+                      : null,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.accent,
+                    foregroundColor: AppTheme.bgDark,
+                  ),
+                  icon: filling
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.play_arrow_rounded),
+                  label: Text(filling ? 'Preenchendo…' : 'Preencher diário'),
+                ),
+              ),
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    error!,
+                    style: const TextStyle(
+                      color: AppTheme.danger,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.subject_rounded,
+                size: 17,
+                color: AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Registro da operação',
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                '${logs.length} mensagens',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: logs.isEmpty
+              ? Center(
+                  child: Text(
+                    'As etapas e os resultados aparecerão aqui.',
+                    style: TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  reverse: true,
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                  itemCount: logs.length,
+                  itemBuilder: (context, i) {
+                    final line = logs[logs.length - i - 1];
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: SelectableText(
+                        line,
+                        style: TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 10,
+                          height: 1.4,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ConnectionLabel extends StatelessWidget {
+  const _ConnectionLabel({required this.opening, required this.ready});
+  final bool opening, ready;
+  @override
+  Widget build(BuildContext context) {
+    final color = ready
+        ? Colors.greenAccent
+        : opening
+        ? AppTheme.accent
+        : AppTheme.textSecondary;
+    final text = ready
+        ? 'EDGE ABERTO'
+        : opening
+        ? 'INICIANDO'
+        : 'DESCONECTADO';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withAlpha(22),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 8,
+          fontWeight: FontWeight.w700,
+          letterSpacing: .6,
+        ),
+      ),
+    );
+  }
+}
+
+class _ValidationResult {
+  const _ValidationResult(this.valid, this.errors);
+  final Map<String, String> valid;
+  final Map<String, String> errors;
+}
+
+class _ImportResult extends _ValidationResult {
+  const _ImportResult(super.valid, super.errors, this.skipped, this.duplicates);
+  final int skipped, duplicates;
+}
+
+class _ShiftResult {
+  const _ShiftResult(
+    this.entries,
+    this.changed,
+    this.filtered,
+    this.overwritten,
+  );
+  final Map<String, String> entries;
+  final int changed, filtered, overwritten;
+}
+
+class _MoodleDiaryCourseDialog extends StatelessWidget {
+  const _MoodleDiaryCourseDialog({required this.courses});
+
+  final List<MoodleCourse> courses;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Escolha uma disciplina do Moodle'),
+    content: SizedBox(
+      width: 520,
+      height: 440,
+      child: ListView.separated(
+        itemCount: courses.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final course = courses[index];
+          return ListTile(
+            leading: const Icon(
+              Icons.menu_book_rounded,
+              color: AppTheme.accent,
+            ),
+            title: Text(
+              course.fullname,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              [
+                if (course.shortname.isNotEmpty) course.shortname,
+                if (course.startDate != null)
+                  'Início: ${DateFormat('dd/MM/yyyy').format(course.startDate!)}',
+              ].join(' · '),
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.pop(context, course),
+          );
+        },
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancelar'),
+      ),
+    ],
+  );
+}
+
+class _SavedMoodleConfigDialog extends StatelessWidget {
+  const _SavedMoodleConfigDialog({required this.configs});
+
+  final List<CourseConfig> configs;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Escolha uma configuração salva'),
+    content: SizedBox(
+      width: 520,
+      height: 440,
+      child: ListView.separated(
+        itemCount: configs.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final config = configs[index];
+          return ListTile(
+            leading: const Icon(
+              Icons.school_rounded,
+              color: AppTheme.accentGreen,
+            ),
+            title: Text(
+              config.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              '${config.sections.length} seções · início ${DateFormat('dd/MM/yyyy').format(config.semesterStartDate)}',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => Navigator.pop(context, config),
+          );
+        },
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancelar'),
+      ),
+    ],
+  );
+}

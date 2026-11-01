@@ -138,13 +138,13 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
       child: CompositedTransformFollower(
         link: _layerLink,
         showWhenUnlinked: false,
-        offset: const Offset(0, 32),
+        offset: Offset(0, 32),
         child: Material(
           elevation: 8,
           borderRadius: BorderRadius.circular(8),
           color: AppTheme.bgSurface,
           child: Container(
-            constraints: const BoxConstraints(maxHeight: 250),
+            constraints: BoxConstraints(maxHeight: 250),
             decoration: BoxDecoration(
               border: Border.all(color: AppTheme.divider),
               borderRadius: BorderRadius.circular(8),
@@ -156,10 +156,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
                 InkWell(
                   onTap: () => _select(null),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: widget.currentId == null
                           ? AppTheme.accent.withAlpha(20)
@@ -175,7 +172,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
                           size: 14,
                           color: AppTheme.textSecondary,
                         ),
-                        const SizedBox(width: 8),
+                        SizedBox(width: 8),
                         Text(
                           'Sem vínculo',
                           style: TextStyle(
@@ -200,7 +197,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
                       return InkWell(
                         onTap: () => _select(opt.id),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(
+                          padding: EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 6,
                           ),
@@ -224,7 +221,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
                               if (opt.subtitle != null)
                                 Text(
                                   opt.subtitle!,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 10,
                                     color: AppTheme.textSecondary,
                                   ),
@@ -262,10 +259,10 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
             child: TextField(
               controller: _filterCtrl,
               focusNode: _focusNode,
-              style: const TextStyle(fontSize: 12, color: AppTheme.textPrimary),
+              style: TextStyle(fontSize: 12, color: AppTheme.textPrimary),
               decoration: InputDecoration(
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
+                contentPadding: EdgeInsets.symmetric(
                   horizontal: 8,
                   vertical: 6,
                 ),
@@ -284,7 +281,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
                 ),
                 suffixIcon: InkWell(
                   onTap: _close,
-                  child: const Padding(
+                  child: Padding(
                     padding: EdgeInsets.all(4),
                     child: Icon(
                       Icons.close,
@@ -331,7 +328,7 @@ class _InlineLinkPickerState extends State<InlineLinkPicker> {
             size: 13,
             color: widget.isLinked ? widget.linkedColor : widget.unlinkedColor,
           ),
-          const SizedBox(width: 4),
+          SizedBox(width: 4),
           Flexible(
             child: Text(
               widget.isLinked

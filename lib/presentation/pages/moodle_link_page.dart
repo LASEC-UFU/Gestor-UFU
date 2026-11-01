@@ -7,6 +7,7 @@ import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class MoodleLinkPage extends StatefulWidget {
@@ -48,6 +49,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     final ctrl = context.watch<ConfigController>();
     final sync = context.watch<SyncController>();
     final auth = context.watch<AuthController>();
@@ -55,7 +57,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: Column(
             children: [
@@ -74,11 +76,12 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
+            tooltip: 'Voltar',
+            icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
             onPressed: () => context.pop(),
           ),
           const SizedBox(width: 8),
-          const Expanded(
+          Expanded(
             child: Text(
               'Vincular ao Moodle',
               style: TextStyle(
@@ -136,7 +139,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
     }
 
     if (sync.loading) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -236,7 +239,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
             ),
             title: Text(
               section.name,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w600,
                 color: AppTheme.textPrimary,
               ),
@@ -259,7 +262,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                   ),
                 ),
               if (linkedMoodleSection == null && section.activities.isNotEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.all(12),
                   child: Text(
                     'Vincule a seção primeiro para vincular as atividades.',
@@ -289,10 +292,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
         initialValue: section.moodleSectionId,
         decoration: InputDecoration(
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 8,
-          ),
+          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide(color: AppTheme.divider),
@@ -303,21 +303,17 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
           ),
           filled: true,
           fillColor: AppTheme.bgSurface,
-          prefixIcon: const Icon(
-            Icons.school,
-            size: 16,
-            color: AppTheme.accent,
-          ),
+          prefixIcon: Icon(Icons.school, size: 16, color: AppTheme.accent),
         ),
         dropdownColor: AppTheme.bgSurface,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-        hint: const Text(
+        style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+        hint: Text(
           'Selecione a seção do Moodle',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
         isExpanded: true,
         items: [
-          const DropdownMenuItem<int?>(
+          DropdownMenuItem<int?>(
             value: null,
             child: Text(
               'Nenhuma (desvincular)',
@@ -358,7 +354,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
         .firstOrNull;
 
     return Padding(
-      padding: const EdgeInsets.only(left: 12, right: 4, bottom: 10),
+      padding: EdgeInsets.only(left: 12, right: 4, bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -378,7 +374,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
               children: [
                 Text(
                   activity.name,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
@@ -389,7 +385,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                   initialValue: activity.moodleModuleId,
                   decoration: InputDecoration(
                     isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(
+                    contentPadding: EdgeInsets.symmetric(
                       horizontal: 10,
                       vertical: 6,
                     ),
@@ -405,11 +401,8 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                     fillColor: AppTheme.bgCard,
                   ),
                   dropdownColor: AppTheme.bgSurface,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 11,
-                  ),
-                  hint: const Text(
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 11),
+                  hint: Text(
                     'Selecione módulo Moodle',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
@@ -418,7 +411,7 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
                   ),
                   isExpanded: true,
                   items: [
-                    const DropdownMenuItem<int?>(
+                    DropdownMenuItem<int?>(
                       value: null,
                       child: Text(
                         'Nenhum (desvincular)',

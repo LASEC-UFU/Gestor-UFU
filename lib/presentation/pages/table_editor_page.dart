@@ -9,6 +9,7 @@ import 'package:config_moodle/domain/entities/moodle_entities.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 import 'package:config_moodle/core/utils/macro_resolver.dart';
 import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 import 'package:config_moodle/presentation/widgets/inline_edit_text.dart';
@@ -188,13 +189,14 @@ class _TableEditorPageState extends State<TableEditorPage> {
 
   @override
   Widget build(BuildContext context) {
+    context.watch<ThemeController>();
     final ctrl = context.watch<ConfigController>();
     final config = ctrl.current;
     final auth = context.watch<AuthController>();
 
     return Scaffold(
       body: Container(
-        decoration: const BoxDecoration(gradient: AppTheme.bgGradient),
+        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
         child: SafeArea(
           child: Column(
             children: [
@@ -309,7 +311,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: AppTheme.bgSurface,
             borderRadius: BorderRadius.circular(6),
@@ -323,7 +325,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
           ),
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
               color: AppTheme.textPrimary,
               fontWeight: FontWeight.w500,
@@ -352,8 +354,9 @@ class _TableEditorPageState extends State<TableEditorPage> {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
-            onPressed: () => context.go('/'),
+            tooltip: 'Voltar',
+            icon: Icon(Icons.arrow_back_rounded, color: AppTheme.textPrimary),
+            onPressed: () => context.go('/moodle'),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -371,7 +374,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                               config.semesterStartDate,
                             )
                           : 'Carregando...',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
@@ -713,7 +716,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'DATA DE INÍCIO DO SEMESTRE',
                   style: TextStyle(
                     fontSize: 10,
@@ -747,7 +750,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 });
               },
             ),
-            const SizedBox(width: 4),
+            SizedBox(width: 4),
             GradientButton(
               label: 'Alterar',
               icon: Icons.edit_calendar,
@@ -928,7 +931,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
       },
       builder: (context, candidateData, rejectedData) {
         return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: EdgeInsets.only(bottom: 12),
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -1045,7 +1048,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                                       ? AppTheme.accentGreen
                                       : AppTheme.textSecondary.withAlpha(100),
                                 ),
-                                const SizedBox(width: 4),
+                                SizedBox(width: 4),
                                 Flexible(
                                   child: Text(
                                     isLinked
@@ -1084,7 +1087,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          SizedBox(height: 2),
                           Row(
                             children: [
                               Icon(
@@ -1099,7 +1102,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                                     Duration(days: section.referenceDaysOffset),
                                   ),
                                 ),
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 12,
                                   color: AppTheme.textSecondary,
                                 ),
@@ -1142,7 +1145,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                             );
                           },
                         ),
-                        const SizedBox(width: 4),
+                        SizedBox(width: 4),
                       ],
                       IconButton(
                         icon: Icon(
@@ -1173,7 +1176,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         ),
                       ),
                       PopupMenuButton<String>(
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.more_vert,
                           color: AppTheme.textSecondary,
                           size: 20,
@@ -1209,7 +1212,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                             value: 'add_activity',
                             child: Text('Adicionar Atividade'),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
                             child: Text(
                               'Excluir',
@@ -1477,7 +1480,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
           if (!hasSelection)
             ReorderableDragStartListener(
               index: index,
-              child: const Icon(
+              child: Icon(
                 Icons.drag_handle,
                 size: 18,
                 color: AppTheme.textSecondary,
@@ -1491,7 +1494,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
             ),
           if (hasSelection)
             Padding(
-              padding: const EdgeInsets.only(right: 2),
+              padding: EdgeInsets.only(right: 2),
               child: Icon(
                 isSelected ? Icons.check_box : Icons.check_box_outline_blank,
                 size: 16,
@@ -1647,13 +1650,10 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 activity.computeOpenDate(sectionRefDate),
                 _needsTime(activity.activityType),
               ),
-              style: const TextStyle(
-                fontSize: 11,
-                color: AppTheme.textSecondary,
-              ),
+              style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
             ),
             if (activity.closeOffsetDays != null) ...[
-              const Text(
+              Text(
                 ' → ',
                 style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               ),
@@ -1662,10 +1662,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   activity.computeCloseDate(sectionRefDate),
                   _needsTime(activity.activityType),
                 ),
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppTheme.textSecondary,
-                ),
+                style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
               ),
             ],
           ],
@@ -1840,7 +1837,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
 
     return Padding(
       key: ValueKey(activity.id),
-      padding: const EdgeInsets.only(left: 4, right: 4, bottom: 8),
+      padding: EdgeInsets.only(left: 4, right: 4, bottom: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -2106,11 +2103,11 @@ class _TableEditorPageState extends State<TableEditorPage> {
       leading: const Icon(Icons.access_time, size: 18, color: AppTheme.accent),
       title: Text(
         display,
-        style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary),
+        style: TextStyle(fontSize: 13, color: AppTheme.textPrimary),
       ),
       subtitle: Text(
         label,
-        style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+        style: TextStyle(fontSize: 11, color: AppTheme.textSecondary),
       ),
       trailing: minutes != null
           ? IconButton(
@@ -2183,7 +2180,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: type,
-                      decoration: const InputDecoration(labelText: 'Tipo'),
+                      decoration: InputDecoration(labelText: 'Tipo'),
                       dropdownColor: AppTheme.bgSurface,
                       items: _activityTypes,
                       onChanged: (v) => setState(() => type = v!),
@@ -2191,7 +2188,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String?>(
                       initialValue: modality,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Modalidade',
                         helperText: 'Usada na tabela para Word',
                       ),
@@ -2366,7 +2363,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   children: [
                     Text(
                       activity.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.textPrimary,
@@ -2384,7 +2381,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         Expanded(
                           child: DropdownButtonFormField<String?>(
                             initialValue: modality,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Modalidade',
                               helperText: 'Usada na tabela para Word',
                               helperStyle: TextStyle(
@@ -2484,7 +2481,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                         Expanded(
                           child: DropdownButtonFormField<int?>(
                             initialValue: expectedWeekday,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Dia da semana esperado',
                               helperText: 'Se não bater, fica amarelo',
                               helperStyle: TextStyle(
@@ -2604,7 +2601,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                           final ms = filtered[i];
                           return ListTile(
                             dense: true,
-                            leading: const Icon(
+                            leading: Icon(
                               Icons.folder_outlined,
                               size: 20,
                               color: AppTheme.textSecondary,
@@ -2733,7 +2730,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
             children: [
               const Icon(Icons.event_busy, color: AppTheme.danger),
               const SizedBox(width: 8),
-              const Text('Datas Especiais'),
+              Text('Datas Especiais'),
             ],
           ),
           content: SizedBox(
@@ -2761,7 +2758,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                         children: [
                           Row(
                             children: [
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   'Datas em que não haverá aula.\n'
                                   'Atividades nessas datas ficam em vermelho.',
@@ -2784,7 +2781,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                           const SizedBox(height: 4),
                           Expanded(
                             child: holidays.isEmpty
-                                ? const Center(
+                                ? Center(
                                     child: Text(
                                       'Nenhum feriado adicionado.',
                                       style: TextStyle(
@@ -2810,7 +2807,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                                         ),
                                         subtitle: Text(
                                           _weekdayNames[date.weekday],
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 11,
                                             color: AppTheme.textSecondary,
                                           ),
@@ -2835,7 +2832,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                         children: [
                           Row(
                             children: [
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   'Datas que funcionam como outro dia\n'
                                   'da semana no calendário acadêmico.',
@@ -2858,7 +2855,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                           const SizedBox(height: 4),
                           Expanded(
                             child: sortedSwapKeys.isEmpty
-                                ? const Center(
+                                ? Center(
                                     child: Text(
                                       'Nenhuma troca de dia adicionada.',
                                       style: TextStyle(
@@ -2886,7 +2883,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
                                         ),
                                         subtitle: Text(
                                           '${_weekdayNames[realWd]} → funciona como ${_weekdayNames[effectiveWd]}',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 11,
                                             color: AppTheme.textSecondary,
                                           ),
