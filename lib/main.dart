@@ -193,7 +193,10 @@ class _UpdateInstallDialogState extends State<_UpdateInstallDialog> {
           });
         },
       );
-      await widget.updateService.installAfterApplicationCloses(installer);
+      await widget.updateService.installAfterApplicationCloses(
+        installer,
+        expectedVersion: widget.release.version,
+      );
       exit(0);
     } on Object catch (error) {
       if (!mounted) return;

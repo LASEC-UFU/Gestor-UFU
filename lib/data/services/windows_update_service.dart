@@ -122,7 +122,15 @@ class WindowsUpdateService {
     final client = http.Client();
     final fileName =
         'GestorUFU_${release.tag.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_')}.msi';
-    final installer = File(p.join(Directory.systemTemp.path, fileName));
+    final updatesDirectory = Directory(
+      p.join(
+        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path,
+        'Gestor UFU',
+        'Updates',
+      ),
+    );
+    await updatesDirectory.create(recursive: true);
+    final installer = File(p.join(updatesDirectory.path, fileName));
     try {
       final request = http.Request('GET', release.downloadUri);
       request.headers['User-Agent'] = _client;
@@ -178,7 +186,10 @@ class WindowsUpdateService {
     }
   }
 
-  Future<void> installAfterApplicationCloses(String installerPath) async {
+  Future<void> installAfterApplicationCloses(
+    String installerPath, {
+    required String expectedVersion,
+  }) async {
     if (!isInstalledWindowsApp) {
       throw const FileSystemException(
         'A atualização automática está disponível na instalação do Windows.',
@@ -203,6 +214,12 @@ class WindowsUpdateService {
     );
     await logDirectory.create(recursive: true);
     final logPath = p.join(logDirectory.path, 'atualizacao.log');
+    final installer = File(installerPath);
+    if (!await installer.exists() || await installer.length() == 0) {
+      throw const FileSystemException(
+        'O instalador da atualização não existe ou está vazio.',
+      );
+    }
     await helper.writeAsBytes(
       [0xef, 0xbb, 0xbf, ...utf8.encode(_installerHelper)],
       flush: true,
@@ -225,7 +242,7 @@ class WindowsUpdateService {
         '-AppPath',
         Platform.resolvedExecutable,
         '-ExpectedVersion',
-        (await PackageInfo.fromPlatform()).version,
+        expectedVersion,
         '-LogPath',
         logPath,
       ], mode: ProcessStartMode.detached);
