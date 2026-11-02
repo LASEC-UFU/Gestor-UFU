@@ -506,7 +506,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                           in programs.entries.toList()
                             ..sort((a, b) => a.key.compareTo(b.key)))
                         ListTile(
-                          leading: CircleAvatar(child: Text('${entry.key}')),
+                          leading: CircleAvatar(
+                            child: Text(
+                              '${(programs.keys.toList()..sort()).indexOf(entry.key) + 1}',
+                            ),
+                          ),
                           title: Text(entry.value),
                           trailing: IconButton(
                             tooltip: 'Remover curso',
@@ -3525,6 +3529,13 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     _ => 'Cadastro anterior',
   };
 
+  List<String> get _availableModalities => [
+    if ((int.tryParse(_theoryHours.text.trim()) ?? 0) > 0) 'theory',
+    if ((int.tryParse(_practiceHours.text.trim()) ?? 0) > 0) 'practice',
+    if ((int.tryParse(_eadHours.text.trim()) ?? 0) > 0) 'ead',
+    if ((int.tryParse(_extensionHours.text.trim()) ?? 0) > 0) 'extension',
+  ];
+
   List<String> _allTeachers() =>
       {
           ...widget.teachers,
@@ -4109,6 +4120,17 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       );
       return false;
     }
+    if (_selectedModality != 'legacy' &&
+        !_availableModalities.contains(_selectedModality)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Selecione uma modalidade cuja carga horária seja maior que zero.',
+          ),
+        ),
+      );
+      return false;
+    }
     final requiresClassIdentification =
         _selectedModality != 'legacy' && _selectedModality != 'ead';
     if (requiresClassIdentification && _class.text.trim().isEmpty) {
@@ -4493,34 +4515,31 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                   const SizedBox(height: 9),
                                   DropdownButtonFormField<String>(
                                     key: ValueKey(
-                                      'modality-$_selectedId-$_selectedModality',
+                                      'modality-$_selectedId-$_selectedModality-${_availableModalities.join('-')}',
                                     ),
-                                    initialValue: _selectedModality == 'legacy'
-                                        ? null
-                                        : _selectedModality,
-                                    hint: const Text('Selecione a modalidade'),
+                                    initialValue:
+                                        _availableModalities.contains(
+                                          _selectedModality,
+                                        )
+                                        ? _selectedModality
+                                        : null,
+                                    hint: Text(
+                                      _availableModalities.isEmpty
+                                          ? 'Informe uma CH maior que zero'
+                                          : 'Selecione a modalidade',
+                                    ),
                                     isExpanded: true,
                                     decoration: const InputDecoration(
                                       labelText: 'Modalidade desta turma',
                                       isDense: true,
                                     ),
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'theory',
-                                        child: Text('Te\u00f3rica'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'practice',
-                                        child: Text('Pr\u00e1tica'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'ead',
-                                        child: Text('EaD'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'extension',
-                                        child: Text('Extens\u00e3o'),
-                                      ),
+                                    items: [
+                                      for (final modality
+                                          in _availableModalities)
+                                        DropdownMenuItem(
+                                          value: modality,
+                                          child: Text(_modalityName(modality)),
+                                        ),
                                     ],
                                     onChanged: (value) {
                                       if (value != null) _changeModality(value);
@@ -4868,10 +4887,12 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
         extensionHours: extension,
       ),
     );
-    if (checkedGroups.any(
-      (entry) => _weeklyHoursStatusColorFor(entry) != const Color(0xFF16803C),
-    )) {
+    final turmaColors = checkedGroups.map(_weeklyHoursStatusColorFor).toList();
+    if (turmaColors.contains(const Color(0xFFB42318))) {
       return const Color(0xFFB42318);
+    }
+    if (turmaColors.contains(const Color(0xFF9A6700))) {
+      return const Color(0xFF9A6700);
     }
     return const Color(0xFF16803C);
   }
