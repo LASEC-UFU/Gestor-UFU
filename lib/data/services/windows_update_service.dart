@@ -195,7 +195,18 @@ class WindowsUpdateService {
         'gestor_ufu_updater_${pid}_${DateTime.now().microsecondsSinceEpoch}.ps1',
       ),
     );
-    await helper.writeAsString(_installerHelper, flush: true);
+    final logDirectory = Directory(
+      p.join(
+        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path,
+        'Gestor UFU',
+      ),
+    );
+    await logDirectory.create(recursive: true);
+    final logPath = p.join(logDirectory.path, 'atualizacao.log');
+    await helper.writeAsBytes(
+      [0xef, 0xbb, 0xbf, ...utf8.encode(_installerHelper)],
+      flush: true,
+    );
     try {
       await Process.start(powershell, [
         '-NoLogo',
@@ -213,6 +224,10 @@ class WindowsUpdateService {
         installerPath,
         '-AppPath',
         Platform.resolvedExecutable,
+        '-ExpectedVersion',
+        (await PackageInfo.fromPlatform()).version,
+        '-LogPath',
+        logPath,
       ], mode: ProcessStartMode.detached);
     } on Object {
       if (await helper.exists()) await helper.delete();
@@ -248,25 +263,74 @@ class WindowsUpdateService {
   }
 
   static const _installerHelper = r'''
-param([int]$ParentPid, [string]$MsiPath, [string]$AppPath)
+param(
+  [int]$ParentPid,
+  [string]$MsiPath,
+  [string]$AppPath,
+  [string]$ExpectedVersion,
+  [string]$LogPath
+)
 $ErrorActionPreference = 'Stop'
+$installSucceeded = $false
+function Write-UpdateLog([string]$Message) {
+  $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message"
+  Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
+function Show-UpdateError([string]$Message) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms
+    [System.Windows.Forms.MessageBox]::Show(
+      "$Message`r`n`r`nLog: $LogPath",
+      'Atualização do Gestor UFU',
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Error
+    ) | Out-Null
+  } catch { }
+}
 try {
+  Write-UpdateLog "Atualização para $ExpectedVersion iniciada. Instalador: $MsiPath"
+  if (-not (Test-Path -LiteralPath $MsiPath)) {
+    throw "O instalador baixado não foi encontrado: $MsiPath"
+  }
   while (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
     Start-Sleep -Milliseconds 400
   }
-  $arguments = '/i "' + $MsiPath + '" /passive /norestart'
+  Write-UpdateLog 'Aplicativo encerrado; iniciando Windows Installer.'
+  $msiLog = [System.IO.Path]::ChangeExtension($LogPath, 'msi.log')
+  $arguments = '/i "' + $MsiPath + '" /passive /norestart /L*V "' + $msiLog + '"'
   $result = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Verb RunAs -Wait -PassThru
-  if ($result.ExitCode -eq 0 -or $result.ExitCode -eq 3010) {
-    Start-Process -FilePath $AppPath
-  } elseif (Test-Path -LiteralPath $AppPath) {
-    Start-Process -FilePath $AppPath
+  Write-UpdateLog "Windows Installer terminou com código $($result.ExitCode). Log MSI: $msiLog"
+  if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 3010) {
+    throw "A instalação MSI falhou com o código $($result.ExitCode)."
   }
+  if (-not (Test-Path -LiteralPath $AppPath)) {
+    throw "A instalação terminou, mas o executável não foi encontrado: $AppPath"
+  }
+  $installedVersion = (Get-Item -LiteralPath $AppPath).VersionInfo.ProductVersion
+  $installedVersionParts = $installedVersion -split '\.'
+  $expectedVersionParts = $ExpectedVersion -split '\.'
+  if ($installedVersionParts.Count -lt 3 -or $expectedVersionParts.Count -lt 3) {
+    throw "Não foi possível validar a versão instalada ($installedVersion; esperada $ExpectedVersion)."
+  }
+  $installedComparable = [version]::Parse(($installedVersionParts[0..2] -join '.') + '.0')
+  $expectedComparable = [version]::Parse(($expectedVersionParts[0..2] -join '.') + '.0')
+  if ($installedComparable -lt $expectedComparable) {
+    throw "O instalador concluiu, mas a versão encontrada ($installedVersion) é anterior à esperada ($ExpectedVersion)."
+  }
+  Write-UpdateLog "Instalação confirmada; executável versão $installedVersion. Reabrindo aplicativo."
+  Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path -Parent $AppPath)
+  $installSucceeded = $true
 } catch {
+  $message = $_.Exception.Message
+  try { Write-UpdateLog "ERRO: $message`r`n$($_ | Out-String)" } catch { }
+  Show-UpdateError "Não foi possível concluir a atualização. O Gestor UFU não foi fechado definitivamente. $message"
   if (Test-Path -LiteralPath $AppPath) {
-    Start-Process -FilePath $AppPath
+    Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path -Parent $AppPath)
   }
 } finally {
-  Remove-Item -LiteralPath $MsiPath -Force -ErrorAction SilentlyContinue
+  if ($installSucceeded) {
+    Remove-Item -LiteralPath $MsiPath -Force -ErrorAction SilentlyContinue
+  }
   Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 }
 ''';

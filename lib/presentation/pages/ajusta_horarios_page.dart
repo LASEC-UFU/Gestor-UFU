@@ -3453,6 +3453,9 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     ..._entries,
     if (_creating) _blank(),
   ].where((e) => e.id == _selectedId).firstOrNull;
+  HorarioDisciplina? get _firstEntryWithClass =>
+      _entries.where((entry) => entry.className.trim().isNotEmpty).firstOrNull;
+  HorarioDisciplina get _defaultEntry => _firstEntryWithClass ?? _entries.first;
 
   HorarioDisciplina _blank() =>
       _newEntryTemplate?.copyWith(
@@ -3497,8 +3500,9 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       _selectedId = _activeNewEntryId;
       _select(_blank());
     } else {
-      _selectedId = _entries.first.id;
-      _select(_entries.first);
+      final entry = _defaultEntry;
+      _selectedId = entry.id;
+      _select(entry);
     }
   }
 
@@ -3716,14 +3720,23 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       final sameMode = groups
           .where((entry) => entry.modality == _selectedModality)
           .toList();
-      final sameClass = sameMode
+      final sameModeWithClass = sameMode
+          .where((entry) => entry.className.trim().isNotEmpty)
+          .toList();
+      final sameClass = sameModeWithClass
           .where(
             (entry) =>
                 entry.className.trim().toLowerCase() ==
                 current?.className.trim().toLowerCase(),
           )
           .firstOrNull;
-      return sameClass ?? sameMode.firstOrNull ?? groups.first;
+      final anyClass = groups
+          .where((entry) => entry.className.trim().isNotEmpty)
+          .firstOrNull;
+      return sameClass ??
+          sameModeWithClass.firstOrNull ??
+          anyClass ??
+          groups.first;
     }).toList()..sort((a, b) {
       final acronym = a.acronym.toLowerCase().compareTo(
         b.acronym.toLowerCase(),
@@ -4205,12 +4218,19 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
           final sameMode = related
               .where((entry) => entry.modality == _selectedModality)
               .firstOrNull;
-          final next = sameMode ?? related.first;
+          final next = sameMode != null && sameMode.className.trim().isNotEmpty
+              ? sameMode
+              : related
+                        .where((entry) => entry.className.trim().isNotEmpty)
+                        .firstOrNull ??
+                    sameMode ??
+                    related.first;
           _selectedId = next.id;
           _select(next);
         } else if (_entries.isNotEmpty) {
-          _selectedId = _entries.first.id;
-          _select(_entries.first);
+          final next = _defaultEntry;
+          _selectedId = next.id;
+          _select(next);
         } else {
           _selectedModality = 'theory';
           _newEntryId = const Uuid().v4();
@@ -4250,7 +4270,13 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
           final sameMode = related
               .where((entry) => entry.modality == _selectedModality)
               .firstOrNull;
-          final next = sameMode ?? related.first;
+          final next = sameMode != null && sameMode.className.trim().isNotEmpty
+              ? sameMode
+              : related
+                        .where((entry) => entry.className.trim().isNotEmpty)
+                        .firstOrNull ??
+                    sameMode ??
+                    related.first;
           _newEntryId = null;
           _newEntryTemplate = null;
           _selectedId = next.id;
@@ -4258,8 +4284,9 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
         } else if (_entries.isNotEmpty) {
           _newEntryId = null;
           _newEntryTemplate = null;
-          _selectedId = _entries.first.id;
-          _select(_entries.first);
+          final next = _defaultEntry;
+          _selectedId = next.id;
+          _select(next);
         } else {
           _newEntryId = const Uuid().v4();
           _newEntryTemplate = null;
@@ -4309,7 +4336,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
         _selectedId = _newEntryId;
         _select(_blank());
       } else {
-        final next = _entries.first;
+        final next = _defaultEntry;
         _selectedId = next.id;
         _select(next);
       }

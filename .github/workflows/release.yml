@@ -99,6 +99,20 @@ jobs:
             -ag `
             -out "windows\installer\harvested.wxs"
 
+          # Keep a new, stable identity for the main executable component.
+          # Older MSIs could consider a stale EXE newer than the package,
+          # skip installing the replacement and then remove the old file.
+          [xml]$harvest = Get-Content "windows\installer\harvested.wxs"
+          $ns = New-Object System.Xml.XmlNamespaceManager($harvest.NameTable)
+          $ns.AddNamespace("w", "http://schemas.microsoft.com/wix/2006/wi")
+          $exeComponent = $harvest.SelectSingleNode(
+            "//w:Component[w:File[contains(@Source, 'config_moodle.exe')]]",
+            $ns
+          )
+          if (-not $exeComponent) { throw "Main executable component not found in harvested.wxs" }
+          $exeComponent.SetAttribute("Guid", "{A178A3F0-48BD-4D07-AF79-1FE3EF49C572}")
+          $harvest.Save((Resolve-Path "windows\installer\harvested.wxs").Path)
+
       - name: Compilar WiX (candle.exe)
         shell: powershell
         run: |
