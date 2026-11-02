@@ -35,8 +35,7 @@ class HorarioDisciplina {
     required this.acronym,
     required this.name,
     required this.className,
-    required this.teacher,
-    this.coTeachers = const [],
+    this.teachers = const [],
     required this.room,
     required this.coursePeriods,
     required this.slots,
@@ -57,8 +56,9 @@ class HorarioDisciplina {
   final String acronym;
   final String name;
   final String className;
-  final String teacher;
-  final List<String> coTeachers;
+
+  /// Teachers assigned to this specific modality/class group.
+  final List<String> teachers;
   final String room;
   final List<CursoPeriodo> coursePeriods;
   final List<HorarioSlot> slots;
@@ -83,10 +83,11 @@ class HorarioDisciplina {
     ].where((part) => part.isNotEmpty).join('-');
   }
 
-  List<String> get teacherNames => {
-    if (teacher.trim().isNotEmpty) teacher.trim(),
-    ...coTeachers.map((name) => name.trim()).where((name) => name.isNotEmpty),
-  }.toList();
+  List<String> get teacherNames => teachers
+      .map((name) => name.trim())
+      .where((name) => name.isNotEmpty)
+      .toSet()
+      .toList();
 
   HorarioDisciplina copyWith({
     String? id,
@@ -96,8 +97,7 @@ class HorarioDisciplina {
     String? acronym,
     String? name,
     String? className,
-    String? teacher,
-    List<String>? coTeachers,
+    List<String>? teachers,
     String? room,
     List<CursoPeriodo>? coursePeriods,
     List<HorarioSlot>? slots,
@@ -113,8 +113,7 @@ class HorarioDisciplina {
     acronym: acronym ?? this.acronym,
     name: name ?? this.name,
     className: className ?? this.className,
-    teacher: teacher ?? this.teacher,
-    coTeachers: coTeachers ?? this.coTeachers,
+    teachers: teachers ?? this.teachers,
     room: room ?? this.room,
     coursePeriods: coursePeriods ?? this.coursePeriods,
     slots: slots ?? this.slots,
@@ -132,8 +131,7 @@ class HorarioDisciplina {
     'acronym': acronym,
     'name': name,
     'className': className,
-    'teacher': teacher,
-    'coTeachers': coTeachers,
+    'teachers': teacherNames,
     'room': room,
     'coursePeriods': coursePeriods.map((item) => item.toJson()).toList(),
     'slots': slots.map((item) => item.toJson()).toList(),
@@ -152,8 +150,7 @@ class HorarioDisciplina {
         acronym: json['acronym'] as String? ?? '',
         name: json['name'] as String? ?? '',
         className: json['className'] as String? ?? '',
-        teacher: json['teacher'] as String? ?? '',
-        coTeachers: ((json['coTeachers'] as List?) ?? const [])
+        teachers: ((json['teachers'] as List?) ?? const [])
             .map((name) => name.toString())
             .toList(),
         room: json['room'] as String? ?? '',

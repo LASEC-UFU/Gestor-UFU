@@ -337,7 +337,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               acronym: subject.acronym,
               name: subject.name,
               className: '',
-              teacher: '',
+              teachers: const [],
               room: '',
               theoryHours: subject.theory,
               practiceHours: subject.practice,
@@ -1859,10 +1859,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             .where((name) => name.toLowerCase() != teacher.toLowerCase())
             .toList();
         if (result.contains(entry.id)) names.add(teacher);
-        return entry.copyWith(
-          teacher: names.firstOrNull ?? '',
-          coTeachers: names.skip(1).toList(),
-        );
+        return entry.copyWith(teachers: names);
       }).toList();
 
       if (_distributionRecords.isNotEmpty) {
@@ -2585,13 +2582,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             !updated.teacherNames.any(
               (name) => name.toLowerCase() == _teacher!.toLowerCase(),
             )) {
-          if (updated.teacher.trim().isEmpty) {
-            updated = updated.copyWith(teacher: _teacher);
-          } else {
-            updated = updated.copyWith(
-              coTeachers: [...updated.coTeachers, _teacher!],
-            );
-          }
+          updated = updated.copyWith(
+            teachers: [...updated.teacherNames, _teacher!],
+          );
         }
         return updated;
       }).toList();
@@ -2626,10 +2619,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             .map(replace)
             .where((name) => result.teachers.contains(name))
             .toList();
-        return entry.copyWith(
-          teacher: assigned.firstOrNull ?? '',
-          coTeachers: assigned.skip(1).toList(),
-        );
+        return entry.copyWith(teachers: assigned);
       }).toList();
       _distributionRecords = _distributionRecords
           .map((record) {
@@ -2818,7 +2808,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             acronym: acronym,
             name: name,
             className: value(row, 6),
-            teacher: value(row, 7),
+            teachers: value(row, 7)
+                .split(',')
+                .map((name) => name.trim())
+                .where((name) => name.isNotEmpty)
+                .toList(),
             room: value(row, 8),
             theoryHours: int.tryParse(value(row, 9)) ?? 0,
             practiceHours: int.tryParse(value(row, 10)) ?? 0,
@@ -3477,7 +3471,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
         acronym: '',
         name: '',
         className: '',
-        teacher: '',
+        teachers: const [],
         room: '',
         theoryHours: 0,
         practiceHours: 0,
@@ -3639,8 +3633,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     maxLines: 1,
     onTap: _openTeacherPicker,
     decoration: const InputDecoration(
-      labelText: 'Docentes (selecione um ou mais)',
-      hintText: 'Clique para pesquisar e selecionar',
+      labelText: 'Docentes desta turma',
+      hintText: 'Clique para selecionar um ou mais docentes',
       suffixIcon: Icon(Icons.arrow_drop_down_rounded),
       isDense: true,
       contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -3947,8 +3941,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       modality: modality,
       className: className,
       room: '',
-      teacher: '',
-      coTeachers: const [],
+      teachers: const [],
       slots: const [],
     );
     setState(() {
@@ -4092,8 +4085,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     acronym: _acronym.text.trim(),
     name: _name.text.trim(),
     className: _class.text.trim(),
-    teacher: _teacherNamesFromField().firstOrNull ?? '',
-    coTeachers: _teacherNamesFromField().skip(1).toList(),
+    teachers: _teacherNamesFromField(),
     room: _room.text.trim(),
     theoryHours: int.tryParse(_theoryHours.text.trim()) ?? 0,
     practiceHours: int.tryParse(_practiceHours.text.trim()) ?? 0,
@@ -4494,8 +4486,6 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                     onChanged: (_) => setState(() {}),
                                   ),
                                   const SizedBox(height: 9),
-                                  _teacherPickerField(),
-                                  const SizedBox(height: 9),
                                   Row(
                                     children: [
                                       Expanded(
@@ -4670,6 +4660,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                       ),
                                     ],
                                   ),
+                                  const SizedBox(height: 9),
+                                  _teacherPickerField(),
                                 ],
                               ),
                             ),

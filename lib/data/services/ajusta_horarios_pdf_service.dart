@@ -303,17 +303,15 @@ class AjustaHorariosPdfService {
     final unique = <String, HorarioDisciplina>{};
     for (final entries in schedule.values) {
       for (final entry in entries) {
-        final legendKey = [
-          entry.acronym.trim().toLowerCase(),
-          entry.name.trim().toLowerCase(),
-          entry.teacherNames.map((name) => name.toLowerCase()).join('|'),
-        ].join('|');
+        final legendKey = _scheduleColorKey(entry);
         unique[legendKey] = entry;
       }
     }
     final items = unique.values.toList()
       ..sort(
-        (a, b) => a.acronym.toLowerCase().compareTo(b.acronym.toLowerCase()),
+        (a, b) => a.timetableLabel.toLowerCase().compareTo(
+          b.timetableLabel.toLowerCase(),
+        ),
       );
     final rows = [
       for (var index = 0; index < items.length; index += 3)
@@ -346,8 +344,8 @@ class AjustaHorariosPdfService {
                     pw.Expanded(
                       child: index < row.length
                           ? pw.Text(
-                              '${row[index].acronym} | ${row[index].name}\n${row[index].teacherNames.join(', ')}',
-                              maxLines: 3,
+                              '${row[index].timetableLabel} | ${row[index].name}\n${row[index].teacherNames.join(', ')}',
+                              maxLines: 4,
                               overflow: pw.TextOverflow.clip,
                               style: pw.TextStyle(
                                 color: textColor,
@@ -365,7 +363,7 @@ class AjustaHorariosPdfService {
   }
 
   String _scheduleColorKey(HorarioDisciplina entry) =>
-      '${entry.id}:${entry.className.trim().toLowerCase()}';
+      '${entry.id}:${entry.modality}:${entry.className.trim().toLowerCase()}';
 
   Future<pw.Font> _loadWindowsFont(String fileName) async {
     final bytes = await File('C:/Windows/Fonts/$fileName').readAsBytes();
