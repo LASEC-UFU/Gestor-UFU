@@ -70,7 +70,7 @@ jobs:
         run: flutter pub get
 
       - name: Build Windows release
-        run: flutter build windows --release
+        run: flutter build windows --release --build-name "${{ needs.prepare.outputs.base_version }}"
 
       - name: Adicionar WiX Toolset ao PATH
         shell: powershell

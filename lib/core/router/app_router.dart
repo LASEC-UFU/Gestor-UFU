@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:config_moodle/presentation/pages/dashboard_page.dart';
 import 'package:config_moodle/presentation/pages/home_page.dart';
@@ -10,7 +11,9 @@ import 'package:config_moodle/presentation/pages/planos_trabalho_page.dart';
 import 'package:config_moodle/presentation/pages/ajusta_horarios_page.dart';
 
 class AppRouter {
+  static final rootNavigatorKey = GlobalKey<NavigatorState>();
   static final GoRouter router = GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     routes: [
       GoRoute(path: '/', builder: (context, state) => const DashboardPage()),

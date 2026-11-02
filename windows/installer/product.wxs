@@ -31,7 +31,7 @@
     <!-- Ícone extraído do próprio executável -->
     <Icon Id="AppIcon" SourceFile="$(var.AppExe)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
-    <Property Id="ARPHELPLINK"    Value="https://github.com/josuemoraisgh/config_moodle" />
+    <Property Id="ARPHELPLINK"    Value="https://github.com/LASEC-UFU/Gestor-UFU/releases" />
 
     <!-- ─── Estrutura de diretórios ─────────────────────────────────── -->
     <Directory Id="TARGETDIR" Name="SourceDir">
