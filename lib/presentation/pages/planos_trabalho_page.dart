@@ -9,6 +9,7 @@ import 'package:config_moodle/data/services/plano_trabalho_automation_service.da
 import 'package:config_moodle/data/services/planilha_trabalho_service.dart';
 import 'package:config_moodle/data/services/planos_trabalho_store.dart';
 import 'package:config_moodle/domain/entities/plano_trabalho.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class PlanosTrabalhoPage extends StatefulWidget {
   const PlanosTrabalhoPage({super.key});
@@ -446,6 +447,8 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
                       ),
                     ),
                     _countPill('${_plans.length} planos'),
+                    const SizedBox(width: 10),
+                    const ThemeSelector(compact: true),
                   ],
                 ),
                 const SizedBox(height: 22),

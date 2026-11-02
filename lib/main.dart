@@ -12,10 +12,13 @@ import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
+import 'package:config_moodle/data/services/shared_preferences_sync_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final preferences = await SharedPreferences.getInstance();
+  final sharedDatabase = SharedPreferencesSyncService();
+  await sharedDatabase.initialize();
   // Importa a grade 2026/2 de Controle e Automacao na primeira abertura.
   await AjustaHorariosStore().load();
   final themeCtrl = ThemeController(
@@ -43,6 +46,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: configCtrl),
         ChangeNotifierProvider.value(value: syncCtrl),
         ChangeNotifierProvider.value(value: themeCtrl),
+        ChangeNotifierProvider.value(value: sharedDatabase),
       ],
       child: const GestorUfuApp(),
     ),

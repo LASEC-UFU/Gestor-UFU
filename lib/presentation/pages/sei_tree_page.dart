@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:config_moodle/presentation/controllers/theme_controller.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class SeiTreePage extends StatefulWidget {
   const SeiTreePage({super.key});
@@ -451,6 +452,8 @@ class _SeiTreePageState extends State<SeiTreePage> {
         ),
         const Spacer(),
         _StatusPill(label: _status, busy: _openingBrowser || _extracting),
+        const SizedBox(width: 10),
+        const ThemeSelector(compact: true),
       ],
     ),
   );

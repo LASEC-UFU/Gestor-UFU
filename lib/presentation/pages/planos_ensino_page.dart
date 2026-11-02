@@ -12,6 +12,7 @@ import 'package:config_moodle/domain/entities/course_config.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/data/services/planos_ensino_service.dart';
 import 'package:config_moodle/data/services/planos_ensino_automation_service.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class PlanosEnsinoPage extends StatefulWidget {
   const PlanosEnsinoPage({super.key});
@@ -394,6 +395,8 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                     icon: const Icon(Icons.add_rounded),
                     label: const Text('Novo formulário'),
                   ),
+                  const SizedBox(width: 10),
+                  const ThemeSelector(compact: true),
                 ],
               ),
             ),

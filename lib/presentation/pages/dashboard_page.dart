@@ -1,13 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/services/preferences_backup_service.dart';
-import 'package:config_moodle/presentation/controllers/theme_controller.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:config_moodle/data/services/shared_preferences_sync_service.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-class DashboardPage extends StatelessWidget {
+class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
+  @override
+  State<DashboardPage> createState() => _DashboardPageState();
+}
+
+class _DashboardPageState extends State<DashboardPage> {
+  static const _orderKey = 'dashboard.module_order.v1';
+  static const _hiddenKey = 'dashboard.hidden_modules.v1';
   static const _modules = <_ModuleInfo>[
     _ModuleInfo(
       title: 'Config Moodle',
@@ -79,9 +89,71 @@ class DashboardPage extends StatelessWidget {
     ),
   ];
 
+  late List<_ModuleInfo> _orderedModules = List.of(_modules);
+  Set<String> _hiddenModules = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadModuleSettings();
+  }
+
+  Future<void> _loadModuleSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedOrder = prefs.getStringList(_orderKey) ?? const <String>[];
+    final savedHidden = prefs.getStringList(_hiddenKey) ?? const <String>[];
+    final byId = {for (final module in _modules) module.id: module};
+    final ordered = <_ModuleInfo>[];
+    for (final id in savedOrder) {
+      final module = byId.remove(id);
+      if (module != null) ordered.add(module);
+    }
+    ordered.addAll(byId.values);
+    if (!mounted) return;
+    setState(() {
+      _orderedModules = ordered;
+      _hiddenModules = savedHidden.toSet();
+    });
+  }
+
+  Future<void> _openSettings() async {
+    final connection = await showDialog<_DatabaseConnectionRequest>(
+      context: context,
+      builder: (_) => _SharedDatabaseDialog(
+        modules: _orderedModules,
+        hiddenModules: _hiddenModules,
+        onModulesChanged: (modules, hidden) async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setStringList(
+            _orderKey,
+            modules.map((module) => module.id).toList(),
+          );
+          await prefs.setStringList(_hiddenKey, hidden.toList());
+          if (!mounted) return;
+          setState(() {
+            _orderedModules = modules;
+            _hiddenModules = hidden;
+          });
+        },
+      ),
+    );
+    if (connection == null || !mounted) return;
+    try {
+      await context.read<SharedPreferencesSyncService>().connectToFile(
+        filePath: connection.path,
+        password: connection.password,
+        useSharedFile: connection.useSharedFile,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao conectar o banco: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    context.watch<ThemeController>();
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(gradient: AppTheme.bgGradient),
@@ -93,7 +165,12 @@ class DashboardPage extends StatelessWidget {
 
               return CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(child: _DashboardHeader(compact: compact)),
+                  SliverToBoxAdapter(
+                    child: _DashboardHeader(
+                      compact: compact,
+                      onSettingsPressed: _openSettings,
+                    ),
+                  ),
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(
                       horizontalPadding,
@@ -110,7 +187,11 @@ class DashboardPage extends StatelessWidget {
                             ? 2
                             : 1;
                         return SliverGrid.builder(
-                          itemCount: _modules.length,
+                          itemCount: _orderedModules
+                              .where(
+                                (module) => !_hiddenModules.contains(module.id),
+                              )
+                              .length,
                           gridDelegate:
                               SliverGridDelegateWithFixedCrossAxisCount(
                                 crossAxisCount: columns,
@@ -118,8 +199,14 @@ class DashboardPage extends StatelessWidget {
                                 crossAxisSpacing: 18,
                                 mainAxisExtent: compact ? 232 : 250,
                               ),
-                          itemBuilder: (context, index) =>
-                              _ModuleCard(module: _modules[index]),
+                          itemBuilder: (context, index) => _ModuleCard(
+                            module: _orderedModules
+                                .where(
+                                  (module) =>
+                                      !_hiddenModules.contains(module.id),
+                                )
+                                .elementAt(index),
+                          ),
                         );
                       },
                     ),
@@ -151,13 +238,16 @@ class DashboardPage extends StatelessWidget {
 }
 
 class _DashboardHeader extends StatelessWidget {
-  const _DashboardHeader({required this.compact});
+  const _DashboardHeader({
+    required this.compact,
+    required this.onSettingsPressed,
+  });
 
   final bool compact;
+  final VoidCallback onSettingsPressed;
 
   @override
   Widget build(BuildContext context) {
-    final theme = context.watch<ThemeController>();
     return Padding(
       padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 22, compact ? 20 : 36, 0),
       child: Row(
@@ -202,67 +292,308 @@ class _DashboardHeader extends StatelessWidget {
             ],
           ),
           const Spacer(),
-          PopupMenuButton<bool>(
-            tooltip: 'Selecionar tema',
-            initialValue: theme.isLight,
-            onSelected: (isLight) => theme.setLight(isLight),
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                value: false,
-                checked: !theme.isLight,
-                child: const Row(
-                  children: [
-                    Icon(Icons.dark_mode_rounded, size: 18),
-                    SizedBox(width: 10),
-                    Text('Escuro'),
-                  ],
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton.icon(
+                onPressed: onSettingsPressed,
+                icon: const Icon(Icons.storage_rounded, size: 17),
+                label: const Text('Configurações'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
                 ),
               ),
-              CheckedPopupMenuItem(
-                value: true,
-                checked: theme.isLight,
-                child: const Row(
-                  children: [
-                    Icon(Icons.light_mode_rounded, size: 18),
-                    SizedBox(width: 10),
-                    Text('Claro'),
-                  ],
-                ),
-              ),
+              const SizedBox(width: 10),
+              const ThemeSelector(),
             ],
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: AppTheme.glassDecoration(opacity: 0.06),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    theme.isLight
-                        ? Icons.light_mode_rounded
-                        : Icons.dark_mode_rounded,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    theme.isLight ? 'Tema claro' : 'Tema escuro',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                  SizedBox(width: 4),
-                  Icon(
-                    Icons.expand_more_rounded,
-                    size: 16,
-                    color: AppTheme.textSecondary,
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DatabaseConnectionRequest {
+  const _DatabaseConnectionRequest({
+    required this.path,
+    required this.password,
+    required this.useSharedFile,
+  });
+  final String path;
+  final String password;
+  final bool useSharedFile;
+}
+
+class _SharedDatabaseDialog extends StatefulWidget {
+  const _SharedDatabaseDialog({
+    required this.modules,
+    required this.hiddenModules,
+    required this.onModulesChanged,
+  });
+
+  final List<_ModuleInfo> modules;
+  final Set<String> hiddenModules;
+  final Future<void> Function(List<_ModuleInfo>, Set<String>) onModulesChanged;
+
+  @override
+  State<_SharedDatabaseDialog> createState() => _SharedDatabaseDialogState();
+}
+
+class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
+  final _password = TextEditingController();
+  String? _path;
+  bool _creating = false;
+  bool _busy = false;
+  String? _message;
+  late final List<_ModuleInfo> _modules = List.of(widget.modules);
+  late final Set<String> _hiddenModules = Set.of(widget.hiddenModules);
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickExisting() async {
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Escolher banco compartilhado no OneDrive',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      allowMultiple: false,
+    );
+    if (result == null || result.files.single.path == null) return;
+    setState(() {
+      _path = result.files.single.path;
+      _creating = false;
+      _message =
+          'Ao conectar, escolha usar os dados do arquivo ou publicar os dados deste computador.';
+    });
+  }
+
+  Future<void> _createFile() async {
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Criar banco compartilhado no OneDrive',
+      fileName: 'gestor_ufu_banco_compartilhado.json',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+    );
+    if (path == null) return;
+    setState(() {
+      _path = path.toLowerCase().endsWith('.json') ? path : '$path.json';
+      _creating = true;
+      _message =
+          'O conteúdo atual deste computador será publicado no novo arquivo.';
+    });
+  }
+
+  Future<void> _connect({required bool useSharedFile}) async {
+    if (_path == null || _password.text.trim().length < 8) {
+      setState(
+        () => _message =
+            'Escolha um arquivo e informe uma senha com pelo menos 8 caracteres.',
+      );
+      return;
+    }
+    setState(() => _busy = true);
+    Navigator.of(context).pop(
+      _DatabaseConnectionRequest(
+        path: _path!,
+        password: _password.text,
+        useSharedFile: useSharedFile,
+      ),
+    );
+  }
+
+  Future<void> _saveModuleSettings() async {
+    await widget.onModulesChanged(List.of(_modules), Set.of(_hiddenModules));
+    if (mounted) {
+      setState(() => _message = 'Prefer\u00eancias da tela inicial salvas.');
+    }
+  }
+
+  void _reorderModules(int oldIndex, int newIndex) {
+    setState(() {
+      final module = _modules.removeAt(oldIndex);
+      _modules.insert(newIndex, module);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sync = context.watch<SharedPreferencesSyncService>();
+    return AlertDialog(
+      title: const Text('Configura\u00e7\u00f5es'),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 700,
+          maxHeight: MediaQuery.sizeOf(context).height * .76,
+        ),
+        child: SingleChildScrollView(
+          child: SizedBox(
+            width: 680,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  sync.isConnected
+                      ? sync.statusLabel
+                      : 'Banco local neste computador',
+                ),
+                if (sync.filePath != null) ...[
+                  const SizedBox(height: 4),
+                  SelectableText(
+                    sync.filePath!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+                if (sync.status == SharedPreferencesSyncStatus.conflict) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Os dois computadores alteraram os dados desde a última sincronização. Escolha qual versão manter.',
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () async {
+                          await sync.resolveConflict(useSharedFile: true);
+                          if (mounted) setState(() {});
+                        },
+                        child: const Text('Usar arquivo compartilhado'),
+                      ),
+                      FilledButton(
+                        onPressed: () async {
+                          await sync.resolveConflict(useSharedFile: false);
+                          if (mounted) setState(() {});
+                        },
+                        child: const Text('Publicar dados deste PC'),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _pickExisting,
+                      icon: const Icon(Icons.folder_open_rounded),
+                      label: const Text('Escolher arquivo existente'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _createFile,
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Criar banco novo'),
+                    ),
+                  ],
+                ),
+                if (_path != null) ...[
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    _path!,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _password,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Senha compartilhada',
+                    helperText:
+                        'Use a mesma senha nos dois computadores. Ela protege os dados e credenciais no arquivo.',
+                  ),
+                ),
+                if (_message != null) ...[
+                  const SizedBox(height: 10),
+                  Text(_message!, style: Theme.of(context).textTheme.bodySmall),
+                ],
+                const Divider(height: 24),
+                Text(
+                  'Recursos da tela inicial',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Marque os recursos que deseja exibir e arraste para ordenar. Cada linha mostra até três, da esquerda para a direita.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 220,
+                  child: ReorderableListView.builder(
+                    itemCount: _modules.length,
+                    onReorderItem: _reorderModules,
+                    buildDefaultDragHandles: false,
+                    itemBuilder: (context, index) {
+                      final module = _modules[index];
+                      final visible = !_hiddenModules.contains(module.id);
+                      return ListTile(
+                        key: ValueKey(module.id),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: Checkbox(
+                          value: visible,
+                          onChanged: (value) => setState(() {
+                            if (value ?? false) {
+                              _hiddenModules.remove(module.id);
+                            } else {
+                              _hiddenModules.add(module.id);
+                            }
+                          }),
+                        ),
+                        title: Text(module.title),
+                        subtitle: Text(visible ? 'Visível' : 'Oculto'),
+                        trailing: ReorderableDragStartListener(
+                          index: index,
+                          child: const Padding(
+                            padding: EdgeInsets.all(8),
+                            child: Icon(Icons.drag_handle_rounded),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        if (sync.isConnected)
+          TextButton(
+            onPressed: () async {
+              await sync.disconnect();
+              if (context.mounted) Navigator.pop(context);
+            },
+            child: const Text('Desconectar'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fechar'),
+        ),
+        FilledButton(
+          onPressed: _saveModuleSettings,
+          child: const Text('Salvar preferências'),
+        ),
+        if (_path != null && !_creating)
+          OutlinedButton(
+            onPressed: _busy ? null : () => _connect(useSharedFile: true),
+            child: const Text('Usar banco compartilhado'),
+          ),
+        if (_path != null)
+          FilledButton(
+            onPressed: _busy ? null : () => _connect(useSharedFile: false),
+            child: Text(
+              _creating ? 'Criar e conectar' : 'Publicar dados locais',
+            ),
+          ),
+      ],
     );
   }
 }
@@ -591,4 +922,6 @@ class _ModuleInfo {
   final String category;
   final bool enabled;
   final String? route;
+
+  String get id => route ?? 'module:$title';
 }

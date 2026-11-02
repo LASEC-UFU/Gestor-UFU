@@ -199,12 +199,7 @@ class AjustaHorariosPdfService {
       }
       gradientColors.add(colors.last);
     }
-    final labels = unique
-        .map(
-          (entry) =>
-              '${entry.acronym}${entry.className.isEmpty ? '' : ' · ${entry.className}'}',
-        )
-        .toList();
+    final labels = unique.map((entry) => entry.timetableLabel).toList();
 
     return pw.Container(
       height: rowHeight,
@@ -290,12 +285,7 @@ class AjustaHorariosPdfService {
         for (final entry in schedule['$weekday:$slot'] ?? const [])
           _scheduleColorKey(entry): entry,
       }.values.toList();
-      final label = entries
-          .map(
-            (entry) =>
-                '${entry.acronym}${entry.className.isEmpty ? '' : ' · ${entry.className}'}',
-          )
-          .join(', ');
+      final label = entries.map((entry) => entry.timetableLabel).join(', ');
       final lines = (label.length / charsPerLine).ceil().clamp(1, 3);
       final neededHeight = (lines * 11.5 + 5).clamp(24.0, 40.0);
       if (neededHeight > height) height = neededHeight;

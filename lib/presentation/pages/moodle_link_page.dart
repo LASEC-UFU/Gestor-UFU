@@ -97,6 +97,8 @@ class _MoodleLinkPageState extends State<MoodleLinkPage> {
               color: AppTheme.accent,
               icon: Icons.school,
             ),
+          const SizedBox(width: 10),
+          const ThemeSelector(compact: true),
         ],
       ),
     );

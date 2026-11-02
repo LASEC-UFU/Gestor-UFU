@@ -13,6 +13,7 @@ import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_pdf_service.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
 import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 class AjustaHorariosPage extends StatefulWidget {
   const AjustaHorariosPage({super.key});
@@ -33,6 +34,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   static const _periodKey = 'ajusta_horarios_periodo_selecionado';
   static const _viewKey = 'ajusta_horarios_visao_selecionada';
   static const _teacherKey = 'ajusta_horarios_docente_selecionado';
+  static const _teacherRosterKey = 'ajusta_horarios_docentes_cadastrados';
   static const _scrollPrefix = 'ajusta_horarios_grade_scroll_';
   final _courseVerticalScroll = ScrollController();
   final _courseHorizontalScroll = ScrollController();
@@ -42,6 +44,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   final Map<String, double> _scrollOffsets = {};
   Timer? _scrollSaveTimer;
   List<HorarioDisciplina> _entries = [];
+  List<String> _teacherRoster = [];
   Map<int, String> _programs = {...horarioProgramas};
   List<_TeacherDistributionRecord> _distributionRecords = [];
   Set<String> _hiddenDistributionTeachers = {};
@@ -93,17 +96,24 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     _scrollSaveTimer = Timer(const Duration(milliseconds: 300), () async {
       final prefs = await SharedPreferences.getInstance();
       for (final item in _scrollOffsets.entries) {
-        await prefs.setDouble('$_scrollPrefix${item.key}', item.value);
+        await prefs.setDouble(
+          _termScopedKey('$_scrollPrefix${item.key}', _term),
+          item.value,
+        );
       }
     });
   }
 
   Future<void> _saveViewSelection() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_programKey, _program);
-    await prefs.setInt(_periodKey, _period);
-    await prefs.setInt(_viewKey, _view);
-    if (_teacher != null) await prefs.setString(_teacherKey, _teacher!);
+    await prefs.setInt(_termScopedKey(_programKey, _term), _program);
+    await prefs.setInt(_termScopedKey(_periodKey, _term), _period);
+    await prefs.setInt(_termScopedKey(_viewKey, _term), _view);
+    if (_teacher != null) {
+      await prefs.setString(_termScopedKey(_teacherKey, _term), _teacher!);
+    } else {
+      await prefs.remove(_termScopedKey(_teacherKey, _term));
+    }
   }
 
   void _restoreCurrentTableScroll() {
@@ -149,8 +159,23 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           : terms.first;
       await prefs.setStringList(_termsKey, terms);
       await prefs.setString(_termKey, activeTerm);
-      final rows = await _store.load(term: activeTerm);
-      final savedTeacher = prefs.getString(_teacherKey);
+      var rows = await _store.load(term: activeTerm);
+      final inferredTeachers =
+          rows.expand((entry) => entry.teacherNames).toSet().toList()..sort();
+      final savedRoster = prefs.getStringList(
+        _termScopedKey(_teacherRosterKey, activeTerm),
+      );
+      final teacherRoster = (savedRoster ?? inferredTeachers).toSet().toList()
+        ..sort();
+      if (savedRoster == null) {
+        await prefs.setStringList(
+          _termScopedKey(_teacherRosterKey, activeTerm),
+          teacherRoster,
+        );
+      }
+      final savedTeacher = prefs.getString(
+        _termScopedKey(_teacherKey, activeTerm),
+      );
       final savedDistribution = prefs.getString(
         _termScopedKey(_distributionKey, activeTerm),
       );
@@ -163,6 +188,19 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   ),
                 )
                 .toList();
+      teacherRoster
+        ..addAll(
+          distribution
+              .map((record) => record.teacher.trim())
+              .where((name) => name.isNotEmpty),
+        )
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      if (savedRoster == null || teacherRoster.length != savedRoster.length) {
+        await prefs.setStringList(
+          _termScopedKey(_teacherRosterKey, activeTerm),
+          teacherRoster,
+        );
+      }
       final hiddenTeachers =
           prefs
               .getStringList(
@@ -179,10 +217,171 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final usablePrograms = programs.isEmpty
           ? {...horarioProgramas}
           : programs;
-      final savedProgram = prefs.getInt(_programKey) ?? _program;
+      final abiMigrationKey =
+          'ajusta_horarios_abi_automacao_v1_${base64Url.encode(utf8.encode(activeTerm)).replaceAll('=', '')}';
+      if (prefs.getBool(abiMigrationKey) != true) {
+        final abiName = 'ABI em Automa\u00e7\u00e3o, Rob\u00f3tica e IA';
+        int? abiProgram;
+        for (final item in usablePrograms.entries) {
+          if (item.value.trim().toLowerCase() == abiName.toLowerCase()) {
+            abiProgram = item.key;
+            break;
+          }
+        }
+        if (abiProgram == null) {
+          abiProgram = usablePrograms.keys.isEmpty
+              ? 1
+              : usablePrograms.keys.reduce((a, b) => a > b ? a : b) + 1;
+          usablePrograms[abiProgram] = abiName;
+        }
+        final abiProgramId = abiProgram;
+
+        var entriesChanged = false;
+        final abiSubjects =
+            <
+              ({
+                String id,
+                String acronym,
+                String name,
+                int theory,
+                int practice,
+                int ead,
+                int extension,
+              })
+            >[
+              (
+                id: '01',
+                acronym: 'EMP',
+                name: 'Empreendedorismo e Inova\u00e7\u00e3o',
+                theory: 2,
+                practice: 0,
+                ead: 0,
+                extension: 0,
+              ),
+              (
+                id: '02',
+                acronym: 'DCF',
+                name: 'Dispositivos Ciberf\u00edsicos para IoT e IIoT',
+                theory: 0,
+                practice: 1,
+                ead: 4,
+                extension: 0,
+              ),
+              (
+                id: '03',
+                acronym: 'IABI',
+                name:
+                    'Introdu\u00e7\u00e3o \u00e0 \u00c1rea B\u00e1sica de Ingresso em Automa\u00e7\u00e3o, Rob\u00f3tica e IA',
+                theory: 2,
+                practice: 0,
+                ead: 0,
+                extension: 0,
+              ),
+              (
+                id: '04',
+                acronym: 'AMS I',
+                name: 'An\u00e1lise e Modelagem de Sistemas I',
+                theory: 2,
+                practice: 0,
+                ead: 2,
+                extension: 0,
+              ),
+              (
+                id: '05',
+                acronym: 'CAME',
+                name:
+                    'Ci\u00eancia e Aplica\u00e7\u00e3o dos Materiais El\u00e9tricos',
+                theory: 0,
+                practice: 0,
+                ead: 2,
+                extension: 0,
+              ),
+              (
+                id: '06',
+                acronym: 'SDA',
+                name: 'Sistemas Digitais para Automa\u00e7\u00e3o',
+                theory: 2,
+                practice: 2,
+                ead: 0,
+                extension: 0,
+              ),
+            ];
+
+        bool belongsToAbi(HorarioDisciplina entry) => entry.coursePeriods.any(
+          (item) => item.program == abiProgramId && item.period == 1,
+        );
+        bool sameDiscipline(HorarioDisciplina entry, String name) =>
+            entry.name.trim().toLowerCase() == name.toLowerCase();
+
+        for (final subject in abiSubjects) {
+          final existingIndex = rows.indexWhere(
+            (entry) => sameDiscipline(entry, subject.name),
+          );
+          if (existingIndex >= 0) {
+            final existing = rows[existingIndex];
+            if (!belongsToAbi(existing)) {
+              rows[existingIndex] = existing.copyWith(
+                coursePeriods: [
+                  ...existing.coursePeriods,
+                  CursoPeriodo(program: abiProgramId, period: 1),
+                ],
+              );
+              entriesChanged = true;
+            }
+            continue;
+          }
+          rows.add(
+            HorarioDisciplina(
+              id: 'abi_${activeTerm.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '_')}_${subject.id}',
+              code: '',
+              acronym: subject.acronym,
+              name: subject.name,
+              className: '',
+              teacher: '',
+              room: '',
+              theoryHours: subject.theory,
+              practiceHours: subject.practice,
+              eadHours: subject.ead,
+              extensionHours: subject.extension,
+              coursePeriods: [CursoPeriodo(program: abiProgramId, period: 1)],
+              slots: const [],
+            ),
+          );
+          entriesChanged = true;
+        }
+
+        final expressionIndex = rows.indexWhere(
+          (entry) =>
+              entry.acronym.trim().toUpperCase() == 'EXPG' ||
+              entry.name.trim().toLowerCase().startsWith('express'),
+        );
+        if (expressionIndex >= 0 && !belongsToAbi(rows[expressionIndex])) {
+          final expression = rows[expressionIndex];
+          rows[expressionIndex] = expression.copyWith(
+            coursePeriods: [
+              ...expression.coursePeriods,
+              CursoPeriodo(program: abiProgramId, period: 1),
+            ],
+          );
+          entriesChanged = true;
+        }
+
+        await prefs.setString(
+          _programsKey,
+          jsonEncode({
+            for (final entry in usablePrograms.entries)
+              '${entry.key}': entry.value,
+          }),
+        );
+        if (entriesChanged) await _store.save(rows, term: activeTerm);
+        await prefs.setBool(abiMigrationKey, true);
+      }
+      final savedProgram =
+          prefs.getInt(_termScopedKey(_programKey, activeTerm)) ?? _program;
       if (mounted) {
         setState(() {
           _entries = rows;
+          _teacherRoster = teacherRoster;
           _terms = terms;
           _term = activeTerm;
           _programs = usablePrograms;
@@ -191,8 +390,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           _program = usablePrograms.containsKey(savedProgram)
               ? savedProgram
               : usablePrograms.keys.first;
-          _period = (prefs.getInt(_periodKey) ?? _period).clamp(1, 11).toInt();
-          _view = (prefs.getInt(_viewKey) ?? _view).clamp(0, 2).toInt();
+          _period =
+              (prefs.getInt(_termScopedKey(_periodKey, activeTerm)) ?? _period)
+                  .clamp(1, 11)
+                  .toInt();
+          _view = (prefs.getInt(_termScopedKey(_viewKey, activeTerm)) ?? _view)
+              .clamp(0, 2)
+              .toInt();
           _teacher = savedTeacher;
           for (final key in const [
             'curso_y',
@@ -200,7 +404,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             'docente_y',
             'docente_x',
           ]) {
-            _scrollOffsets[key] = prefs.getDouble('$_scrollPrefix$key') ?? 0;
+            _scrollOffsets[key] =
+                prefs.getDouble(
+                  _termScopedKey('$_scrollPrefix$key', activeTerm),
+                ) ??
+                0;
           }
           _loading = false;
         });
@@ -393,13 +601,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         ),
       )
       .toList();
-  List<String> get _teachers =>
-      _entries
-          .expand((entry) => entry.teacherNames)
-          .where((e) => e.isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  List<String> get _teachers => {
+    ..._teacherRoster,
+    ..._entries
+        .expand((entry) => entry.teacherNames)
+        .where((e) => e.isNotEmpty),
+  }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   Map<String, List<HorarioDisciplina>> _schedule({
     int? program,
     int? period,
@@ -407,6 +614,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   }) {
     final result = <String, List<HorarioDisciplina>>{};
     for (final entry in _entries) {
+      if (entry.modality == 'ead') continue;
       final include = teacher != null
           ? entry.teacherNames.contains(teacher)
           : entry.coursePeriods.any(
@@ -502,6 +710,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               tooltip: 'Exportar grade em CSV',
               icon: const Icon(Icons.table_chart_rounded),
             ),
+            const SizedBox(width: 8),
+            const ThemeSelector(compact: true),
           ],
         ),
         if (compact)
@@ -695,6 +905,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       if (copyChoice == null || !mounted) return;
       if (copyChoice.sourceTerm != null) {
         await _copyTermData(copyChoice.sourceTerm!, term);
+      } else {
+        await _clearTermData(term);
       }
       final updatedTerms = [..._terms, term];
       final prefs = await SharedPreferences.getInstance();
@@ -705,19 +917,83 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   }
 
   Future<void> _copyTermData(String source, String destination) async {
-    final entries = await _store.load(term: source);
+    if (source == destination) return;
+    await _clearTermData(destination);
+    final sourceEntries = await _store.load(term: source);
+    final entries = sourceEntries
+        .map(
+          (entry) => HorarioDisciplina.fromJson(
+            Map<String, dynamic>.from(entry.toJson()),
+          ),
+        )
+        .toList();
     await _store.save(entries, term: destination);
     final prefs = await SharedPreferences.getInstance();
-    for (final key in const [
-      _distributionKey,
-      _hiddenDistributionTeachersKey,
+    final sourceDistribution = prefs.getString(
+      _termScopedKey(_distributionKey, source),
+    );
+    var distributionTeachers = <String>{};
+    if (sourceDistribution != null) {
+      final decoded = (jsonDecode(sourceDistribution) as List)
+          .map(
+            (item) => _TeacherDistributionRecord.fromJson(
+              Map<String, dynamic>.from(item as Map),
+            ),
+          )
+          .toList();
+      distributionTeachers = decoded
+          .map((record) => record.teacher.trim())
+          .where((name) => name.isNotEmpty)
+          .toSet();
+      await prefs.setString(
+        _termScopedKey(_distributionKey, destination),
+        jsonEncode(decoded.map((record) => record.toJson()).toList()),
+      );
+    }
+    final sourceRoster = prefs.getStringList(
+      _termScopedKey(_teacherRosterKey, source),
+    );
+    final roster = (sourceRoster ?? <String>[]).toSet()
+      ..addAll(entries.expand((entry) => entry.teacherNames))
+      ..addAll(distributionTeachers);
+    await prefs.setStringList(
+      _termScopedKey(_teacherRosterKey, destination),
+      roster.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+    );
+    final sourceHidden = prefs.getStringList(
+      _termScopedKey(_hiddenDistributionTeachersKey, source),
+    );
+    if (sourceHidden != null) {
+      await prefs.setStringList(
+        _termScopedKey(_hiddenDistributionTeachersKey, destination),
+        List<String>.from(sourceHidden),
+      );
+    }
+  }
+
+  Future<void> _clearTermData(String term) async {
+    await _store.clear(term: term);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_termScopedKey(_distributionKey, term));
+    await prefs.remove(_termScopedKey(_hiddenDistributionTeachersKey, term));
+    await prefs.setStringList(
+      _termScopedKey(_teacherRosterKey, term),
+      const [],
+    );
+    for (final key in [
+      _teacherKey,
+      _programKey,
+      _periodKey,
+      _viewKey,
+      ...const [
+        'curso_y',
+        'curso_x',
+        'docente_y',
+        'docente_x',
+      ].map((key) => '$_scrollPrefix$key'),
     ]) {
-      final value = prefs.get(_termScopedKey(key, source));
-      if (value is String) {
-        await prefs.setString(_termScopedKey(key, destination), value);
-      } else if (value is List<String>) {
-        await prefs.setStringList(_termScopedKey(key, destination), value);
-      }
+      await prefs.remove(_termScopedKey(key, term));
     }
   }
 
@@ -747,22 +1023,61 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               )
               ?.toSet() ??
           <String>{};
-      final names = rows.expand((entry) => entry.teacherNames).toSet();
-      final savedTeacher = prefs.getString(_teacherKey);
+      final inferredRoster = <String>{
+        ...rows.expand((entry) => entry.teacherNames),
+        ...distribution.map((record) => record.teacher.trim()),
+      }..removeWhere((name) => name.isEmpty);
+      final savedRoster = prefs.getStringList(
+        _termScopedKey(_teacherRosterKey, term),
+      );
+      final roster = (savedRoster ?? inferredRoster.toList()).toSet().toList()
+        ..addAll(inferredRoster)
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      if (savedRoster == null || roster.length != savedRoster.length) {
+        await prefs.setStringList(
+          _termScopedKey(_teacherRosterKey, term),
+          roster,
+        );
+      }
+      final names = <String>{
+        ...roster,
+        ...rows.expand((entry) => entry.teacherNames),
+      };
+      final savedTeacher = prefs.getString(_termScopedKey(_teacherKey, term));
+      final savedProgram =
+          prefs.getInt(_termScopedKey(_programKey, term)) ?? _program;
+      final savedPeriod = prefs.getInt(_termScopedKey(_periodKey, term)) ?? 1;
+      final savedView = prefs.getInt(_termScopedKey(_viewKey, term)) ?? _view;
+      final offsets = <String, double>{
+        for (final key in const [
+          'curso_y',
+          'curso_x',
+          'docente_y',
+          'docente_x',
+        ])
+          key: prefs.getDouble(_termScopedKey('$_scrollPrefix$key', term)) ?? 0,
+      };
       if (!mounted) return;
       setState(() {
         _term = term;
         _entries = rows;
+        _teacherRoster = roster;
         _distributionRecords = distribution;
         _hiddenDistributionTeachers = hidden;
-        _period = 1;
+        _program = _programs.containsKey(savedProgram)
+            ? savedProgram
+            : _programs.keys.first;
+        _period = savedPeriod.clamp(1, 11).toInt();
+        _view = savedView.clamp(0, 2).toInt();
         _teacher = names.contains(savedTeacher)
             ? savedTeacher
             : (names.isEmpty ? null : names.first);
+        _scrollOffsets
+          ..clear()
+          ..addAll(offsets);
         _loading = false;
       });
-      await prefs.setInt(_periodKey, 1);
-      if (_teacher != null) await prefs.setString(_teacherKey, _teacher!);
+      await _saveViewSelection();
       _restoreCurrentTableScroll();
     } catch (error) {
       if (mounted) setState(() => _loading = false);
@@ -818,27 +1133,16 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                     children: [
                       SizedBox(
                         width: compact ? 280 : 400,
-                        child: DropdownButtonFormField<int>(
-                          initialValue: _program,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Curso',
-                            prefixIcon: Icon(Icons.school_rounded),
-                          ),
-                          items: _programs.entries
-                              .map(
-                                (entry) => DropdownMenuItem(
-                                  value: entry.key,
-                                  child: Text(
-                                    entry.value,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (value) {
+                        child: _SearchableSelect<int>(
+                          key: ValueKey('curso-$_program'),
+                          value: _program,
+                          options: _programs.keys.toList(),
+                          label: 'Curso',
+                          optionLabel: (program) => _programs[program] ?? '',
+                          icon: Icons.school_rounded,
+                          onSelected: (value) {
                             setState(() {
-                              _program = value ?? _programs.keys.first;
+                              _program = value;
                               _period = 1;
                             });
                             _saveViewSelection();
@@ -943,22 +1247,14 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               children: [
                 SizedBox(
                   width: compact ? 300 : 440,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _teacher,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Docente',
-                      prefixIcon: Icon(Icons.person_rounded),
-                    ),
-                    items: teachers
-                        .map(
-                          (name) => DropdownMenuItem(
-                            value: name,
-                            child: Text(name, overflow: TextOverflow.ellipsis),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
+                  child: _SearchableSelect<String>(
+                    key: ValueKey('docente-$_teacher'),
+                    value: _teacher!,
+                    options: teachers,
+                    label: 'Docente',
+                    optionLabel: (name) => name,
+                    icon: Icons.person_rounded,
+                    onSelected: (value) {
                       setState(() => _teacher = value);
                       _saveViewSelection();
                       _restoreCurrentTableScroll();
@@ -967,9 +1263,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
-                  onPressed: _busy ? null : _generateTeachers,
-                  icon: const Icon(Icons.auto_awesome_rounded),
-                  label: const Text('Gerar grades de docentes'),
+                  onPressed: _busy ? null : _editTeachers,
+                  icon: const Icon(Icons.manage_accounts_rounded),
+                  label: const Text('Editar docentes'),
                 ),
               ],
             ),
@@ -1198,22 +1494,31 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               Expanded(
                 child: Scrollbar(
                   child: SingleChildScrollView(
-                    child: Scrollbar(
-                      controller: _distributionHorizontalScroll,
-                      thumbVisibility: true,
-                      notificationPredicate: (notification) =>
-                          notification.metrics.axis == Axis.horizontal,
-                      child: SingleChildScrollView(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => Scrollbar(
                         controller: _distributionHorizontalScroll,
-                        scrollDirection: Axis.horizontal,
-                        child: _distributionTable(
-                          summaries,
-                          totalTheory,
-                          totalPractice,
-                          totalEad,
-                          totalExtension,
-                          totalHours,
-                          totalClasses,
+                        thumbVisibility: true,
+                        notificationPredicate: (notification) =>
+                            notification.metrics.axis == Axis.horizontal,
+                        child: SingleChildScrollView(
+                          controller: _distributionHorizontalScroll,
+                          scrollDirection: Axis.horizontal,
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minWidth: constraints.maxWidth,
+                            ),
+                            child: Center(
+                              child: _distributionTable(
+                                summaries,
+                                totalTheory,
+                                totalPractice,
+                                totalEad,
+                                totalExtension,
+                                totalHours,
+                                totalClasses,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1302,6 +1607,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               _distributionCell(
                 summaries[index].disciplines.join(', '),
                 tooltip: summaries[index].disciplines.join(', '),
+                onTap: () => _editTeacherDisciplines(summaries[index].name),
               ),
               _distributionCell(
                 '${summaries[index].theoryHours}',
@@ -1368,6 +1674,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     bool numeric = false,
     bool bold = false,
     String? tooltip,
+    VoidCallback? onTap,
   }) {
     final text = Text(
       value,
@@ -1383,11 +1690,231 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         horizontal: header ? 10 : 11,
         vertical: header ? 10 : 7,
       ),
-      child: Align(
-        alignment: numeric ? Alignment.center : Alignment.centerLeft,
-        child: tooltip == null ? text : Tooltip(message: tooltip, child: text),
+      child: InkWell(
+        onTap: onTap,
+        child: Align(
+          alignment: numeric ? Alignment.center : Alignment.centerLeft,
+          child: tooltip == null
+              ? text
+              : Tooltip(message: tooltip, child: text),
+        ),
       ),
     );
+  }
+
+  Future<void> _editTeacherDisciplines(String teacher) async {
+    final candidates = [..._entries]
+      ..sort(
+        (a, b) => _classLabel(
+          a,
+        ).toLowerCase().compareTo(_classLabel(b).toLowerCase()),
+      );
+    final searchController = TextEditingController();
+    final initiallySelected = candidates
+        .where((entry) => entry.teacherNames.contains(teacher))
+        .map((entry) => entry.id)
+        .toSet();
+    final selected = Set<String>.from(initiallySelected);
+    var showOnlySelected = false;
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final query = searchController.text.trim().toLowerCase();
+          final visible = candidates.where((entry) {
+            if (showOnlySelected && !selected.contains(entry.id)) return false;
+            if (query.isEmpty) return true;
+            return entry.acronym.toLowerCase().contains(query) ||
+                entry.name.toLowerCase().contains(query) ||
+                entry.code.toLowerCase().contains(query) ||
+                entry.className.toLowerCase().contains(query);
+          }).toList();
+          return AlertDialog(
+            title: Text('Disciplinas de $teacher'),
+            content: SizedBox(
+              width: 620,
+              height: 560,
+              child: Column(
+                children: [
+                  TextField(
+                    controller: searchController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Buscar disciplina por sigla, nome ou turma',
+                      prefixIcon: Icon(Icons.search_rounded),
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${selected.length} disciplina(s) selecionada(s)',
+                          style: TextStyle(color: AppTheme.textSecondary),
+                        ),
+                      ),
+                      SegmentedButton<bool>(
+                        showSelectedIcon: false,
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            label: Text('Todas'),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            label: Text('Selecionadas'),
+                          ),
+                        ],
+                        selected: {showOnlySelected},
+                        onSelectionChanged: (value) => setDialogState(
+                          () => showOnlySelected = value.first,
+                        ),
+                        style: const ButtonStyle(
+                          visualDensity: VisualDensity.compact,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? Center(
+                            child: Text(
+                              showOnlySelected && selected.isEmpty
+                                  ? 'Nenhuma disciplina selecionada para este professor.'
+                                  : 'Nenhuma disciplina encontrada.',
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: visible.length,
+                            itemBuilder: (context, index) {
+                              final entry = visible[index];
+                              final periods = entry.coursePeriods
+                                  .map(
+                                    (item) =>
+                                        '${_programs[item.program] ?? 'Curso'} · ${item.period == 11 ? 'Optativas' : '${item.period}º período'}',
+                                  )
+                                  .join(' | ');
+                              return CheckboxListTile(
+                                dense: true,
+                                value: selected.contains(entry.id),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                title: Text(
+                                  '${_classLabel(entry)} · ${entry.name}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  '${entry.code}${periods.isEmpty ? '' : ' · $periods'}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onChanged: (checked) => setDialogState(() {
+                                  if (checked == true) {
+                                    selected.add(entry.id);
+                                  } else {
+                                    selected.remove(entry.id);
+                                  }
+                                }),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, selected),
+                child: const Text('Salvar disciplinas'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    searchController.dispose();
+    if (result == null || !mounted) return;
+
+    final labels = {
+      for (final entry in candidates) entry.id: _classLabel(entry),
+    };
+    final hadImportedRecords = _distributionRecords.isNotEmpty;
+    setState(() {
+      _entries = _entries.map((entry) {
+        if (!labels.containsKey(entry.id)) return entry;
+        final names = entry.teacherNames
+            .where((name) => name.toLowerCase() != teacher.toLowerCase())
+            .toList();
+        if (result.contains(entry.id)) names.add(teacher);
+        return entry.copyWith(
+          teacher: names.firstOrNull ?? '',
+          coTeachers: names.skip(1).toList(),
+        );
+      }).toList();
+
+      if (_distributionRecords.isNotEmpty) {
+        final oldRecords = _distributionRecords;
+        final candidateLabels = labels.values.toSet();
+        final kept = oldRecords.where((record) {
+          return record.teacher.toLowerCase() != teacher.toLowerCase() ||
+              !candidateLabels.contains(record.discipline);
+        }).toList();
+        for (final entry in candidates.where(
+          (item) => result.contains(item.id),
+        )) {
+          final label = _classLabel(entry);
+          for (final coursePeriod in entry.coursePeriods) {
+            final period = coursePeriod.period == 11
+                ? 'Optativas'
+                : '${coursePeriod.period}º';
+            final prior = oldRecords
+                .where(
+                  (record) =>
+                      record.teacher.toLowerCase() == teacher.toLowerCase() &&
+                      record.discipline == label &&
+                      record.period.replaceAll('º', '') ==
+                          period.replaceAll('º', ''),
+                )
+                .firstOrNull;
+            kept.add(
+              _TeacherDistributionRecord(
+                teacher: teacher,
+                discipline: label,
+                period: period,
+                theoryHours: entry.theoryHours,
+                practiceHours: entry.practiceHours,
+                eadHours: entry.eadHours != 0
+                    ? entry.eadHours
+                    : prior?.eadHours ?? 0,
+                extensionHours: entry.extensionHours != 0
+                    ? entry.extensionHours
+                    : prior?.extensionHours ?? 0,
+              ),
+            );
+          }
+        }
+        _distributionRecords = kept;
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    if (hadImportedRecords) {
+      await prefs.setString(
+        _termScopedKey(_distributionKey, _term),
+        jsonEncode(
+          _distributionRecords.map((record) => record.toJson()).toList(),
+        ),
+      );
+    }
+    await _persist();
   }
 
   List<_TeacherDistribution> _summariesFromSchedule() => _teachers.map((
@@ -1402,14 +1929,34 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             .toSet()
             .toList()
           ..sort();
+    int hours(HorarioDisciplina entry, String modality) {
+      if (entry.modality != 'legacy' && entry.modality != modality) return 0;
+      return switch (modality) {
+        'theory' => entry.theoryHours,
+        'practice' => entry.practiceHours,
+        'ead' => entry.eadHours,
+        'extension' => entry.extensionHours,
+        _ => 0,
+      };
+    }
+
     return _TeacherDistribution(
       name: teacher,
       disciplines: entries.map(_classLabel).toList(),
       classCount: entries.length,
-      theoryHours: entries.fold(0, (sum, entry) => sum + entry.theoryHours),
-      practiceHours: entries.fold(0, (sum, entry) => sum + entry.practiceHours),
-      eadHours: 0,
-      extensionHours: 0,
+      theoryHours: entries.fold(
+        0,
+        (sum, entry) => sum + hours(entry, 'theory'),
+      ),
+      practiceHours: entries.fold(
+        0,
+        (sum, entry) => sum + hours(entry, 'practice'),
+      ),
+      eadHours: entries.fold(0, (sum, entry) => sum + hours(entry, 'ead')),
+      extensionHours: entries.fold(
+        0,
+        (sum, entry) => sum + hours(entry, 'extension'),
+      ),
       periods: periods
           .map((period) => period == 11 ? 'Optativas' : '$periodº')
           .toList(),
@@ -1468,10 +2015,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     ];
   }
 
-  String _classLabel(HorarioDisciplina entry) {
-    final label = entry.acronym.trim().isEmpty ? entry.name : entry.acronym;
-    return '${label.trim()}${entry.className.trim().isEmpty ? '' : ' ${entry.className.trim()}'}';
-  }
+  String _classLabel(HorarioDisciplina entry) => entry.timetableLabel;
 
   Widget _timetable(
     Map<String, List<HorarioDisciplina>> schedule,
@@ -1597,11 +2141,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 ],
                 if (_view == 0) ...[
                   Text(
-                    '${_periodEntries.length} disciplinas neste per\u00edodo',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11,
-                    ),
+                    '${_periodEntries.map((entry) => entry.subjectId).toSet().length} disciplinas neste per\u00edodo',
+                    style: TextStyle(color: Colors.black, fontSize: 11),
                   ),
                   const SizedBox(width: 8),
                 ],
@@ -1706,12 +2247,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     double cellWidth,
   ) {
     if (entries.length < 2) return const [0, 1];
-    final labels = entries
-        .map(
-          (entry) =>
-              '${entry.acronym}${entry.className.isNotEmpty ? ' · ${entry.className}' : ''}',
-        )
-        .toList();
+    final labels = entries.map((entry) => entry.timetableLabel).toList();
     final textStyle = TextStyle(
       color: AppTheme.textPrimary,
       fontSize: 13,
@@ -1766,12 +2302,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     final unique = <String, HorarioDisciplina>{
       for (final entry in entries) '${entry.id}:${entry.className}': entry,
     }.values.toList();
-    final labels = unique
-        .map(
-          (entry) =>
-              '${entry.acronym}${entry.className.isNotEmpty ? ' \u00b7 ${entry.className}' : ''}',
-        )
-        .toList();
+    final labels = unique.map((entry) => entry.timetableLabel).toList();
     final colorOpacity = AppTheme.isLight ? 70 : 100;
     final colors = unique
         .map(
@@ -1906,7 +2437,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           }).toList();
           return AlertDialog(
             title: Text(
-              '${horarioDias[weekday - 1]} \u00b7 ${horarioFaixas[slot - 1]}',
+              '${horarioDias[weekday - 1]} ? ${horarioFaixas[slot - 1]}',
             ),
             content: SizedBox(
               width: 560,
@@ -1969,7 +2500,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                                 controlAffinity:
                                     ListTileControlAffinity.leading,
                                 title: Text(
-                                  '$label \u00b7 Turma ${entry.className}',
+                                  '$label ? Turma ${entry.className}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1977,7 +2508,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                                   [
                                     entry.name,
                                     ...entry.teacherNames,
-                                  ].join(' \u00b7 '),
+                                  ].join(' ? '),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -2065,91 +2596,169 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     _message('Hor\u00e1rio atualizado e salvo na base de dados.');
   }
 
-  Future<void> _generateTeachers() async {
-    final teachers = _teachers;
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Grades por docente'),
-        content: SizedBox(
-          width: 560,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: teachers.length,
-            itemBuilder: (context, index) {
-              final teacher = teachers[index];
-              final courses = _entries
-                  .where((entry) => entry.teacherNames.contains(teacher))
-                  .toList();
-              final blocks = courses.fold<int>(
-                0,
-                (sum, entry) => sum + entry.slots.length,
-              );
-              return ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: AppTheme.accent.withAlpha(25),
-                  child: Icon(
-                    Icons.person_rounded,
-                    color: AppTheme.accent,
-                    size: 19,
-                  ),
-                ),
-                title: Text(teacher),
-                subtitle: Text(
-                  '${courses.length} disciplinas · $blocks blocos semanais',
-                ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pop(dialogContext, teacher),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Fechar'),
-          ),
-        ],
+  Future<void> _editTeachers() async {
+    final result = await Navigator.of(context).push<_TeacherRosterResult>(
+      MaterialPageRoute(
+        builder: (_) => _TeacherRosterPage(teachers: _teachers),
       ),
     );
-    if (selected != null) {
-      setState(() {
-        _teacher = selected;
-        _view = 1;
-      });
-      _saveViewSelection();
-      _restoreCurrentTableScroll();
+    if (result == null) return;
+    final renamed = result.renamed;
+    final hadImportedDistribution = _distributionRecords.isNotEmpty;
+    setState(() {
+      _teacherRoster = result.teachers;
+      _entries = _entries.map((entry) {
+        String replace(String name) {
+          var current = name;
+          final visited = <String>{};
+          while (renamed.containsKey(current) && visited.add(current)) {
+            current = renamed[current]!;
+            if (current.isEmpty) break;
+          }
+          return current;
+        }
+
+        final assigned = entry.teacherNames
+            .map(replace)
+            .where((name) => result.teachers.contains(name))
+            .toList();
+        return entry.copyWith(
+          teacher: assigned.firstOrNull ?? '',
+          coTeachers: assigned.skip(1).toList(),
+        );
+      }).toList();
+      _distributionRecords = _distributionRecords
+          .map((record) {
+            var teacher = record.teacher;
+            final visited = <String>{};
+            while (renamed.containsKey(teacher) && visited.add(teacher)) {
+              teacher = renamed[teacher]!;
+              if (teacher.isEmpty) return null;
+            }
+            if (!result.teachers.contains(teacher)) return null;
+            return _TeacherDistributionRecord(
+              teacher: teacher,
+              discipline: record.discipline,
+              period: record.period,
+              theoryHours: record.theoryHours,
+              practiceHours: record.practiceHours,
+              eadHours: record.eadHours,
+              extensionHours: record.extensionHours,
+            );
+          })
+          .whereType<_TeacherDistributionRecord>()
+          .toList();
+      if (_teacher != null) {
+        var selected = _teacher!;
+        final visited = <String>{};
+        while (renamed.containsKey(selected) && visited.add(selected)) {
+          selected = renamed[selected]!;
+          if (selected.isEmpty) break;
+        }
+        _teacher = result.teachers.contains(selected)
+            ? selected
+            : result.teachers.firstOrNull;
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _termScopedKey(_teacherRosterKey, _term),
+      _teacherRoster,
+    );
+    if (hadImportedDistribution) {
+      await prefs.setString(
+        _termScopedKey(_distributionKey, _term),
+        jsonEncode(
+          _distributionRecords.map((record) => record.toJson()).toList(),
+        ),
+      );
     }
+    await _persist();
+    await _saveViewSelection();
   }
 
   Future<void> _editPeriod() async {
     final candidates = _periodEntries;
-    final result = await showDialog<_HorarioEditorResult>(
+    await showDialog<void>(
       context: context,
       builder: (_) => _HorarioEditorDialog(
         entries: candidates,
+        teachers: _teachers,
         selectedProgram: _program,
         selectedPeriod: _period,
+        onSave: _savePeriodEntries,
       ),
     );
-    if (result == null) return;
-    if (result.action == _HorarioEditorAction.delete) {
-      setState(() => _entries.removeWhere((entry) => entry.id == result.id));
-    } else {
-      final updated = result.entry!;
-      setState(() {
-        final index = _entries.indexWhere((entry) => entry.id == updated.id);
-        if (index < 0) {
-          _entries = [..._entries, updated];
-        } else {
-          _entries = [
-            for (var i = 0; i < _entries.length; i++)
-              if (i == index) updated else _entries[i],
-          ];
+  }
+
+  Future<void> _savePeriodEntries(
+    List<HorarioDisciplina> returnedEntries,
+  ) async {
+    final candidates = _periodEntries;
+    final currentIds = candidates.map((entry) => entry.id).toSet();
+    final returnedById = {for (final entry in returnedEntries) entry.id: entry};
+    final previousById = {for (final entry in candidates) entry.id: entry};
+    var distributionChanged = false;
+    setState(() {
+      final updated = <HorarioDisciplina>[];
+      for (final entry in _entries) {
+        if (!currentIds.contains(entry.id)) {
+          updated.add(entry);
+          continue;
         }
-      });
-    }
+        final returned = returnedById[entry.id];
+        if (returned != null) {
+          updated.add(returned);
+          continue;
+        }
+        final remainingPeriods = entry.coursePeriods
+            .where(
+              (item) => !(item.program == _program && item.period == _period),
+            )
+            .toList();
+        if (remainingPeriods.isNotEmpty) {
+          updated.add(entry.copyWith(coursePeriods: remainingPeriods));
+        }
+      }
+      for (final entry in returnedEntries) {
+        if (!currentIds.contains(entry.id)) updated.add(entry);
+        final previous = previousById[entry.id];
+        if (previous != null &&
+            (previous.theoryHours != entry.theoryHours ||
+                previous.practiceHours != entry.practiceHours ||
+                previous.eadHours != entry.eadHours ||
+                previous.extensionHours != entry.extensionHours)) {
+          distributionChanged = true;
+          final label = _classLabel(entry);
+          _distributionRecords = _distributionRecords.map((record) {
+            if (!entry.teacherNames.contains(record.teacher) ||
+                record.discipline != label) {
+              return record;
+            }
+            return _TeacherDistributionRecord(
+              teacher: record.teacher,
+              discipline: record.discipline,
+              period: record.period,
+              theoryHours: entry.theoryHours,
+              practiceHours: entry.practiceHours,
+              eadHours: entry.eadHours,
+              extensionHours: entry.extensionHours,
+            );
+          }).toList();
+        }
+      }
+      _entries = updated;
+    });
     await _persist();
+    if (distributionChanged && _distributionRecords.isNotEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        _termScopedKey(_distributionKey, _term),
+        jsonEncode(
+          _distributionRecords.map((record) => record.toJson()).toList(),
+        ),
+      );
+    }
   }
 
   Future<void> _importDatabase() async {
@@ -2389,12 +2998,25 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
     if (replace != true) return;
     final prefs = await SharedPreferences.getInstance();
+    final importedTeachers = imported
+        .map((item) => item.teacher.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet();
+    final updatedRoster = {..._teacherRoster, ...importedTeachers}.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     await prefs.setString(
       _termScopedKey(_distributionKey, _term),
       jsonEncode(imported.map((item) => item.toJson()).toList()),
     );
+    await prefs.setStringList(
+      _termScopedKey(_teacherRosterKey, _term),
+      updatedRoster,
+    );
     if (!mounted) return;
-    setState(() => _distributionRecords = imported);
+    setState(() {
+      _distributionRecords = imported;
+      _teacherRoster = updatedRoster;
+    });
     _message('Distribuição docente importada: ${imported.length} turmas.');
   }
 
@@ -2505,6 +3127,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     });
     final result = <String, List<HorarioDisciplina>>{};
     for (final entry in selectedEntries) {
+      if (entry.modality == 'ead') continue;
       for (final slot in entry.slots) {
         result.putIfAbsent(slot.key, () => []).add(entry);
       }
@@ -2515,8 +3138,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   String _exportTitle(List<int> periods) {
     final periodLabel = periods.map(_periodExportLabel).join(', ');
     return _view == 1
-        ? 'Grade: ${_teacher ?? 'Docente'} \u00b7 $periodLabel'
-        : '${_programs[_program]} \u00b7 $periodLabel';
+        ? 'Grade: ${_teacher ?? 'Docente'} ? $periodLabel'
+        : '${_programs[_program]} ? $periodLabel';
   }
 
   String _periodLabel(int period) =>
@@ -2572,10 +3195,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           horarioFaixas[slot - 1],
           for (var day = 1; day <= 5; day++)
             (schedule['$day:$slot'] ?? const [])
-                .map(
-                  (entry) =>
-                      '${entry.acronym}${entry.className.isEmpty ? '' : ' - ${entry.className}'}',
-                )
+                .map((entry) => entry.timetableLabel)
                 .join(' | '),
         ]);
       }
@@ -2790,12 +3410,16 @@ class _TeacherDistributionRecord {
 class _HorarioEditorDialog extends StatefulWidget {
   const _HorarioEditorDialog({
     required this.entries,
+    required this.teachers,
     required this.selectedProgram,
     required this.selectedPeriod,
+    required this.onSave,
   });
   final List<HorarioDisciplina> entries;
+  final List<String> teachers;
   final int selectedProgram;
   final int selectedPeriod;
+  final Future<void> Function(List<HorarioDisciplina>) onSave;
   @override
   State<_HorarioEditorDialog> createState() => _HorarioEditorDialogState();
 }
@@ -2809,45 +3433,68 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
   final _room = TextEditingController();
   final _theoryHours = TextEditingController();
   final _practiceHours = TextEditingController();
+  final _eadHours = TextEditingController();
+  final _extensionHours = TextEditingController();
   final Set<String> _slots = {};
+  final List<String> _selectedTeachers = [];
+  late final List<HorarioDisciplina> _entries = [...widget.entries];
   String? _selectedId;
   String? _newEntryId;
+  HorarioDisciplina? _newEntryTemplate;
+  String _selectedModality = 'theory';
+  bool _addingTurma = false;
   String? get _activeNewEntryId => _newEntryId;
   bool get _creating => _activeNewEntryId != null;
   HorarioDisciplina? get _selected => [
-    ...widget.entries,
+    ..._entries,
     if (_creating) _blank(),
   ].where((e) => e.id == _selectedId).firstOrNull;
 
-  HorarioDisciplina _blank() => HorarioDisciplina(
-    id: _activeNewEntryId!,
-    code: '',
-    acronym: '',
-    name: '',
-    className: '',
-    teacher: '',
-    room: '',
-    theoryHours: 0,
-    practiceHours: 0,
-    coursePeriods: [
-      CursoPeriodo(
-        program: widget.selectedProgram,
-        period: widget.selectedPeriod,
-      ),
-    ],
-    slots: const [],
-  );
+  HorarioDisciplina _blank() =>
+      _newEntryTemplate?.copyWith(
+        id: _activeNewEntryId!,
+        subjectId: _newEntryTemplate!.subjectId,
+        slots: const [],
+        coursePeriods: [
+          CursoPeriodo(
+            program: widget.selectedProgram,
+            period: widget.selectedPeriod,
+          ),
+        ],
+      ) ??
+      HorarioDisciplina(
+        id: _activeNewEntryId!,
+        subjectId: _activeNewEntryId!,
+        modality: _selectedModality,
+        code: '',
+        acronym: '',
+        name: '',
+        className: '',
+        teacher: '',
+        room: '',
+        theoryHours: 0,
+        practiceHours: 0,
+        eadHours: 0,
+        extensionHours: 0,
+        coursePeriods: [
+          CursoPeriodo(
+            program: widget.selectedProgram,
+            period: widget.selectedPeriod,
+          ),
+        ],
+        slots: const [],
+      );
 
   @override
   void initState() {
     super.initState();
-    if (_creating || widget.entries.isEmpty) {
-      _newEntryId ??= const Uuid().v4();
+    if (_entries.isEmpty) {
+      _newEntryId = const Uuid().v4();
       _selectedId = _activeNewEntryId;
       _select(_blank());
-    } else if (widget.entries.isNotEmpty) {
-      _selectedId = widget.entries.first.id;
-      _select(widget.entries.first);
+    } else {
+      _selectedId = _entries.first.id;
+      _select(_entries.first);
     }
   }
 
@@ -2862,65 +3509,701 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       _room,
       _theoryHours,
       _practiceHours,
+      _eadHours,
+      _extensionHours,
     ]) {
       controller.dispose();
     }
     super.dispose();
   }
 
+  String _modalityName(String modality) => switch (modality) {
+    'theory' => 'Te\u00f3rica',
+    'practice' => 'Pr\u00e1tica',
+    'ead' => 'EaD',
+    'extension' => 'Extens\u00e3o',
+    _ => 'Cadastro anterior',
+  };
+
+  List<String> _allTeachers() =>
+      {
+          ...widget.teachers,
+          ..._entries.expand((entry) => entry.teacherNames),
+          ..._selectedTeachers,
+        }.where((name) => name.trim().isNotEmpty).toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+  Future<void> _openTeacherPicker() async {
+    final search = TextEditingController();
+    final selected = Set<String>.from(_selectedTeachers);
+    final result = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final query = search.text.trim().toLowerCase();
+          final teachers = _allTeachers()
+              .where((name) => name.toLowerCase().contains(query))
+              .toList();
+          return AlertDialog(
+            title: const Text('Selecionar docentes'),
+            content: SizedBox(
+              width: 540,
+              height: 520,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: search,
+                    autofocus: true,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'Filtrar docentes pelo nome',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text('${selected.length} docente(s) selecionado(s)'),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: teachers.isEmpty
+                        ? const Center(
+                            child: Text('Nenhum docente encontrado.'),
+                          )
+                        : ListView.builder(
+                            itemCount: teachers.length,
+                            itemBuilder: (context, index) {
+                              final name = teachers[index];
+                              return CheckboxListTile(
+                                value: selected.contains(name),
+                                title: Text(name),
+                                dense: true,
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                onChanged: (checked) => setDialogState(() {
+                                  if (checked == true) {
+                                    selected.add(name);
+                                  } else {
+                                    selected.remove(name);
+                                  }
+                                }),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(dialogContext, selected.toList()),
+                child: const Text('Aplicar seleção'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    search.dispose();
+    if (result == null || !mounted) return;
+    setState(() {
+      _selectedTeachers
+        ..clear()
+        ..addAll(result);
+      _teacher.text = result.join(', ');
+    });
+  }
+
+  Widget _teacherPickerField() => TextField(
+    controller: _teacher,
+    readOnly: true,
+    maxLines: 1,
+    onTap: _openTeacherPicker,
+    decoration: const InputDecoration(
+      labelText: 'Docentes (selecione um ou mais)',
+      hintText: 'Clique para pesquisar e selecionar',
+      suffixIcon: Icon(Icons.arrow_drop_down_rounded),
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+    ),
+  );
+
   void _select(HorarioDisciplina entry) {
+    _selectedModality = entry.modality == 'legacy' ? 'legacy' : entry.modality;
     _code.text = entry.code;
     _acronym.text = entry.acronym;
     _name.text = entry.name;
     _class.text = entry.className;
-    _teacher.text = entry.teacherNames.join(', ');
+    _selectedTeachers
+      ..clear()
+      ..addAll(entry.teacherNames);
+    _teacher.text = _selectedTeachers.join(', ');
     _room.text = entry.room;
-    _theoryHours.text = '${entry.theoryHours}';
-    _practiceHours.text = '${entry.practiceHours}';
+    _theoryHours.text = '${_sharedHours(entry, 'theory')}';
+    _practiceHours.text = '${_sharedHours(entry, 'practice')}';
+    _eadHours.text = '${_sharedHours(entry, 'ead')}';
+    _extensionHours.text = '${_sharedHours(entry, 'extension')}';
     _slots
       ..clear()
       ..addAll(entry.slots.map((slot) => slot.key));
   }
 
+  String _disciplineGroupKey(HorarioDisciplina entry) {
+    final acronym = entry.acronym.trim().toLowerCase();
+    final name = entry.name.trim().toLowerCase();
+    return acronym.isEmpty || name.isEmpty
+        ? 'id:${entry.subjectId}'
+        : 'subject:$acronym|$name';
+  }
+
+  bool _sameDiscipline(HorarioDisciplina a, HorarioDisciplina b) =>
+      (a.subjectId.isNotEmpty && a.subjectId == b.subjectId) ||
+      _disciplineGroupKey(a) == _disciplineGroupKey(b);
+
+  int _sharedHours(HorarioDisciplina entry, String modality) {
+    final related = _entries.where(
+      (candidate) => _sameDiscipline(candidate, entry),
+    );
+    final values = <int>[
+      for (final candidate in related)
+        switch (modality) {
+          'theory' => candidate.theoryHours,
+          'practice' => candidate.practiceHours,
+          'ead' => candidate.eadHours,
+          'extension' => candidate.extensionHours,
+          _ => 0,
+        },
+      switch (modality) {
+        'theory' => entry.theoryHours,
+        'practice' => entry.practiceHours,
+        'ead' => entry.eadHours,
+        'extension' => entry.extensionHours,
+        _ => 0,
+      },
+    ];
+    return values.fold<int>(
+      0,
+      (maximum, value) => value > maximum ? value : maximum,
+    );
+  }
+
+  List<HorarioDisciplina> _disciplineOptions(HorarioDisciplina? current) {
+    final entries = [..._entries, if (_creating) _blank()];
+    final bySubject = <String, List<HorarioDisciplina>>{};
+    for (final entry in entries) {
+      bySubject.putIfAbsent(_disciplineGroupKey(entry), () => []).add(entry);
+    }
+    return bySubject.values.map((groups) {
+      if (current != null &&
+          _disciplineGroupKey(current) == _disciplineGroupKey(groups.first)) {
+        return current;
+      }
+      final sameMode = groups
+          .where((entry) => entry.modality == _selectedModality)
+          .toList();
+      final sameClass = sameMode
+          .where(
+            (entry) =>
+                entry.className.trim().toLowerCase() ==
+                current?.className.trim().toLowerCase(),
+          )
+          .firstOrNull;
+      return sameClass ?? sameMode.firstOrNull ?? groups.first;
+    }).toList()..sort((a, b) {
+      final acronym = a.acronym.toLowerCase().compareTo(
+        b.acronym.toLowerCase(),
+      );
+      return acronym != 0
+          ? acronym
+          : a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+  }
+
   void _switchEntry(String? id) {
     if (id == null) return;
-    final entry = [
-      ...widget.entries,
-      if (_creating) _blank(),
-    ].where((e) => e.id == id).firstOrNull;
+    if (id == _selectedId) return;
+    final entry = _entries.where((e) => e.id == id).firstOrNull;
     if (entry == null) return;
+    if (!_commitCurrent()) return;
     setState(() {
+      _addingTurma = false;
+      _newEntryId = null;
+      _newEntryTemplate = null;
       _selectedId = id;
       _select(entry);
     });
   }
 
-  void _startCreating() {
+  Future<({bool blank, HorarioDisciplina? template})?> _chooseTemplate() async {
+    final search = TextEditingController();
+    final result = await showDialog<({bool blank, HorarioDisciplina? template})>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final query = search.text.trim().toLowerCase();
+          final visible = _entries.where((entry) {
+            return query.isEmpty ||
+                entry.acronym.toLowerCase().contains(query) ||
+                entry.name.toLowerCase().contains(query);
+          }).toList();
+          return AlertDialog(
+            title: const Text('Nova disciplina'),
+            content: SizedBox(
+              width: 560,
+              height: 500,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Escolha uma disciplina para copiar ou comece em branco.',
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: search,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'Filtrar por sigla ou nome',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: AppTheme.primary.withAlpha(20),
+                      child: Icon(Icons.add_rounded, color: AppTheme.primary),
+                    ),
+                    title: const Text('Começar em branco'),
+                    subtitle: const Text(
+                      'Preencher todos os dados manualmente.',
+                    ),
+                    onTap: () => Navigator.pop(dialogContext, (
+                      blank: true,
+                      template: null,
+                    )),
+                  ),
+                  const Divider(height: 1),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? Center(
+                            child: Text(
+                              _entries.isEmpty
+                                  ? 'Ainda não há disciplinas para usar como modelo.'
+                                  : 'Nenhuma disciplina corresponde à busca.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppTheme.textSecondary),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: visible.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final entry = visible[index];
+                              return ListTile(
+                                title: Text(
+                                  '${entry.acronym} · ${entry.name}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                  'Turma ${entry.className}${entry.teacherNames.isEmpty ? '' : ' · ${entry.teacherNames.join(', ')}'}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onTap: () => Navigator.pop(dialogContext, (
+                                  blank: false,
+                                  template: entry,
+                                )),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    search.dispose();
+    return result;
+  }
+
+  Future<void> _startCreating() async {
+    if (!_commitCurrent()) return;
+    final choice = await _chooseTemplate();
+    if (choice == null || !mounted) return;
     setState(() {
+      _addingTurma = false;
       _newEntryId = const Uuid().v4();
+      _newEntryTemplate = choice.blank ? null : choice.template;
       _selectedId = _newEntryId;
       _select(_blank());
     });
   }
 
-  void _returnToExisting() {
-    if (widget.entries.isEmpty) return;
+  Future<void> _startAddingTurma() async {
+    final selected = _selected;
+    final selectedId = _selectedId;
+    if (selected == null || !_commitCurrent()) return;
+    final source = _entries
+        .where((entry) => entry.id == selectedId)
+        .firstOrNull;
+    if (source == null) return;
+    await _createTurmaDraft(source, _selectedModality);
+  }
+
+  Future<void> _createTurmaDraft(
+    HorarioDisciplina source,
+    String modality,
+  ) async {
+    if (modality == 'legacy') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selecione uma modalidade antes de adicionar a turma.'),
+        ),
+      );
+      return;
+    }
+    final classNameController = TextEditingController();
+    final className = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Nova turma'),
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            controller: classNameController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Identificação da turma',
+              hintText: 'Ex.: 1, A1, B ou U',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, classNameController.text.trim()),
+            child: const Text('Adicionar'),
+          ),
+        ],
+      ),
+    );
+    classNameController.dispose();
+    if (className == null || className.isEmpty || !mounted) return;
+    final duplicated = _entries.any(
+      (entry) =>
+          entry.subjectId == source.subjectId &&
+          entry.modality == modality &&
+          entry.className.trim().toLowerCase() == className.toLowerCase(),
+    );
+    if (duplicated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Essa turma já existe nesta modalidade.')),
+      );
+      return;
+    }
+    final template = source.copyWith(
+      modality: modality,
+      className: className,
+      room: '',
+      teacher: '',
+      coTeachers: const [],
+      slots: const [],
+    );
     setState(() {
-      _newEntryId = null;
-      _selectedId = widget.entries.first.id;
-      _select(widget.entries.first);
+      _addingTurma = true;
+      _selectedModality = modality;
+      _newEntryId = const Uuid().v4();
+      _newEntryTemplate = template;
+      _selectedId = _newEntryId;
+      _select(_blank());
     });
+  }
+
+  List<HorarioDisciplina> _classGroups(HorarioDisciplina? current) {
+    if (current == null) return const [];
+    final groups = _entries
+        .where(
+          (entry) =>
+              _sameDiscipline(entry, current) &&
+              entry.modality == _selectedModality,
+        )
+        .toList();
+    if (_creating && current.id == _activeNewEntryId) {
+      groups.add(_editedValue(current));
+    } else if (!_creating) {
+      final selectedIndex = groups.indexWhere(
+        (entry) => entry.id == current.id,
+      );
+      if (selectedIndex >= 0) groups[selectedIndex] = _editedValue(current);
+    }
+    groups.sort(
+      (a, b) => a.className.toLowerCase().compareTo(b.className.toLowerCase()),
+    );
+    return groups;
+  }
+
+  Future<void> _promptTurmaIdentification() async {
+    final current = _selected;
+    if (current == null) return;
+    final controller = TextEditingController(text: _class.text.trim());
+    final identification = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Identificação da turma'),
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Turma',
+              hintText: 'Ex.: 1, A1, B ou U',
+            ),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Confirmar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (identification == null || !mounted) return;
+    if (identification.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe a identificação da turma.')),
+      );
+      return;
+    }
+    final duplicate = _entries.any(
+      (entry) =>
+          entry.id != current.id &&
+          _disciplineGroupKey(entry) == _disciplineGroupKey(current) &&
+          entry.modality == _selectedModality &&
+          entry.className.trim().toLowerCase() == identification.toLowerCase(),
+    );
+    if (duplicate) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Essa turma já existe nesta modalidade da disciplina.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _class.text = identification);
+  }
+
+  Future<void> _changeModality(String value) async {
+    if (value == _selectedModality) return;
+    if (_creating) {
+      setState(() {
+        _selectedModality = value;
+        if (value == 'ead') _slots.clear();
+      });
+      return;
+    }
+    final selected = _selected;
+    final selectedId = _selectedId;
+    if (selected == null || !_commitCurrent()) return;
+    final source = _entries
+        .where((entry) => entry.id == selectedId)
+        .firstOrNull;
+    if (source == null) return;
+    final existing = _entries
+        .where(
+          (entry) =>
+              entry.subjectId == source.subjectId && entry.modality == value,
+        )
+        .firstOrNull;
+    if (existing != null) {
+      setState(() {
+        _addingTurma = false;
+        _newEntryId = null;
+        _newEntryTemplate = null;
+        _selectedId = existing.id;
+        _select(existing);
+      });
+      return;
+    }
+    await _createTurmaDraft(source, value);
+  }
+
+  HorarioDisciplina _editedValue(HorarioDisciplina source) => source.copyWith(
+    subjectId:
+        _creating &&
+            _newEntryTemplate != null &&
+            (_code.text.trim() != _newEntryTemplate!.code ||
+                _acronym.text.trim() != _newEntryTemplate!.acronym ||
+                _name.text.trim() != _newEntryTemplate!.name)
+        ? source.id
+        : source.subjectId,
+    modality: _selectedModality,
+    code: _code.text.trim(),
+    acronym: _acronym.text.trim(),
+    name: _name.text.trim(),
+    className: _class.text.trim(),
+    teacher: _teacherNamesFromField().firstOrNull ?? '',
+    coTeachers: _teacherNamesFromField().skip(1).toList(),
+    room: _room.text.trim(),
+    theoryHours: int.tryParse(_theoryHours.text.trim()) ?? 0,
+    practiceHours: int.tryParse(_practiceHours.text.trim()) ?? 0,
+    eadHours: int.tryParse(_eadHours.text.trim()) ?? 0,
+    extensionHours: int.tryParse(_extensionHours.text.trim()) ?? 0,
+    slots:
+        _slots.map((key) {
+          final parts = key.split(':');
+          return HorarioSlot(
+            weekday: int.parse(parts[0]),
+            slot: int.parse(parts[1]),
+          );
+        }).toList()..sort(
+          (a, b) => a.weekday != b.weekday
+              ? a.weekday.compareTo(b.weekday)
+              : a.slot.compareTo(b.slot),
+        ),
+  );
+
+  bool _commitCurrent() {
+    final selected = _selected;
+    if (selected == null) return true;
+    final hasName = _name.text.trim().isNotEmpty;
+    final hasAcronym = _acronym.text.trim().isNotEmpty;
+    if (!hasName || !hasAcronym) {
+      if (_creating && !hasName && !hasAcronym) {
+        _addingTurma = false;
+        _newEntryId = null;
+        _newEntryTemplate = null;
+        _selectedId = null;
+        return true;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe ao menos o nome e a sigla da disciplina.'),
+        ),
+      );
+      return false;
+    }
+    final requiresClassIdentification =
+        _selectedModality != 'legacy' && _selectedModality != 'ead';
+    if (requiresClassIdentification && _class.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Informe a identificação da turma, como A1, B ou U.'),
+        ),
+      );
+      return false;
+    }
+    final edited = _editedValue(selected);
+    final duplicateClass =
+        _selectedModality != 'legacy' &&
+        _class.text.trim().isNotEmpty &&
+        _entries.any(
+          (entry) =>
+              entry.id != edited.id &&
+              entry.subjectId == edited.subjectId &&
+              entry.modality == _selectedModality &&
+              entry.className.trim().toLowerCase() ==
+                  _class.text.trim().toLowerCase(),
+        );
+    if (duplicateClass) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Essa turma já existe nesta modalidade da disciplina.'),
+        ),
+      );
+      return false;
+    }
+    final independentCreation = _creating && !_addingTurma;
+    final index = _entries.indexWhere((entry) => entry.id == edited.id);
+    if (index < 0) {
+      _entries.add(edited);
+    } else {
+      _entries[index] = edited;
+    }
+    if (!independentCreation) {
+      for (var i = 0; i < _entries.length; i++) {
+        final entry = _entries[i];
+        if (_sameDiscipline(entry, edited)) {
+          _entries[i] = entry.copyWith(
+            code: edited.code,
+            acronym: edited.acronym,
+            name: edited.name,
+            theoryHours: edited.theoryHours,
+            practiceHours: edited.practiceHours,
+            eadHours: edited.eadHours,
+            extensionHours: edited.extensionHours,
+          );
+        }
+      }
+    }
+    _addingTurma = false;
+    _newEntryId = null;
+    _newEntryTemplate = null;
+    return true;
   }
 
   Future<void> _deleteSelected() async {
     final selected = _selected;
-    if (selected == null || _creating) return;
+    if (selected == null) return;
+    if (_creating) {
+      setState(() {
+        _addingTurma = false;
+        _newEntryId = null;
+        _newEntryTemplate = null;
+        final related = _entries
+            .where((entry) => entry.subjectId == selected.subjectId)
+            .toList();
+        if (related.isNotEmpty) {
+          final sameMode = related
+              .where((entry) => entry.modality == _selectedModality)
+              .firstOrNull;
+          final next = sameMode ?? related.first;
+          _selectedId = next.id;
+          _select(next);
+        } else if (_entries.isNotEmpty) {
+          _selectedId = _entries.first.id;
+          _select(_entries.first);
+        } else {
+          _selectedModality = 'theory';
+          _newEntryId = const Uuid().v4();
+          _selectedId = _newEntryId;
+          _select(_blank());
+        }
+      });
+      return;
+    }
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Apagar disciplina?'),
+        title: const Text('Remover turma?'),
         content: Text(
-          'A disciplina ${selected.acronym} - ${selected.name}, turma ${selected.className}, ser\u00e1 removida da grade deste per\u00edodo letivo.',
+          'A turma ${selected.acronym}-${selected.className} da modalidade ${_modalityName(selected.modality)} ser\u00e1 removida. As outras turmas da disciplina ser\u00e3o mantidas.',
         ),
         actions: [
           TextButton(
@@ -2936,13 +4219,95 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       ),
     );
     if (confirmed == true && mounted) {
-      Navigator.pop(context, _HorarioEditorResult.delete(selected.id));
+      setState(() {
+        _entries.removeWhere((entry) => entry.id == selected.id);
+        final related = _entries
+            .where((entry) => entry.subjectId == selected.subjectId)
+            .toList();
+        if (related.isNotEmpty) {
+          final sameMode = related
+              .where((entry) => entry.modality == _selectedModality)
+              .firstOrNull;
+          final next = sameMode ?? related.first;
+          _newEntryId = null;
+          _newEntryTemplate = null;
+          _selectedId = next.id;
+          _select(next);
+        } else if (_entries.isNotEmpty) {
+          _newEntryId = null;
+          _newEntryTemplate = null;
+          _selectedId = _entries.first.id;
+          _select(_entries.first);
+        } else {
+          _newEntryId = const Uuid().v4();
+          _newEntryTemplate = null;
+          _selectedId = _newEntryId;
+          _select(_blank());
+        }
+      });
     }
+  }
+
+  Future<void> _deleteDiscipline() async {
+    final selected = _selected;
+    if (selected == null || _creating) return;
+    final groupKey = _disciplineGroupKey(selected);
+    final groupCount = _entries
+        .where((entry) => _disciplineGroupKey(entry) == groupKey)
+        .length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover disciplina inteira?'),
+        content: Text(
+          'Serão removidas todas as modalidades e turmas de ${selected.acronym} · ${selected.name} ($groupCount turma(s)). Esta ação não pode ser desfeita.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: const Text('Remover disciplina'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _entries.removeWhere((entry) => _disciplineGroupKey(entry) == groupKey);
+      _newEntryId = null;
+      _newEntryTemplate = null;
+      _addingTurma = false;
+      if (_entries.isEmpty) {
+        _selectedModality = 'theory';
+        _newEntryId = const Uuid().v4();
+        _selectedId = _newEntryId;
+        _select(_blank());
+      } else {
+        final next = _entries.first;
+        _selectedId = next.id;
+        _select(next);
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final item = _selected;
+    final classGroups = _classGroups(item);
+    final disciplineOptions = _disciplineOptions(item);
+    final selectedDisciplineId = item == null
+        ? null
+        : disciplineOptions
+              .where(
+                (entry) =>
+                    _disciplineGroupKey(entry) == _disciplineGroupKey(item),
+              )
+              .firstOrNull
+              ?.id;
     return Dialog(
       child: SizedBox(
         width: 1000,
@@ -2959,7 +4324,11 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _creating ? 'Nova disciplina' : 'Editor de horários',
+                          _creating
+                              ? (_addingTurma
+                                    ? 'Nova turma da disciplina'
+                                    : 'Nova disciplina')
+                              : 'Editor de horários',
                           style: TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 22,
@@ -2984,72 +4353,74 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                 ],
               ),
               const SizedBox(height: 16),
-              if (!_creating && widget.entries.isNotEmpty)
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownMenu<String>(
-                        initialSelection: _selectedId,
-                        label: const Text('Disciplina do período'),
-                        expandedInsets: EdgeInsets.zero,
-                        enableFilter: true,
-                        requestFocusOnTap: true,
-                        menuHeight: 360,
-                        filterCallback: (entries, filter) {
-                          final query = filter.trim().toLowerCase();
-                          if (query.isEmpty) return entries;
-                          return entries
-                              .where(
-                                (entry) =>
-                                    entry.label.toLowerCase().contains(query),
-                              )
-                              .toList();
-                        },
-                        dropdownMenuEntries: widget.entries
-                            .map(
-                              (entry) => DropdownMenuEntry<String>(
-                                value: entry.id,
-                                label:
-                                    '${entry.acronym} · ${entry.name} · turma ${entry.className}',
-                                style: const ButtonStyle(),
-                              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownMenu<String>(
+                      key: ValueKey(
+                        '$_selectedId-$_creating-${_entries.length}',
+                      ),
+                      initialSelection: selectedDisciplineId,
+                      textStyle: TextStyle(
+                        color: item == null
+                            ? AppTheme.textPrimary
+                            : _disciplineStatusColor(item),
+                        fontSize: 16,
+                      ),
+                      label: const Text('Disciplina do per\u00edodo'),
+                      expandedInsets: EdgeInsets.zero,
+                      enableFilter: true,
+                      requestFocusOnTap: true,
+                      menuHeight: 360,
+                      filterCallback: (options, filter) {
+                        final query = filter.trim().toLowerCase();
+                        if (query.isEmpty) return options;
+                        return options
+                            .where(
+                              (option) =>
+                                  option.label.toLowerCase().contains(query),
                             )
-                            .toList(),
-                        onSelected: _switchEntry,
-                      ),
+                            .toList();
+                      },
+                      dropdownMenuEntries: [
+                        ...disciplineOptions.map((entry) {
+                          final currentValue = entry.id == _selectedId
+                              ? _editedValue(entry)
+                              : entry;
+                          return DropdownMenuEntry<String>(
+                            value: entry.id,
+                            label:
+                                '${currentValue.acronym} · ${currentValue.name}',
+                            style: ButtonStyle(
+                              foregroundColor: WidgetStatePropertyAll(
+                                _disciplineStatusColor(currentValue),
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                      onSelected: _switchEntry,
                     ),
-                    const SizedBox(width: 8),
-                    IconButton.filledTonal(
-                      tooltip: 'Adicionar disciplina',
-                      onPressed: _startCreating,
-                      icon: const Icon(Icons.add_rounded),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    tooltip: 'Adicionar disciplina ou copiar um modelo',
+                    onPressed: _startCreating,
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    tooltip: 'Remover disciplina inteira',
+                    onPressed: item == null || _creating
+                        ? null
+                        : _deleteDiscipline,
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.danger,
                     ),
-                    const SizedBox(width: 4),
-                    IconButton.filledTonal(
-                      tooltip: 'Apagar disciplina selecionada',
-                      onPressed: _deleteSelected,
-                      style: IconButton.styleFrom(
-                        foregroundColor: AppTheme.danger,
-                      ),
-                      icon: const Icon(Icons.delete_outline_rounded),
-                    ),
-                  ],
-                )
-              else if (_creating && widget.entries.isNotEmpty)
-                Row(
-                  children: [
-                    Chip(
-                      avatar: const Icon(Icons.add_rounded, size: 18),
-                      label: const Text('Nova disciplina'),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      onPressed: _returnToExisting,
-                      icon: const Icon(Icons.list_rounded),
-                      label: const Text('Voltar para a lista'),
-                    ),
-                  ],
-                ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                ],
+              ),
               const SizedBox(height: 14),
               Expanded(
                 child: item == null
@@ -3067,20 +4438,14 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                   const SizedBox(height: 9),
                                   _field(_acronym, 'Sigla'),
                                   const SizedBox(height: 9),
-                                  _field(_name, 'Nome da disciplina'),
-                                  const SizedBox(height: 9),
-                                  Row(
-                                    children: [
-                                      Expanded(child: _field(_class, 'Turma')),
-                                      const SizedBox(width: 9),
-                                      Expanded(child: _field(_room, 'Sala')),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 9),
                                   _field(
-                                    _teacher,
-                                    'Docente(s), separados por vírgula',
+                                    _name,
+                                    'Nome da disciplina',
+                                    textColor: _disciplineStatusColor(item),
+                                    onChanged: (_) => setState(() {}),
                                   ),
+                                  const SizedBox(height: 9),
+                                  _teacherPickerField(),
                                   const SizedBox(height: 9),
                                   Row(
                                     children: [
@@ -3089,6 +4454,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                           _theoryHours,
                                           'CH Teórica',
                                           keyboardType: TextInputType.number,
+                                          onChanged: (_) => setState(() {}),
                                         ),
                                       ),
                                       const SizedBox(width: 9),
@@ -3097,6 +4463,163 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                           _practiceHours,
                                           'CH Prática',
                                           keyboardType: TextInputType.number,
+                                          onChanged: (_) => setState(() {}),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 9),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _field(
+                                          _eadHours,
+                                          'CH EaD',
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (_) => setState(() {}),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 9),
+                                      Expanded(
+                                        child: _field(
+                                          _extensionHours,
+                                          'CH Extens\u00e3o',
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (_) => setState(() {}),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 9),
+                                  DropdownButtonFormField<String>(
+                                    key: ValueKey(
+                                      'modality-$_selectedId-$_selectedModality',
+                                    ),
+                                    initialValue: _selectedModality == 'legacy'
+                                        ? null
+                                        : _selectedModality,
+                                    hint: const Text('Selecione a modalidade'),
+                                    isExpanded: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Modalidade desta turma',
+                                      isDense: true,
+                                    ),
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'theory',
+                                        child: Text('Te\u00f3rica'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'practice',
+                                        child: Text('Pr\u00e1tica'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'ead',
+                                        child: Text('EaD'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'extension',
+                                        child: Text('Extens\u00e3o'),
+                                      ),
+                                    ],
+                                    onChanged: (value) {
+                                      if (value != null) _changeModality(value);
+                                    },
+                                  ),
+                                  const SizedBox(height: 9),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 5,
+                                        child:
+                                            _class.text.trim().isEmpty &&
+                                                classGroups.every(
+                                                  (entry) => entry.className
+                                                      .trim()
+                                                      .isEmpty,
+                                                )
+                                            ? TextField(
+                                                controller: _class,
+                                                readOnly: true,
+                                                maxLines: 1,
+                                                onTap:
+                                                    _promptTurmaIdentification,
+                                                decoration: InputDecoration(
+                                                  labelText:
+                                                      'Turma (${_modalityName(_selectedModality)})',
+                                                  hintText:
+                                                      'Clique para identificar',
+                                                  suffixIcon: const Icon(
+                                                    Icons
+                                                        .arrow_drop_down_rounded,
+                                                  ),
+                                                  isDense: true,
+                                                ),
+                                              )
+                                            : DropdownButtonFormField<String>(
+                                                key: ValueKey(
+                                                  'class-$_selectedId-$_selectedModality',
+                                                ),
+                                                initialValue:
+                                                    classGroups.any(
+                                                      (entry) =>
+                                                          entry.id ==
+                                                          _selectedId,
+                                                    )
+                                                    ? _selectedId
+                                                    : null,
+                                                hint: const Text(
+                                                  'Selecione a turma',
+                                                ),
+                                                isExpanded: true,
+                                                decoration: InputDecoration(
+                                                  labelText:
+                                                      'Turma (${_modalityName(_selectedModality)})',
+                                                  isDense: true,
+                                                ),
+                                                items: classGroups
+                                                    .map(
+                                                      (
+                                                        entry,
+                                                      ) => DropdownMenuItem(
+                                                        value: entry.id,
+                                                        child: Text(
+                                                          entry.className
+                                                                  .trim()
+                                                                  .isEmpty
+                                                              ? 'Turma sem identificação'
+                                                              : entry.className,
+                                                          overflow: TextOverflow
+                                                              .ellipsis,
+                                                        ),
+                                                      ),
+                                                    )
+                                                    .toList(),
+                                                onChanged: _switchEntry,
+                                              ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      IconButton.filledTonal(
+                                        tooltip:
+                                            'Adicionar turma nesta modalidade',
+                                        onPressed: _startAddingTurma,
+                                        icon: const Icon(Icons.add_rounded),
+                                      ),
+                                      const SizedBox(width: 2),
+                                      IconButton.filledTonal(
+                                        tooltip: 'Remover turma selecionada',
+                                        onPressed: _deleteSelected,
+                                        style: IconButton.styleFrom(
+                                          foregroundColor: AppTheme.danger,
+                                        ),
+                                        icon: const Icon(Icons.remove_rounded),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        flex: 4,
+                                        child: _field(
+                                          _room,
+                                          'Sala desta turma',
                                         ),
                                       ),
                                     ],
@@ -3115,7 +4638,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                     Text(
                                       'HORÁRIOS DA SEMANA',
                                       style: TextStyle(
-                                        color: AppTheme.textSecondary,
+                                        color: _weeklyHoursStatusColor,
                                         fontSize: 10,
                                         letterSpacing: 1.1,
                                         fontWeight: FontWeight.w700,
@@ -3188,19 +4711,24 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                         value: _slots.contains(
                                                           '$day:$slot',
                                                         ),
-                                                        onChanged: (selected) =>
-                                                            setState(() {
-                                                              if (selected ==
-                                                                  true) {
-                                                                _slots.add(
-                                                                  '$day:$slot',
-                                                                );
-                                                              } else {
-                                                                _slots.remove(
-                                                                  '$day:$slot',
-                                                                );
-                                                              }
-                                                            }),
+                                                        onChanged:
+                                                            _selectedModality ==
+                                                                'ead'
+                                                            ? null
+                                                            : (
+                                                                selected,
+                                                              ) => setState(() {
+                                                                if (selected ==
+                                                                    true) {
+                                                                  _slots.add(
+                                                                    '$day:$slot',
+                                                                  );
+                                                                } else {
+                                                                  _slots.remove(
+                                                                    '$day:$slot',
+                                                                  );
+                                                                }
+                                                              }),
                                                       ),
                                                     ),
                                                   ),
@@ -3219,7 +4747,11 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                     borderRadius: BorderRadius.circular(11),
                                   ),
                                   child: Text(
-                                    'Os blocos usam a mesma codificação da planilha original. Sobreposições são mantidas e destacadas na grade para revisão.',
+                                    _selectedModality == 'ead'
+                                        ? 'Turmas EaD ficam registradas na carga horária e na distribuição docente, sem ocupar horários presenciais.'
+                                        : _selectedModality == 'extension'
+                                        ? 'Turmas de Extensão podem ter horários na grade; marque os blocos quando houver encontros presenciais.'
+                                        : 'Os blocos usam a mesma codificação da planilha original. Sobreposições são mantidas e destacadas na grade para revisão.',
                                     style: TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 10,
@@ -3237,15 +4769,15 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancelar'),
-                  ),
-                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: item == null ? null : _save,
                     icon: const Icon(Icons.save_rounded),
                     label: const Text('Salvar disciplina e horários'),
+                  ),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Fechar'),
                   ),
                 ],
               ),
@@ -3256,13 +4788,116 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     );
   }
 
+  int get _expectedWeeklyHours => switch (_selectedModality) {
+    'theory' => int.tryParse(_theoryHours.text.trim()) ?? 0,
+    'practice' => int.tryParse(_practiceHours.text.trim()) ?? 0,
+    'ead' => 0,
+    'extension' => int.tryParse(_extensionHours.text.trim()) ?? 0,
+    _ =>
+      (int.tryParse(_theoryHours.text.trim()) ?? 0) +
+          (int.tryParse(_practiceHours.text.trim()) ?? 0),
+  };
+
+  Color get _weeklyHoursStatusColor {
+    if (_selectedModality == 'extension' || _selectedModality == 'ead') {
+      return const Color(0xFF16803C);
+    }
+    return _weeklyHoursStatusColorForValues(
+      scheduled: _slots.length,
+      expected: _expectedWeeklyHours,
+    );
+  }
+
+  Color _weeklyHoursStatusColorFor(HorarioDisciplina entry) {
+    if (entry.modality == 'extension' || entry.modality == 'ead') {
+      return const Color(0xFF16803C);
+    }
+    return _weeklyHoursStatusColorForValues(
+      scheduled: entry.slots.length,
+      expected: switch (entry.modality) {
+        'theory' => entry.theoryHours,
+        'practice' => entry.practiceHours,
+        'ead' => 0,
+        'extension' => entry.extensionHours,
+        _ => entry.theoryHours + entry.practiceHours,
+      },
+    );
+  }
+
+  Color _disciplineStatusColor(HorarioDisciplina discipline) {
+    final selected = _selected;
+    final editingThisDiscipline =
+        selected != null && _sameDiscipline(selected, discipline);
+    final groups = _entries
+        .where((entry) => _sameDiscipline(entry, discipline))
+        .map(
+          (entry) => editingThisDiscipline && entry.id == selected.id
+              ? _editedValue(selected)
+              : entry,
+        )
+        .toList();
+    if (_creating &&
+        editingThisDiscipline &&
+        !groups.any((entry) => entry.id == selected.id)) {
+      groups.add(_editedValue(discipline));
+    }
+    final theory = editingThisDiscipline
+        ? int.tryParse(_theoryHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'theory');
+    final practice = editingThisDiscipline
+        ? int.tryParse(_practiceHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'practice');
+    final ead = editingThisDiscipline
+        ? int.tryParse(_eadHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'ead');
+    final extension = editingThisDiscipline
+        ? int.tryParse(_extensionHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'extension');
+    bool hasClassFor(String modality) =>
+        groups.any((entry) => entry.modality == modality);
+    if ((theory > 0 && !hasClassFor('theory')) ||
+        (practice > 0 && !hasClassFor('practice')) ||
+        (extension > 0 && !hasClassFor('extension'))) {
+      return const Color(0xFFB42318);
+    }
+    final checkedGroups = groups.map(
+      (entry) => entry.copyWith(
+        theoryHours: theory,
+        practiceHours: practice,
+        eadHours: ead,
+        extensionHours: extension,
+      ),
+    );
+    if (checkedGroups.any(
+      (entry) => _weeklyHoursStatusColorFor(entry) != const Color(0xFF16803C),
+    )) {
+      return const Color(0xFFB42318);
+    }
+    return const Color(0xFF16803C);
+  }
+
+  Color _weeklyHoursStatusColorForValues({
+    required int scheduled,
+    required int expected,
+  }) {
+    if (scheduled < expected) return const Color(0xFFB42318);
+    if (scheduled == expected) return const Color(0xFF16803C);
+    return const Color(0xFF9A6700);
+  }
+
   Widget _field(
     TextEditingController controller,
     String label, {
     TextInputType? keyboardType,
+    Color? textColor,
+    ValueChanged<String>? onChanged,
   }) => TextField(
     controller: controller,
     keyboardType: keyboardType,
+    onChanged: onChanged,
+    style: textColor == null
+        ? null
+        : TextStyle(color: textColor, fontWeight: FontWeight.w600),
     decoration: InputDecoration(labelText: label, isDense: true),
   );
 
@@ -3278,43 +4913,13 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     return names;
   }
 
-  void _save() {
-    if (_name.text.trim().isEmpty || _acronym.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Informe ao menos o nome e a sigla da disciplina.'),
-        ),
-      );
-      return;
-    }
-    final source = _selected ?? _blank();
-    Navigator.pop(
-      context,
-      _HorarioEditorResult.save(
-        source.copyWith(
-          code: _code.text.trim(),
-          acronym: _acronym.text.trim(),
-          name: _name.text.trim(),
-          className: _class.text.trim(),
-          teacher: _teacherNamesFromField().firstOrNull ?? '',
-          coTeachers: _teacherNamesFromField().skip(1).toList(),
-          room: _room.text.trim(),
-          theoryHours: int.tryParse(_theoryHours.text.trim()) ?? 0,
-          practiceHours: int.tryParse(_practiceHours.text.trim()) ?? 0,
-          slots:
-              _slots.map((key) {
-                final p = key.split(':');
-                return HorarioSlot(
-                  weekday: int.parse(p[0]),
-                  slot: int.parse(p[1]),
-                );
-              }).toList()..sort(
-                (a, b) => a.weekday != b.weekday
-                    ? a.weekday.compareTo(b.weekday)
-                    : a.slot.compareTo(b.slot),
-              ),
-        ),
-      ),
+  Future<void> _save() async {
+    if (!_commitCurrent()) return;
+    setState(() {});
+    await widget.onSave(List.of(_entries));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Disciplina e horários salvos.')),
     );
   }
 }
@@ -3325,25 +4930,311 @@ class _ScheduleExportChoice {
   final List<int> periods;
 }
 
-enum _HorarioEditorAction { save, delete }
-
-class _HorarioEditorResult {
-  const _HorarioEditorResult.save(this.entry)
-    : action = _HorarioEditorAction.save,
-      id = null;
-
-  const _HorarioEditorResult.delete(this.id)
-    : action = _HorarioEditorAction.delete,
-      entry = null;
-
-  final _HorarioEditorAction action;
-  final HorarioDisciplina? entry;
-  final String? id;
-}
-
 class _TermCopyChoice {
   const _TermCopyChoice.blank() : sourceTerm = null;
   const _TermCopyChoice.copy(this.sourceTerm);
 
   final String? sourceTerm;
+}
+
+class _TeacherRosterResult {
+  const _TeacherRosterResult(this.teachers, this.renamed);
+
+  final List<String> teachers;
+  final Map<String, String> renamed;
+}
+
+class _TeacherRosterPage extends StatefulWidget {
+  const _TeacherRosterPage({required this.teachers});
+
+  final List<String> teachers;
+
+  @override
+  State<_TeacherRosterPage> createState() => _TeacherRosterPageState();
+}
+
+class _TeacherRosterPageState extends State<_TeacherRosterPage> {
+  late final List<String> _teachers = [...widget.teachers];
+  final Map<String, String> _renamed = {};
+
+  Future<String?> _askName({String? current}) async {
+    final controller = TextEditingController(text: current ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(current == null ? 'Adicionar docente' : 'Editar docente'),
+        content: SizedBox(
+          width: 440,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Nome do docente',
+              prefixIcon: Icon(Icons.person_outline_rounded),
+            ),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = name?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    final duplicate = _teachers.any(
+      (teacher) =>
+          teacher.toLowerCase() == trimmed.toLowerCase() && teacher != current,
+    );
+    if (duplicate) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Já existe um docente com esse nome.')),
+        );
+      }
+      return null;
+    }
+    return trimmed;
+  }
+
+  Future<void> _addTeacher() async {
+    final name = await _askName();
+    if (name == null || !mounted) return;
+    setState(() => _teachers.add(name));
+  }
+
+  Future<void> _editTeacher(String oldName) async {
+    final name = await _askName(current: oldName);
+    if (name == null || !mounted) return;
+    setState(() {
+      final index = _teachers.indexOf(oldName);
+      _teachers[index] = name;
+      _renamed[oldName] = name;
+    });
+  }
+
+  Future<void> _removeTeacher(String name) async {
+    final remove = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover docente?'),
+        content: Text(
+          '“$name” será removido do cadastro e das disciplinas em que está vinculado.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (remove != true || !mounted) return;
+    setState(() {
+      _teachers.remove(name);
+      _renamed[name] = '';
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      leading: IconButton(
+        tooltip: 'Voltar',
+        icon: const Icon(Icons.arrow_back_rounded),
+        onPressed: () => Navigator.pop(context),
+      ),
+      title: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Editar docentes'),
+          Text(
+            'Cadastre e mantenha os nomes usados nas disciplinas.',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => Navigator.pop(
+            context,
+            _TeacherRosterResult(_teachers.toList(), Map.of(_renamed)),
+          ),
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('Concluir'),
+        ),
+        const SizedBox(width: 8),
+        const ThemeSelector(compact: true),
+        const SizedBox(width: 16),
+      ],
+    ),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 900),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Text(
+                    '${_teachers.length} docentes cadastrados',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  FilledButton.icon(
+                    onPressed: _addTeacher,
+                    icon: const Icon(Icons.person_add_alt_1_rounded),
+                    label: const Text('Adicionar docente'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _teachers.isEmpty
+                    ? const Center(child: Text('Nenhum docente cadastrado.'))
+                    : Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: ListView.separated(
+                          itemCount: _teachers.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final teacher = _teachers[index];
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: AppTheme.accent.withAlpha(24),
+                                child: Icon(
+                                  Icons.person_rounded,
+                                  color: AppTheme.accent,
+                                ),
+                              ),
+                              title: Text(teacher),
+                              trailing: Wrap(
+                                spacing: 4,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Editar docente',
+                                    onPressed: () => _editTeacher(teacher),
+                                    icon: const Icon(Icons.edit_rounded),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Remover docente',
+                                    onPressed: () => _removeTeacher(teacher),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                    ),
+                                    color: Theme.of(context).colorScheme.error,
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _SearchableSelect<T extends Object> extends StatelessWidget {
+  const _SearchableSelect({
+    super.key,
+    required this.value,
+    required this.options,
+    required this.label,
+    required this.optionLabel,
+    required this.icon,
+    required this.onSelected,
+  });
+
+  final T value;
+  final List<T> options;
+  final String label;
+  final String Function(T option) optionLabel;
+  final IconData icon;
+  final ValueChanged<T> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedLabel = optionLabel(value);
+    return Autocomplete<T>(
+      initialValue: TextEditingValue(text: selectedLabel),
+      displayStringForOption: optionLabel,
+      optionsBuilder: (text) {
+        final query = text.text.trim().toLowerCase();
+        if (query.isEmpty) return options;
+        return options.where(
+          (option) => optionLabel(option).toLowerCase().contains(query),
+        );
+      },
+      onSelected: onSelected,
+      optionsViewBuilder: (context, select, filteredOptions) => Align(
+        alignment: Alignment.topLeft,
+        child: Material(
+          elevation: 8,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280, maxWidth: 480),
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              shrinkWrap: true,
+              itemCount: filteredOptions.length,
+              itemBuilder: (context, index) {
+                final option = filteredOptions.elementAt(index);
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    optionLabel(option),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => select(option),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+      fieldViewBuilder: (context, controller, focusNode, onSubmit) => TextField(
+        controller: controller,
+        focusNode: focusNode,
+        onTap: () {
+          if (controller.text == selectedLabel) controller.clear();
+        },
+        onSubmitted: (_) => onSubmit(),
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon),
+          suffixIcon: IconButton(
+            tooltip: 'Mostrar opções',
+            icon: const Icon(Icons.arrow_drop_down_rounded),
+            onPressed: () {
+              if (controller.text.isNotEmpty) controller.clear();
+              focusNode.requestFocus();
+            },
+          ),
+        ),
+      ),
+    );
+  }
 }

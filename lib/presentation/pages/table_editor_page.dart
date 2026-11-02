@@ -527,6 +527,8 @@ class _TableEditorPageState extends State<TableEditorPage> {
                   },
                 ),
               ),
+            const SizedBox(width: 8),
+            const ThemeSelector(compact: true),
           ],
         ],
       ),

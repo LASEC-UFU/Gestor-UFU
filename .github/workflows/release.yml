@@ -229,6 +229,7 @@ jobs:
           tag_name: ${{ inputs.version || github.ref_name }}
           name: "Gestor UFU ${{ inputs.version || github.ref_name }}"
           body: ${{ inputs.notes }}
+          generate_release_notes: ${{ inputs.notes == '' }}
           prerelease: false
           target_commitish: ${{ github.sha }}
           files: |

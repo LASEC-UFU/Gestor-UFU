@@ -1,4 +1,4 @@
-﻿class HorarioSlot {
+class HorarioSlot {
   const HorarioSlot({required this.weekday, required this.slot});
 
   /// Monday = 1 ... Friday = 5, matching the original BDados encoding.
@@ -29,6 +29,8 @@ class CursoPeriodo {
 class HorarioDisciplina {
   const HorarioDisciplina({
     required this.id,
+    String? subjectId,
+    this.modality = 'legacy',
     required this.code,
     required this.acronym,
     required this.name,
@@ -40,9 +42,17 @@ class HorarioDisciplina {
     required this.slots,
     this.theoryHours = 0,
     this.practiceHours = 0,
-  });
+    this.eadHours = 0,
+    this.extensionHours = 0,
+  }) : subjectId = subjectId ?? id;
 
   final String id;
+
+  /// Identifies the logical subject shared by its theory/practice/EaD/extension groups.
+  final String subjectId;
+
+  /// theory, practice, ead, extension or legacy (pre-modality records).
+  final String modality;
   final String code;
   final String acronym;
   final String name;
@@ -54,6 +64,24 @@ class HorarioDisciplina {
   final List<HorarioSlot> slots;
   final int theoryHours;
   final int practiceHours;
+  final int eadHours;
+  final int extensionHours;
+
+  String get timetableLabel {
+    final subject = acronym.trim().isEmpty ? name.trim() : acronym.trim();
+    final modalityLabel = switch (modality) {
+      'theory' => 'T',
+      'practice' => 'P',
+      'ead' => 'EaD',
+      'extension' => 'E',
+      _ => '',
+    };
+    return [
+      subject,
+      modalityLabel,
+      className.trim(),
+    ].where((part) => part.isNotEmpty).join('-');
+  }
 
   List<String> get teacherNames => {
     if (teacher.trim().isNotEmpty) teacher.trim(),
@@ -62,6 +90,8 @@ class HorarioDisciplina {
 
   HorarioDisciplina copyWith({
     String? id,
+    String? subjectId,
+    String? modality,
     String? code,
     String? acronym,
     String? name,
@@ -73,8 +103,12 @@ class HorarioDisciplina {
     List<HorarioSlot>? slots,
     int? theoryHours,
     int? practiceHours,
+    int? eadHours,
+    int? extensionHours,
   }) => HorarioDisciplina(
     id: id ?? this.id,
+    subjectId: subjectId ?? this.subjectId,
+    modality: modality ?? this.modality,
     code: code ?? this.code,
     acronym: acronym ?? this.acronym,
     name: name ?? this.name,
@@ -86,10 +120,14 @@ class HorarioDisciplina {
     slots: slots ?? this.slots,
     theoryHours: theoryHours ?? this.theoryHours,
     practiceHours: practiceHours ?? this.practiceHours,
+    eadHours: eadHours ?? this.eadHours,
+    extensionHours: extensionHours ?? this.extensionHours,
   );
 
   Map<String, Object?> toJson() => {
     'id': id,
+    'subjectId': subjectId,
+    'modality': modality,
     'code': code,
     'acronym': acronym,
     'name': name,
@@ -101,11 +139,15 @@ class HorarioDisciplina {
     'slots': slots.map((item) => item.toJson()).toList(),
     'theoryHours': theoryHours,
     'practiceHours': practiceHours,
+    'eadHours': eadHours,
+    'extensionHours': extensionHours,
   };
 
   factory HorarioDisciplina.fromJson(Map<String, dynamic> json) =>
       HorarioDisciplina(
         id: json['id'] as String,
+        subjectId: json['subjectId'] as String? ?? json['id'] as String,
+        modality: json['modality'] as String? ?? 'legacy',
         code: json['code'] as String? ?? '',
         acronym: json['acronym'] as String? ?? '',
         name: json['name'] as String? ?? '',
@@ -129,6 +171,8 @@ class HorarioDisciplina {
             .toList(),
         theoryHours: (json['theoryHours'] as num?)?.toInt() ?? 0,
         practiceHours: (json['practiceHours'] as num?)?.toInt() ?? 0,
+        eadHours: (json['eadHours'] as num?)?.toInt() ?? 0,
+        extensionHours: (json['extensionHours'] as num?)?.toInt() ?? 0,
       );
 }
 

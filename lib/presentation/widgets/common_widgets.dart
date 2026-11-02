@@ -1,5 +1,79 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:config_moodle/presentation/controllers/theme_controller.dart';
+
+class ThemeSelector extends StatelessWidget {
+  const ThemeSelector({super.key, this.compact = false});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = context.watch<ThemeController>();
+    return PopupMenuButton<bool>(
+      tooltip: 'Selecionar tema',
+      initialValue: theme.isLight,
+      onSelected: theme.setLight,
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(
+          value: false,
+          checked: !theme.isLight,
+          child: const Row(
+            children: [
+              Icon(Icons.dark_mode_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('Escuro'),
+            ],
+          ),
+        ),
+        CheckedPopupMenuItem(
+          value: true,
+          checked: theme.isLight,
+          child: const Row(
+            children: [
+              Icon(Icons.light_mode_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('Claro'),
+            ],
+          ),
+        ),
+      ],
+      child: Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 10 : 12,
+          vertical: 8,
+        ),
+        decoration: AppTheme.glassDecoration(opacity: 0.06),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              theme.isLight
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+              size: 16,
+              color: AppTheme.textSecondary,
+            ),
+            if (!compact) ...[
+              const SizedBox(width: 8),
+              Text(
+                theme.isLight ? 'Tema claro' : 'Tema escuro',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(width: 4),
+              Icon(
+                Icons.expand_more_rounded,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class GlassCard extends StatelessWidget {
   final Widget child;

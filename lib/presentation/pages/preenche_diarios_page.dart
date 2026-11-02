@@ -21,6 +21,7 @@ import 'package:config_moodle/presentation/controllers/auth_controller.dart';
 import 'package:config_moodle/presentation/controllers/config_controller.dart';
 import 'package:config_moodle/presentation/controllers/sync_controller.dart';
 import 'package:config_moodle/presentation/controllers/theme_controller.dart';
+import 'package:config_moodle/presentation/widgets/common_widgets.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
 const _portalCredentialsKey = 'portal_docente_credentials_v1';
@@ -1660,6 +1661,8 @@ class _PageHeader extends StatelessWidget {
         ),
         const Spacer(),
         _StatusPill(count: entryCount),
+        const SizedBox(width: 10),
+        const ThemeSelector(compact: true),
       ],
     ),
   );

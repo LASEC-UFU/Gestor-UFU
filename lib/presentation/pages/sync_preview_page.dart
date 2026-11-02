@@ -175,6 +175,8 @@ class _SyncPreviewPageState extends State<SyncPreviewPage> {
               color: AppTheme.accentGreen,
               icon: Icons.school,
             ),
+          const SizedBox(width: 10),
+          const ThemeSelector(compact: true),
         ],
       ),
     );

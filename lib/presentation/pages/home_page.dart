@@ -167,6 +167,8 @@ class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+          const SizedBox(width: 10),
+          const ThemeSelector(compact: true),
         ],
       ),
     );
