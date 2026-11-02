@@ -1,0 +1,63 @@
+name: Publicar manual Gestor UFU no GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/manual/site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obter código
+        uses: actions/checkout@v4
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Validar arquivos e links locais
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f docs/manual/site/index.html
+          test -f docs/manual/site/search-index.json
+          python3 - <<'PY'
+          import json, pathlib, re, sys
+          root = pathlib.Path('docs/manual/site')
+          files = list(root.rglob('*.html'))
+          bad = []
+          for p in files:
+              text = p.read_text(encoding='utf-8')
+              for ref in re.findall(r'(?:href|src)="([^"#]+)', text):
+                  if ref.startswith(('https://','http://','mailto:','data:')): continue
+                  target = (p.parent / ref.split('#',1)[0]).resolve()
+                  if not target.exists(): bad.append(f'{p}: {ref}')
+          json.loads((root/'search-index.json').read_text(encoding='utf-8'))
+          if bad:
+              print('\n'.join(bad)); sys.exit(1)
+          print(f'Validated {len(files)} HTML pages and search index')
+          PY
+      - name: Enviar site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/manual/site
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Publicar
+        id: deployment
+        uses: actions/deploy-pages@v4
