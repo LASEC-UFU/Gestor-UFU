@@ -9,6 +9,7 @@ import 'package:config_moodle/presentation/pages/preenche_diarios_page.dart';
 import 'package:config_moodle/presentation/pages/planos_ensino_page.dart';
 import 'package:config_moodle/presentation/pages/planos_trabalho_page.dart';
 import 'package:config_moodle/presentation/pages/ajusta_horarios_page.dart';
+import 'package:config_moodle/presentation/pages/equivalencia_alunos_page.dart';
 
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -34,6 +35,10 @@ class AppRouter {
       GoRoute(
         path: '/ajusta-horarios',
         builder: (context, state) => const AjustaHorariosPage(),
+      ),
+      GoRoute(
+        path: '/equivalencia-alunos',
+        builder: (context, state) => const EquivalenciaAlunosPage(),
       ),
       GoRoute(
         path: '/editor/:id',

@@ -141,6 +141,34 @@ class HorarioDisciplina {
     'extensionHours': extensionHours,
   };
 
+  static List<String> _readTeacherNames(Map<String, dynamic> json) {
+    final names = <String>[];
+    final seen = <String>{};
+
+    void add(Object? value) {
+      final name = value?.toString().trim() ?? '';
+      if (name.isEmpty || !seen.add(name.toLowerCase())) return;
+      names.add(name);
+    }
+
+    // `teacher` and `coTeachers` were used by older database files. Keep
+    // reading them so upgrading the app never silently removes assignments.
+    final current = json['teachers'];
+    if (current is List) {
+      for (final name in current) {
+        add(name);
+      }
+    }
+    add(json['teacher']);
+    final legacyCoTeachers = json['coTeachers'];
+    if (legacyCoTeachers is List) {
+      for (final name in legacyCoTeachers) {
+        add(name);
+      }
+    }
+    return names;
+  }
+
   factory HorarioDisciplina.fromJson(Map<String, dynamic> json) =>
       HorarioDisciplina(
         id: json['id'] as String,
@@ -150,9 +178,7 @@ class HorarioDisciplina {
         acronym: json['acronym'] as String? ?? '',
         name: json['name'] as String? ?? '',
         className: json['className'] as String? ?? '',
-        teachers: ((json['teachers'] as List?) ?? const [])
-            .map((name) => name.toString())
-            .toList(),
+        teachers: _readTeacherNames(json),
         room: json['room'] as String? ?? '',
         coursePeriods: ((json['coursePeriods'] as List?) ?? const [])
             .map(

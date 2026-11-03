@@ -1,7 +1,7 @@
 name: config_moodle
 description: "Ferramentas acadêmicas UFU, incluindo gestão de disciplinas Moodle."
 publish_to: 'none'
-version: 1.1.7+9
+version: 1.1.8+10
 
 environment:
   sdk: ^3.11.3
@@ -29,6 +29,8 @@ dependencies:
   cryptography: ^2.9.0
   flutter_secure_storage: ^10.3.4
   package_info_plus: ^9.0.1
+  desktop_multi_window: 0.3.1
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:

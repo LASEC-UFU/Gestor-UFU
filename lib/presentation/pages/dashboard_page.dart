@@ -80,6 +80,16 @@ class _DashboardPageState extends State<DashboardPage> {
       category: 'PLANEJAMENTO DE DISCIPLINAS',
     ),
     _ModuleInfo(
+      title: 'Equivalência de Alunos',
+      description:
+          'Organize análises de aproveitamento de disciplinas entre cursos.',
+      icon: Icons.compare_arrows_rounded,
+      accent: Color(0xFF63C9B8),
+      enabled: true,
+      route: '/equivalencia-alunos',
+      category: 'VIDA ACADÊMICA',
+    ),
+    _ModuleInfo(
       title: 'Inserir Documentos no SEI',
       description:
           'Insira fichas de componentes curriculares no processo do SEI.',

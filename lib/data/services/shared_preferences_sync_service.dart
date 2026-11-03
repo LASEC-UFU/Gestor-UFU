@@ -211,6 +211,14 @@ class SharedPreferencesSyncService extends ChangeNotifier
         return;
       }
       if (remoteChanged && !localChanged) {
+        await prefs.reload();
+        final latestLocalHash = await _hash(await _localSnapshot());
+        if (latestLocalHash != localHash) {
+          // A local edit landed while the remote snapshot was being read.
+          // Preserve both copies and ask the user to resolve the conflict.
+          _setStatus(SharedPreferencesSyncStatus.conflict);
+          return;
+        }
         await _applyPreferences(remote.preferences);
         await prefs.setString(_baselineKey, remoteHash);
       } else if (localChanged && !remoteChanged) {
@@ -249,12 +257,23 @@ class SharedPreferencesSyncService extends ChangeNotifier
   Future<void> _applyPreferences(Map<String, dynamic> values) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.reload();
-    for (final key in prefs.getKeys().where(
-      (key) => !key.startsWith(metadataPrefix),
-    )) {
-      await prefs.remove(key);
-    }
+
+    // Validate everything first, then write replacements before removing stale
+    // keys. Readers never observe an empty preference store during sync.
     for (final entry in values.entries) {
+      if (entry.key.startsWith(metadataPrefix)) continue;
+      final value = entry.value;
+      if (value is String || value is bool || value is int || value is double) {
+        continue;
+      }
+      if (value is List && value.every((item) => item is String)) continue;
+      throw FormatException(
+        'Tipo de dado inv\u00e1lido na chave ${entry.key}.',
+      );
+    }
+
+    for (final entry in values.entries) {
+      if (entry.key.startsWith(metadataPrefix)) continue;
       final value = entry.value;
       if (value is String) {
         await prefs.setString(entry.key, value);
@@ -266,49 +285,99 @@ class SharedPreferencesSyncService extends ChangeNotifier
         await prefs.setDouble(entry.key, value);
       } else if (value is List && value.every((item) => item is String)) {
         await prefs.setStringList(entry.key, value.cast<String>());
-      } else {
-        throw FormatException('Tipo de dado invÃ¡lido na chave ${entry.key}.');
       }
+    }
+
+    final remoteKeys = values.keys
+        .where((key) => !key.startsWith(metadataPrefix))
+        .toSet();
+    final staleKeys = prefs
+        .getKeys()
+        .where(
+          (key) => !key.startsWith(metadataPrefix) && !remoteKeys.contains(key),
+        )
+        .toList();
+    for (final key in staleKeys) {
+      await prefs.remove(key);
     }
   }
 
   Future<_RemoteSnapshot> _readRemote(String filePath, String password) async {
-    var file = File(filePath);
-    if (!await file.exists() && await File('$filePath.bak').exists()) {
-      await File('$filePath.bak').rename(filePath);
+    Object? lastError;
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        final file = File(filePath);
+        if (!await file.exists()) {
+          throw const FileSystemException(
+            'O arquivo compartilhado est\u00e1 sendo atualizado ou ainda n\u00e3o foi sincronizado.',
+          );
+        }
+
+        // OneDrive can expose the destination during its rename/write steps.
+        // Accept only identical consecutive reads and retry transient parse or
+        // decryption errors rather than applying a partial snapshot.
+        final firstRead = await file.readAsString();
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+        if (!await file.exists()) {
+          throw const FileSystemException(
+            'O arquivo compartilhado mudou durante a sincroniza\u00e7\u00e3o.',
+          );
+        }
+        final encoded = await file.readAsString();
+        if (firstRead != encoded) {
+          throw const FormatException(
+            'O arquivo compartilhado ainda est\u00e1 sendo atualizado.',
+          );
+        }
+
+        final outer = jsonDecode(encoded);
+        if (outer is! Map<String, dynamic> ||
+            outer['format'] != _format ||
+            outer['version'] != _version ||
+            outer['cipherText'] is! String) {
+          throw const FormatException(
+            'Formato do banco compartilhado inv\u00e1lido.',
+          );
+        }
+        final salt = base64Decode(outer['salt'] as String);
+        final nonce = base64Decode(outer['nonce'] as String);
+        final cipherText = base64Decode(outer['cipherText'] as String);
+        final mac = Mac(base64Decode(outer['mac'] as String));
+        final secretKey = await _kdf.deriveKey(
+          secretKey: SecretKey(utf8.encode(password)),
+          nonce: salt,
+        );
+        final clear = await _aes.decrypt(
+          SecretBox(cipherText, nonce: nonce, mac: mac),
+          secretKey: secretKey,
+        );
+        final plainText = utf8.decode(clear);
+        final inner = jsonDecode(plainText);
+        if (inner is! Map<String, dynamic> ||
+            inner['format'] != _format ||
+            inner['version'] != _version ||
+            inner['preferences'] is! Map) {
+          throw const FormatException(
+            'Conte?do do banco compartilhado inv\u00e1lido.',
+          );
+        }
+        return _RemoteSnapshot(
+          plainText,
+          Map<String, dynamic>.from(inner['preferences'] as Map),
+        );
+      } on Object catch (error) {
+        lastError = error;
+        if (attempt < 4) {
+          await Future<void>.delayed(
+            Duration(milliseconds: 180 * (attempt + 1)),
+          );
+        }
+      }
     }
-    final outer = jsonDecode(await file.readAsString());
-    if (outer is! Map<String, dynamic> ||
-        outer['format'] != _format ||
-        outer['version'] != _version ||
-        outer['cipherText'] is! String) {
-      throw const FormatException('Formato do banco compartilhado invÃ¡lido.');
-    }
-    final salt = base64Decode(outer['salt'] as String);
-    final nonce = base64Decode(outer['nonce'] as String);
-    final cipherText = base64Decode(outer['cipherText'] as String);
-    final mac = Mac(base64Decode(outer['mac'] as String));
-    final secretKey = await _kdf.deriveKey(
-      secretKey: SecretKey(utf8.encode(password)),
-      nonce: salt,
-    );
-    final clear = await _aes.decrypt(
-      SecretBox(cipherText, nonce: nonce, mac: mac),
-      secretKey: secretKey,
-    );
-    final plainText = utf8.decode(clear);
-    final inner = jsonDecode(plainText);
-    if (inner is! Map<String, dynamic> ||
-        inner['format'] != _format ||
-        inner['version'] != _version ||
-        inner['preferences'] is! Map) {
-      throw const FormatException(
-        'ConteÃºdo do banco compartilhado invÃ¡lido.',
-      );
-    }
-    return _RemoteSnapshot(
-      plainText,
-      Map<String, dynamic>.from(inner['preferences'] as Map),
+    Error.throwWithStackTrace(
+      lastError ??
+          const FileSystemException('Falha ao ler o banco compartilhado.'),
+      StackTrace.current,
     );
   }
 

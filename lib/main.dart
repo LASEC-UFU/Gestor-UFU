@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,9 +19,102 @@ import 'package:config_moodle/presentation/controllers/theme_controller.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
 import 'package:config_moodle/data/services/shared_preferences_sync_service.dart';
 import 'package:config_moodle/data/services/windows_update_service.dart';
+import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
+import 'package:config_moodle/presentation/pages/ajusta_horarios_page.dart';
+import 'package:window_manager/window_manager.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    final window = await WindowController.fromCurrentEngine();
+    if (window.arguments.isNotEmpty) {
+      final payload = jsonDecode(window.arguments) as Map<String, dynamic>;
+      if (payload['type'] == 'scheduleEditor') {
+        final isLight = payload['isLight'] as bool? ?? false;
+        AppTheme.isLight = isLight;
+        final entries = (payload['entries'] as List)
+            .map(
+              (item) => HorarioDisciplina.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList();
+        final teachers = (payload['teachers'] as List).cast<String>();
+        final programs = (payload['programs'] as Map).map(
+          (key, value) => MapEntry(int.parse(key as String), value as String),
+        );
+        await windowManager.ensureInitialized();
+        unawaited(
+          windowManager.waitUntilReadyToShow(
+            const WindowOptions(
+              size: Size(1100, 780),
+              minimumSize: Size(1000, 760),
+              center: true,
+              title: 'Editar disciplinas - Gestor UFU',
+            ),
+            () async {
+              await windowManager.show();
+              await windowManager.focus();
+            },
+          ),
+        );
+        runApp(
+          HorarioEditorWindowApp(
+            entries: entries,
+            teachers: teachers,
+            programs: programs,
+            selectedProgram: payload['selectedProgram'] as int,
+            selectedPeriod: payload['selectedPeriod'] as int,
+            channelName: payload['channel'] as String,
+            initialEntryId: payload['initialEntryId'] as String?,
+            isLight: isLight,
+          ),
+        );
+        return;
+      }
+      if (payload['type'] == 'teacherEditor') {
+        final isLight = payload['isLight'] as bool? ?? false;
+        AppTheme.isLight = isLight;
+        final entries = (payload['entries'] as List)
+            .map(
+              (item) => HorarioDisciplina.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList();
+        final teachers = (payload['teachers'] as List).cast<String>();
+        final programs = (payload['programs'] as Map).map(
+          (key, value) => MapEntry(int.parse(key as String), value as String),
+        );
+        await windowManager.ensureInitialized();
+        unawaited(
+          windowManager.waitUntilReadyToShow(
+            const WindowOptions(
+              size: Size(1120, 820),
+              minimumSize: Size(900, 650),
+              center: true,
+              title: 'Editar docentes - Gestor UFU',
+            ),
+            () async {
+              await windowManager.show();
+              await windowManager.focus();
+            },
+          ),
+        );
+        runApp(
+          TeacherRosterWindowApp(
+            teachers: teachers,
+            entries: entries,
+            programs: programs,
+            channelName: payload['channel'] as String,
+            initialTeacher: payload['initialTeacher'] as String?,
+            isLight: isLight,
+          ),
+        );
+        return;
+      }
+    }
+  }
   final preferences = await SharedPreferences.getInstance();
   final sharedDatabase = SharedPreferencesSyncService();
   await sharedDatabase.initialize();

@@ -4,11 +4,14 @@ import 'dart:io';
 
 import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pdf/pdf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_pdf_service.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
@@ -42,6 +45,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   final _teacherHorizontalScroll = ScrollController();
   final _distributionHorizontalScroll = ScrollController();
   final Map<String, double> _scrollOffsets = {};
+  WindowMethodChannel? _scheduleEditorChannel;
+  WindowController? _scheduleEditorController;
+  bool _openingScheduleEditor = false;
+  WindowMethodChannel? _teacherEditorChannel;
+  WindowController? _teacherEditorController;
+  bool _openingTeacherEditor = false;
   Timer? _scrollSaveTimer;
   List<HorarioDisciplina> _entries = [];
   List<String> _teacherRoster = [];
@@ -1258,11 +1267,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                     label: 'Docente',
                     optionLabel: (name) => name,
                     icon: Icons.person_rounded,
-                    onSelected: (value) {
-                      setState(() => _teacher = value);
-                      _saveViewSelection();
-                      _restoreCurrentTableScroll();
-                    },
+                    onSelected: _selectTeacher,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1270,6 +1275,16 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   onPressed: _busy ? null : _editTeachers,
                   icon: const Icon(Icons.manage_accounts_rounded),
                   label: const Text('Editar docentes'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _editPeriod,
+                  icon: const Icon(Icons.tune_rounded),
+                  label: const Text('Editar disciplinas'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                  ),
                 ),
               ],
             ),
@@ -1585,12 +1600,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   'ID',
                   'Professor',
                   'Disciplinas (Sigla Turma)',
-                  'CH\nTeórica',
-                  'CH\nPrática',
-                  'CH\nEaD',
+                  'CH\r\nTeórica',
+                  'CH\r\nPrática',
+                  'CH\r\nEaD',
                   'Total',
-                  'CH\nExtensão',
-                  'Nº\nTurmas',
+                  'CH\r\nExtensão',
+                  'Nº\r\nTurmas',
                   'Períodos',
                 ][index],
                 header: true,
@@ -1922,7 +1937,17 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     teacher,
   ) {
     final entries = _entries
-        .where((entry) => entry.teacherNames.contains(teacher))
+        .where(
+          (entry) =>
+              entry.teacherNames.contains(teacher) &&
+              const {
+                'theory',
+                'practice',
+                'ead',
+                'extension',
+              }.contains(entry.modality) &&
+              entry.className.trim().isNotEmpty,
+        )
         .toList();
     final periods =
         entries
@@ -1931,7 +1956,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             .toList()
           ..sort();
     int hours(HorarioDisciplina entry, String modality) {
-      if (entry.modality != 'legacy' && entry.modality != modality) return 0;
+      if (entry.modality != modality) return 0;
       return switch (modality) {
         'theory' => entry.theoryHours,
         'practice' => entry.practiceHours,
@@ -1943,7 +1968,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
     return _TeacherDistribution(
       name: teacher,
-      disciplines: entries.map(_classLabel).toList(),
+      disciplines: entries.map(_classLabel).toSet().toList(),
       classCount: entries.length,
       theoryHours: entries.fold(
         0,
@@ -2121,7 +2146,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 const SizedBox(width: 7),
                 Expanded(
                   child: Text(
-                    'Duplo clique em um hor\u00e1rio para escolher as disciplinas. Turmas simult\u00e2neas aparecem separadas por v\u00edrgula',
+                    'Duplo clique em um hor\u00e1rio para editar a disciplina ou turma. Turmas simult\u00e2neas aparecem separadas por v\u00edrgula',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 11,
@@ -2178,7 +2203,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             disciplineColors,
             height: rowHeight,
             cellWidth: cellWidth,
-            onDoubleTap: () => _editTimetableCell(weekday, slot),
+            onDoubleTap: (fraction) => _editTimetableCell(
+              cellEntries: schedule['$weekday:$slot'] ?? const [],
+              cellFraction: fraction,
+              cellWidth: cellWidth,
+            ),
           ),
       ],
     );
@@ -2298,7 +2327,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     Map<String, Color> disciplineColors, {
     required double height,
     required double cellWidth,
-    required VoidCallback onDoubleTap,
+    required ValueChanged<double> onDoubleTap,
   }) {
     final unique = <String, HorarioDisciplina>{
       for (final entry in entries) '${entry.id}:${entry.className}': entry,
@@ -2328,12 +2357,20 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       fillColors.add(colors.last);
     }
 
+    var doubleTapFraction = 0.5;
     return Tooltip(
       message: labels.join(', '),
       child: Material(
         color: Colors.transparent,
-        child: InkWell(
-          onDoubleTap: onDoubleTap,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTapDown: (details) {
+            doubleTapFraction = (details.localPosition.dx / cellWidth).clamp(
+              0.0,
+              1.0,
+            );
+          },
+          onDoubleTap: () => onDoubleTap(doubleTapFraction),
           child: Container(
             width: double.infinity,
             height: height,
@@ -2394,233 +2431,119 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
   }
 
-  Future<void> _editTimetableCell(int weekday, int slot) async {
-    final candidates = [..._entries]
-      ..sort((a, b) {
-        final acronymOrder = a.acronym.toLowerCase().compareTo(
-          b.acronym.toLowerCase(),
-        );
-        return acronymOrder != 0
-            ? acronymOrder
-            : a.className.toLowerCase().compareTo(b.className.toLowerCase());
-      });
-    if (candidates.isEmpty) {
-      _message('N\u00e3o h\u00e1 disciplinas cadastradas para selecionar.');
+  Future<void> _editTimetableCell({
+    required List<HorarioDisciplina> cellEntries,
+    required double cellFraction,
+    required double cellWidth,
+  }) async {
+    final unique = <String, HorarioDisciplina>{
+      for (final entry in cellEntries) '${entry.id}:${entry.className}': entry,
+    }.values.toList();
+    if (unique.isEmpty) {
+      await _editPeriod(selectDefault: true);
       return;
     }
 
-    bool belongsToCurrentView(HorarioDisciplina entry) => _view == 1
-        ? _teacher != null && entry.teacherNames.contains(_teacher)
-        : entry.coursePeriods.any(
-            (item) => item.program == _program && item.period == _period,
-          );
-    final selected = candidates
-        .where(
-          (entry) =>
-              belongsToCurrentView(entry) &&
-              entry.slots.any(
-                (item) => item.weekday == weekday && item.slot == slot,
-              ),
-        )
-        .map((entry) => entry.id)
-        .toSet();
-    final searchController = TextEditingController();
-    final result = await showDialog<Set<String>>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final query = searchController.text.trim().toLowerCase();
-          final visible = candidates.where((entry) {
-            if (query.isEmpty) return true;
-            return entry.name.toLowerCase().contains(query) ||
-                entry.code.toLowerCase().contains(query) ||
-                entry.acronym.toLowerCase().contains(query);
-          }).toList();
-          return AlertDialog(
-            title: Text(
-              '${horarioDias[weekday - 1]} ? ${horarioFaixas[slot - 1]}',
-            ),
-            content: SizedBox(
-              width: 560,
-              height: 540,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: searchController,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      labelText: 'Buscar por nome ou c\u00f3digo',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      suffixIcon: searchController.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: 'Limpar busca',
-                              onPressed: () {
-                                searchController.clear();
-                                setDialogState(() {});
-                              },
-                              icon: const Icon(Icons.close_rounded),
-                            ),
-                    ),
-                    onChanged: (_) => setDialogState(() {}),
-                  ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => setDialogState(
-                          () =>
-                              selected.addAll(visible.map((entry) => entry.id)),
-                        ),
-                        child: const Text('Selecionar resultados'),
-                      ),
-                      TextButton(
-                        onPressed: () => setDialogState(selected.clear),
-                        child: const Text('Limpar sele\u00e7\u00e3o'),
-                      ),
-                    ],
-                  ),
-                  Expanded(
-                    child: visible.isEmpty
-                        ? Center(
-                            child: Text(
-                              'Nenhuma disciplina encontrada',
-                              style: TextStyle(color: AppTheme.textSecondary),
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: visible.length,
-                            itemBuilder: (context, index) {
-                              final entry = visible[index];
-                              final label = entry.acronym.isEmpty
-                                  ? entry.name
-                                  : entry.acronym;
-                              return CheckboxListTile(
-                                dense: true,
-                                value: selected.contains(entry.id),
-                                controlAffinity:
-                                    ListTileControlAffinity.leading,
-                                title: Text(
-                                  '$label ? Turma ${entry.className}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                subtitle: Text(
-                                  [
-                                    entry.name,
-                                    ...entry.teacherNames,
-                                  ].join(' ? '),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                onChanged: (checked) => setDialogState(() {
-                                  if (checked == true) {
-                                    selected.add(entry.id);
-                                  } else {
-                                    selected.remove(entry.id);
-                                  }
-                                }),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancelar'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, selected),
-                child: const Text('Aplicar ao hor\u00e1rio'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    searchController.dispose();
-    if (result == null || !mounted) return;
-
-    setState(() {
-      _entries = _entries.map((entry) {
-        final inCurrentView = belongsToCurrentView(entry);
-        final isSelected = result.contains(entry.id);
-        if (!inCurrentView && !isSelected) return entry;
-
-        var updated = entry;
-        final slots = entry.slots
-            .where((item) => item.weekday != weekday || item.slot != slot)
-            .toList();
-        if (isSelected) {
-          slots.add(HorarioSlot(weekday: weekday, slot: slot));
+    var selectedIndex = unique.length - 1;
+    if (unique.length > 1) {
+      final stops = _scheduleColorStops(unique, cellWidth);
+      for (var index = 0; index < unique.length - 1; index++) {
+        if (cellFraction <= stops[1 + index * 2]) {
+          selectedIndex = index;
+          break;
         }
-        slots.sort(
-          (a, b) => a.weekday != b.weekday
-              ? a.weekday.compareTo(b.weekday)
-              : a.slot.compareTo(b.slot),
-        );
-        updated = updated.copyWith(slots: slots);
-
-        if (isSelected &&
-            _view == 0 &&
-            !updated.coursePeriods.any(
-              (item) => item.program == _program && item.period == _period,
-            )) {
-          updated = updated.copyWith(
-            coursePeriods: [
-              ...updated.coursePeriods,
-              CursoPeriodo(program: _program, period: _period),
-            ],
-          );
-        }
-        if (isSelected &&
-            _view == 1 &&
-            _teacher != null &&
-            !updated.teacherNames.any(
-              (name) => name.toLowerCase() == _teacher!.toLowerCase(),
-            )) {
-          updated = updated.copyWith(
-            teachers: [...updated.teacherNames, _teacher!],
-          );
-        }
-        return updated;
-      }).toList();
-    });
-    await _persist();
-    _message('Hor\u00e1rio atualizado e salvo na base de dados.');
+      }
+    }
+    await _editPeriod(initialEntryId: unique[selectedIndex].id);
   }
 
   Future<void> _editTeachers() async {
-    final result = await Navigator.of(context).push<_TeacherRosterResult>(
-      MaterialPageRoute(
-        builder: (_) => _TeacherRosterPage(teachers: _teachers),
-      ),
+    final activeChannel = _teacherEditorChannel;
+    final activeController = _teacherEditorController;
+    if (activeChannel != null && activeController != null) {
+      final windows = await WindowController.getAll();
+      if (windows.any(
+        (window) => window.windowId == activeController.windowId,
+      )) {
+        final selectedTeacher = _view == 1 ? _teacher : null;
+        if (selectedTeacher != null) {
+          await activeChannel.invokeMethod<bool>(
+            'selectTeacher',
+            selectedTeacher,
+          );
+        }
+        await activeController.show();
+        return;
+      }
+      await activeChannel.setMethodCallHandler(null);
+      _teacherEditorChannel = null;
+      _teacherEditorController = null;
+    }
+    if (_openingTeacherEditor) return;
+    _openingTeacherEditor = true;
+    final channelName = 'gestor_ufu_teachers_${const Uuid().v4()}';
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
     );
-    if (result == null) return;
+    try {
+      await channel.setMethodCallHandler((call) async {
+        if (call.method == 'saveRoster' || call.method == 'closed') {
+          final result = _TeacherRosterResult.fromJson(
+            Map<String, dynamic>.from(call.arguments as Map),
+          );
+          await _applyTeacherRosterResult(result);
+          return true;
+        }
+        if (call.method == 'teacherSelected') {
+          final teacher = call.arguments as String?;
+          if (teacher != null && _teacherRoster.contains(teacher)) {
+            if (mounted && _teacher != teacher) {
+              setState(() => _teacher = teacher);
+            }
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_termScopedKey(_teacherKey, _term), teacher);
+            await _saveViewSelection();
+            return true;
+          }
+          return false;
+        }
+        throw MissingPluginException(
+          'M\u00e9todo n\u00e3o reconhecido: ${call.method}',
+        );
+      });
+      _teacherEditorChannel = channel;
+      final controller = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'teacherEditor',
+            'channel': channelName,
+            'teachers': _teachers,
+            'entries': _entries.map((entry) => entry.toJson()).toList(),
+            'programs': _programs.map((key, value) => MapEntry('$key', value)),
+            'initialTeacher': _view == 1 ? _teacher : null,
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _teacherEditorController = controller;
+      await controller.show();
+    } catch (_) {
+      await channel.setMethodCallHandler(null);
+      _teacherEditorChannel = null;
+      _teacherEditorController = null;
+      rethrow;
+    } finally {
+      _openingTeacherEditor = false;
+    }
+  }
+
+  Future<void> _applyTeacherRosterResult(_TeacherRosterResult result) async {
     final renamed = result.renamed;
     final hadImportedDistribution = _distributionRecords.isNotEmpty;
     setState(() {
       _teacherRoster = result.teachers;
-      _entries = _entries.map((entry) {
-        String replace(String name) {
-          var current = name;
-          final visited = <String>{};
-          while (renamed.containsKey(current) && visited.add(current)) {
-            current = renamed[current]!;
-            if (current.isEmpty) break;
-          }
-          return current;
-        }
-
-        final assigned = entry.teacherNames
-            .map(replace)
-            .where((name) => result.teachers.contains(name))
-            .toList();
-        return entry.copyWith(teachers: assigned);
-      }).toList();
+      _entries = result.entries;
       _distributionRecords = _distributionRecords
           .map((record) {
             var teacher = record.teacher;
@@ -2671,51 +2594,100 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     await _saveViewSelection();
   }
 
-  Future<void> _editPeriod() async {
-    final candidates = _periodEntries;
-    await showDialog<void>(
-      context: context,
-      builder: (_) => _HorarioEditorDialog(
-        entries: candidates,
-        teachers: _teachers,
-        selectedProgram: _program,
-        selectedPeriod: _period,
-        onSave: _savePeriodEntries,
-      ),
+  Future<void> _selectTeacher(String teacher) async {
+    if (mounted && _teacher != teacher) setState(() => _teacher = teacher);
+    await _saveViewSelection();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_termScopedKey(_teacherKey, _term), teacher);
+    await _teacherEditorChannel?.invokeMethod<bool>('selectTeacher', teacher);
+    _restoreCurrentTableScroll();
+  }
+
+  Future<void> _editPeriod({
+    String? initialEntryId,
+    bool selectDefault = false,
+  }) async {
+    final activeChannel = _scheduleEditorChannel;
+    final activeController = _scheduleEditorController;
+    if (activeChannel != null && activeController != null) {
+      final windows = await WindowController.getAll();
+      if (windows.any(
+        (window) => window.windowId == activeController.windowId,
+      )) {
+        if (selectDefault) {
+          await activeChannel.invokeMethod<bool>('selectDefault');
+        } else if (initialEntryId != null) {
+          await activeChannel.invokeMethod<bool>('selectEntry', initialEntryId);
+        }
+        await activeController.show();
+        return;
+      }
+      await activeChannel.setMethodCallHandler(null);
+      _scheduleEditorChannel = null;
+      _scheduleEditorController = null;
+    }
+    if (_openingScheduleEditor) return;
+    _openingScheduleEditor = true;
+    final channelName = 'gestor_ufu_schedule_${const Uuid().v4()}';
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
     );
+    try {
+      await channel.setMethodCallHandler((call) async {
+        if (call.method == 'saveEntries') {
+          final values = (call.arguments as List)
+              .map(
+                (value) => HorarioDisciplina.fromJson(
+                  Map<String, dynamic>.from(value as Map),
+                ),
+              )
+              .toList();
+          await _savePeriodEntries(values);
+          return true;
+        }
+        if (call.method == 'closed') {
+          return true;
+        }
+        throw MissingPluginException(
+          'M\u00e9todo n\u00e3o reconhecido: ${call.method}',
+        );
+      });
+      _scheduleEditorChannel = channel;
+      final controller = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'scheduleEditor',
+            'channel': channelName,
+            'entries': _entries.map((entry) => entry.toJson()).toList(),
+            'teachers': _teachers,
+            'programs': _programs.map((key, value) => MapEntry('$key', value)),
+            'selectedProgram': _program,
+            'selectedPeriod': _period,
+            'initialEntryId': initialEntryId,
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _scheduleEditorController = controller;
+      await controller.show();
+    } catch (_) {
+      await channel.setMethodCallHandler(null);
+      _scheduleEditorChannel = null;
+      _scheduleEditorController = null;
+      rethrow;
+    } finally {
+      _openingScheduleEditor = false;
+    }
   }
 
   Future<void> _savePeriodEntries(
     List<HorarioDisciplina> returnedEntries,
   ) async {
-    final candidates = _periodEntries;
-    final currentIds = candidates.map((entry) => entry.id).toSet();
-    final returnedById = {for (final entry in returnedEntries) entry.id: entry};
-    final previousById = {for (final entry in candidates) entry.id: entry};
+    final previousById = {for (final entry in _entries) entry.id: entry};
     var distributionChanged = false;
     setState(() {
-      final updated = <HorarioDisciplina>[];
-      for (final entry in _entries) {
-        if (!currentIds.contains(entry.id)) {
-          updated.add(entry);
-          continue;
-        }
-        final returned = returnedById[entry.id];
-        if (returned != null) {
-          updated.add(returned);
-          continue;
-        }
-        final remainingPeriods = entry.coursePeriods
-            .where(
-              (item) => !(item.program == _program && item.period == _period),
-            )
-            .toList();
-        if (remainingPeriods.isNotEmpty) {
-          updated.add(entry.copyWith(coursePeriods: remainingPeriods));
-        }
-      }
       for (final entry in returnedEntries) {
-        if (!currentIds.contains(entry.id)) updated.add(entry);
         final previous = previousById[entry.id];
         if (previous != null &&
             (previous.theoryHours != entry.theoryHours ||
@@ -2741,7 +2713,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           }).toList();
         }
       }
-      _entries = updated;
+      _entries = returnedEntries;
     });
     await _persist();
     if (distributionChanged && _distributionRecords.isNotEmpty) {
@@ -3111,10 +3083,138 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
   }
 
-  Map<String, List<HorarioDisciplina>> _scheduleForExportPeriod(int period) {
+  Future<List<String>?> _choosePdfTeachers() {
+    final availableTeachers = _teachers;
+    var scope = 0;
+    final selected = <String>{if (_teacher != null) _teacher!};
+    return showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, dialogSetState) => AlertDialog(
+          title: const Text('Exportar grades por docente'),
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                RadioListTile<int>(
+                  value: 0,
+                  groupValue: scope,
+                  title: Text('Professor corrente - ${_teacher ?? ""}'),
+                  onChanged: (value) => dialogSetState(() => scope = value!),
+                ),
+                RadioListTile<int>(
+                  value: 1,
+                  groupValue: scope,
+                  title: const Text('Todos os professores'),
+                  onChanged: (value) => dialogSetState(() => scope = value!),
+                ),
+                RadioListTile<int>(
+                  value: 2,
+                  groupValue: scope,
+                  title: const Text('Escolher professores'),
+                  onChanged: (value) => dialogSetState(() => scope = value!),
+                ),
+                if (scope == 2) ...[
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => dialogSetState(
+                          () => selected.addAll(availableTeachers),
+                        ),
+                        child: const Text('Selecionar todos'),
+                      ),
+                      TextButton(
+                        onPressed: () => dialogSetState(selected.clear),
+                        child: const Text('Limpar sele??o'),
+                      ),
+                      const Spacer(),
+                      Text('${selected.length} selecionado(s)'),
+                    ],
+                  ),
+                  SizedBox(
+                    height: 280,
+                    child: ListView.builder(
+                      itemCount: availableTeachers.length,
+                      itemBuilder: (context, index) {
+                        final teacher = availableTeachers[index];
+                        return CheckboxListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          value: selected.contains(teacher),
+                          title: Text(teacher),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          onChanged: (checked) => dialogSetState(() {
+                            if (checked == true) {
+                              selected.add(teacher);
+                            } else {
+                              selected.remove(teacher);
+                            }
+                          }),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: scope == 2 && selected.isEmpty
+                  ? null
+                  : () {
+                      final result = switch (scope) {
+                        0 => _teacher == null ? <String>[] : [_teacher!],
+                        1 => List<String>.of(availableTeachers),
+                        _ => selected.toList(),
+                      };
+                      result.sort(
+                        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+                      );
+                      Navigator.pop(dialogContext, result);
+                    },
+              icon: const Icon(Icons.picture_as_pdf_rounded),
+              label: const Text('Continuar'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<int> _exportPeriodsForTeacher(String teacher) {
+    final periods =
+        _entries
+            .where((entry) => entry.teacherNames.contains(teacher))
+            .expand((entry) => entry.coursePeriods.map((item) => item.period))
+            .toSet()
+            .toList()
+          ..sort();
+    return periods;
+  }
+
+  String _safeFileName(String value) {
+    final safe = value
+        .trim()
+        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '-')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceAll(RegExp(r'[. ]+$'), '');
+    return safe.isEmpty ? 'docente' : safe;
+  }
+
+  Map<String, List<HorarioDisciplina>> _scheduleForExportPeriod(
+    int period, {
+    String? teacher,
+  }) {
     final selectedEntries = _entries.where((entry) {
       final matchesView = _view == 1
-          ? _teacher != null && entry.teacherNames.contains(_teacher)
+          ? (teacher ?? _teacher) != null &&
+                entry.teacherNames.contains(teacher ?? _teacher)
           : entry.coursePeriods.any((item) => item.program == _program);
       return matchesView &&
           entry.coursePeriods.any(
@@ -3133,10 +3233,10 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     return result;
   }
 
-  String _exportTitle(List<int> periods) {
+  String _exportTitle(List<int> periods, {String? teacher}) {
     final periodLabel = periods.map(_periodExportLabel).join(', ');
     return _view == 1
-        ? 'Grade: ${_teacher ?? 'Docente'} ? $periodLabel'
+        ? 'Grade: ${teacher ?? _teacher ?? 'Docente'} ? $periodLabel'
         : '${_programs[_program]} ? $periodLabel';
   }
 
@@ -3221,6 +3321,74 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
   Future<void> _exportPdf() async {
     final teacherMode = _view == 1;
+    if (teacherMode) {
+      final selectedTeacher = _teacher;
+      if (selectedTeacher == null) return;
+      final selectedTeachers = await _choosePdfTeachers();
+      if (selectedTeachers == null) return;
+      final teachers = selectedTeachers;
+      final exportMultiple = teachers.length > 1;
+      final singleTeacher = teachers.length == 1
+          ? teachers.single
+          : selectedTeacher;
+      if (teachers.isEmpty) {
+        _message('Nenhum professor possui disciplinas para exportar.');
+        return;
+      }
+
+      try {
+        String? directory;
+        String? singleFilePath;
+        if (exportMultiple) {
+          directory = await FilePicker.platform.getDirectoryPath(
+            dialogTitle: 'Escolha a pasta dos PDFs dos professores',
+          );
+          if (directory == null) return;
+        } else {
+          singleFilePath = await FilePicker.platform.saveFile(
+            dialogTitle: 'Exportar grade do professor',
+            fileName: '${_safeFileName(singleTeacher)}.pdf',
+            type: FileType.custom,
+            allowedExtensions: const ['pdf'],
+          );
+          if (singleFilePath == null) return;
+        }
+
+        var exported = 0;
+        for (final teacher in teachers) {
+          final periods = _exportPeriodsForTeacher(teacher);
+          if (periods.isEmpty) continue;
+          final sheets = [
+            for (final period in periods)
+              _createPdfSheet(
+                _exportTitle([period], teacher: teacher),
+                _scheduleForExportPeriod(period, teacher: teacher),
+              ),
+          ];
+          final bytes = await _pdfService.generate(
+            term: _term,
+            sheets: sheets,
+            isLightTheme: AppTheme.isLight,
+          );
+          final outputPath = exportMultiple
+              ? '${directory!}${Platform.pathSeparator}${_safeFileName(teacher)}.pdf'
+              : (singleFilePath!.toLowerCase().endsWith('.pdf')
+                    ? singleFilePath
+                    : '$singleFilePath.pdf');
+          await File(outputPath).writeAsBytes(bytes, flush: true);
+          exported++;
+        }
+        _message(
+          exportMultiple
+              ? '$exported PDF(s) exportado(s), um por professor.'
+              : 'PDF da grade de $singleTeacher exportado com sucesso.',
+        );
+      } catch (error) {
+        _message('N\u00e3o foi poss\u00edvel exportar o PDF: $error');
+      }
+      return;
+    }
+
     final choice = await _chooseExportPeriods(pdf: true);
     if (choice == null) return;
     final selectedSchedules = choice.periods
@@ -3405,19 +3573,141 @@ class _TeacherDistributionRecord {
       );
 }
 
+class HorarioEditorWindowApp extends StatelessWidget {
+  const HorarioEditorWindowApp({
+    required this.entries,
+    required this.teachers,
+    required this.programs,
+    required this.selectedProgram,
+    required this.selectedPeriod,
+    required this.channelName,
+    required this.initialEntryId,
+    required this.isLight,
+    super.key,
+  });
+
+  final List<HorarioDisciplina> entries;
+  final List<String> teachers;
+  final Map<int, String> programs;
+  final int selectedProgram;
+  final int selectedPeriod;
+  final String channelName;
+  final String? initialEntryId;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    debugShowCheckedModeBanner: false,
+    theme: AppTheme.light,
+    darkTheme: AppTheme.dark,
+    themeMode: isLight ? ThemeMode.light : ThemeMode.dark,
+    home: Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: _HorarioEditorDialog(
+            entries: entries,
+            teachers: teachers,
+            programs: programs,
+            selectedProgram: selectedProgram,
+            selectedPeriod: selectedPeriod,
+            initialEntryId: initialEntryId,
+            channelName: channelName,
+            onSave: (updated) async {
+              await WindowMethodChannel(
+                channelName,
+                mode: ChannelMode.bidirectional,
+              ).invokeMethod<bool>(
+                'saveEntries',
+                updated.map((entry) => entry.toJson()).toList(),
+              );
+            },
+            onClose: () async {
+              try {
+                await WindowMethodChannel(
+                  channelName,
+                  mode: ChannelMode.bidirectional,
+                ).invokeMethod<bool>('closed');
+              } finally {
+                await (await WindowController.fromCurrentEngine()).hide();
+              }
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class TeacherRosterWindowApp extends StatelessWidget {
+  const TeacherRosterWindowApp({
+    required this.teachers,
+    required this.entries,
+    required this.programs,
+    required this.channelName,
+    required this.initialTeacher,
+    required this.isLight,
+    super.key,
+  });
+
+  final List<String> teachers;
+  final List<HorarioDisciplina> entries;
+  final Map<int, String> programs;
+  final String channelName;
+  final String? initialTeacher;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
+    );
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: isLight ? ThemeMode.light : ThemeMode.dark,
+      home: _TeacherRosterPage(
+        teachers: teachers,
+        entries: entries,
+        programs: programs,
+        initialTeacher: initialTeacher,
+        channelName: channelName,
+        onSave: (result) =>
+            channel.invokeMethod<bool>('saveRoster', result.toJson()),
+        onClose: (result) async {
+          try {
+            await channel.invokeMethod<bool>('closed', result.toJson());
+          } finally {
+            await (await WindowController.fromCurrentEngine()).hide();
+          }
+        },
+      ),
+    );
+  }
+}
+
 class _HorarioEditorDialog extends StatefulWidget {
   const _HorarioEditorDialog({
     required this.entries,
     required this.teachers,
+    required this.programs,
     required this.selectedProgram,
     required this.selectedPeriod,
+    required this.initialEntryId,
+    required this.channelName,
     required this.onSave,
+    this.onClose,
   });
   final List<HorarioDisciplina> entries;
   final List<String> teachers;
+  final Map<int, String> programs;
   final int selectedProgram;
   final int selectedPeriod;
+  final String? initialEntryId;
+  final String channelName;
   final Future<void> Function(List<HorarioDisciplina>) onSave;
+  final Future<void> Function()? onClose;
   @override
   State<_HorarioEditorDialog> createState() => _HorarioEditorDialogState();
 }
@@ -3435,6 +3725,16 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
   final _extensionHours = TextEditingController();
   final Set<String> _slots = {};
   final List<String> _selectedTeachers = [];
+  final List<CursoPeriodo> _offerings = [];
+  Future<void> _closeEditor() async {
+    final onClose = widget.onClose;
+    if (onClose != null) {
+      await onClose();
+    } else if (mounted) {
+      Navigator.pop(context);
+    }
+  }
+
   late final List<HorarioDisciplina> _entries = [...widget.entries];
   String? _selectedId;
   String? _newEntryId;
@@ -3443,13 +3743,35 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
   bool _addingTurma = false;
   String? get _activeNewEntryId => _newEntryId;
   bool get _creating => _activeNewEntryId != null;
+  bool get _hasSelectedModality =>
+      _selectedModality != 'legacy' &&
+      _availableModalities.contains(_selectedModality);
   HorarioDisciplina? get _selected => [
     ..._entries,
     if (_creating) _blank(),
   ].where((e) => e.id == _selectedId).firstOrNull;
   HorarioDisciplina? get _firstEntryWithClass =>
       _entries.where((entry) => entry.className.trim().isNotEmpty).firstOrNull;
-  HorarioDisciplina get _defaultEntry => _firstEntryWithClass ?? _entries.first;
+  HorarioDisciplina get _defaultEntry {
+    final relevant = _entries
+        .where(
+          (entry) => entry.coursePeriods.any(
+            (item) =>
+                item.program == widget.selectedProgram &&
+                item.period == widget.selectedPeriod,
+          ),
+        )
+        .toList();
+    if (relevant.isEmpty) return _firstEntryWithClass ?? _entries.first;
+
+    final firstSubject = relevant.first;
+    final subjectEntries = relevant
+        .where((entry) => _sameDiscipline(entry, firstSubject))
+        .toList();
+    return _firstConfiguredTurma(subjectEntries) ??
+        relevant.where((entry) => entry.modality != 'legacy').firstOrNull ??
+        relevant.first;
+  }
 
   HorarioDisciplina _blank() =>
       _newEntryTemplate?.copyWith(
@@ -3489,7 +3811,13 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
   @override
   void initState() {
     super.initState();
-    if (_entries.isEmpty) {
+    final requestedEntry = _entries
+        .where((entry) => entry.id == widget.initialEntryId)
+        .firstOrNull;
+    if (requestedEntry != null) {
+      _selectedId = requestedEntry.id;
+      _select(requestedEntry);
+    } else if (_entries.isEmpty) {
       _newEntryId = const Uuid().v4();
       _selectedId = _activeNewEntryId;
       _select(_blank());
@@ -3498,6 +3826,25 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       _selectedId = entry.id;
       _select(entry);
     }
+    unawaited(
+      WindowMethodChannel(
+        widget.channelName,
+        mode: ChannelMode.bidirectional,
+      ).setMethodCallHandler((call) async {
+        if (call.method == 'selectEntry') {
+          final id = call.arguments as String?;
+          if (id != null && mounted) _switchEntry(id);
+          return true;
+        }
+        if (call.method == 'selectDefault') {
+          if (mounted && _entries.isNotEmpty) _switchEntry(_defaultEntry.id);
+          return true;
+        }
+        throw MissingPluginException(
+          'M\u00e9todo n\u00e3o reconhecido: ${call.method}',
+        );
+      }),
+    );
   }
 
   @override
@@ -3526,6 +3873,28 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     'extension' => 'Extens\u00e3o',
     _ => 'Cadastro anterior',
   };
+
+  Color _modalityScheduleColor(String modality) => switch (modality) {
+    'theory' => const Color(0xFF6554E8),
+    'practice' => const Color(0xFF0089A8),
+    'ead' => const Color(0xFFE09A00),
+    'extension' => const Color(0xFF16803C),
+    _ => AppTheme.textSecondary,
+  };
+
+  List<HorarioDisciplina> _otherClassesAtSlot(String slotKey) {
+    final current = _selected;
+    if (current == null) return const [];
+    return _entries
+        .where(
+          (entry) =>
+              entry.id != current.id &&
+              _sameDiscipline(entry, current) &&
+              entry.modality != 'legacy' &&
+              entry.slots.any((slot) => slot.key == slotKey),
+        )
+        .toList();
+  }
 
   List<String> get _availableModalities => [
     if ((int.tryParse(_theoryHours.text.trim()) ?? 0) > 0) 'theory',
@@ -3642,7 +4011,6 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
   );
 
   void _select(HorarioDisciplina entry) {
-    _selectedModality = entry.modality == 'legacy' ? 'legacy' : entry.modality;
     _code.text = entry.code;
     _acronym.text = entry.acronym;
     _name.text = entry.name;
@@ -3656,6 +4024,26 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     _practiceHours.text = '${_sharedHours(entry, 'practice')}';
     _eadHours.text = '${_sharedHours(entry, 'ead')}';
     _extensionHours.text = '${_sharedHours(entry, 'extension')}';
+    _selectedModality = entry.modality == 'legacy'
+        ? (_availableModalities.firstOrNull ?? 'legacy')
+        : entry.modality;
+    final related = _creating
+        ? [entry]
+        : _entries.where((candidate) => _sameDiscipline(candidate, entry));
+    final offerings = <String, CursoPeriodo>{};
+    for (final candidate in related) {
+      for (final offering in candidate.coursePeriods) {
+        offerings['${offering.program}:${offering.period}'] = offering;
+      }
+    }
+    _offerings
+      ..clear()
+      ..addAll(
+        offerings.values.toList()..sort((a, b) {
+          final course = a.program.compareTo(b.program);
+          return course != 0 ? course : a.period.compareTo(b.period);
+        }),
+      );
     _slots
       ..clear()
       ..addAll(entry.slots.map((slot) => slot.key));
@@ -3700,6 +4088,25 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     );
   }
 
+  HorarioDisciplina? _firstConfiguredTurma(
+    List<HorarioDisciplina> subjectEntries,
+  ) {
+    if (subjectEntries.isEmpty) return null;
+    final source = subjectEntries.first;
+    for (final modality in const ['theory', 'practice', 'ead', 'extension']) {
+      if (_sharedHours(source, modality) <= 0) continue;
+      final groups = subjectEntries
+          .where((entry) => entry.modality == modality)
+          .toList();
+      final identified = groups
+          .where((entry) => entry.className.trim().isNotEmpty)
+          .firstOrNull;
+      if (identified != null) return identified;
+      if (groups.isNotEmpty) return groups.first;
+    }
+    return null;
+  }
+
   List<HorarioDisciplina> _disciplineOptions(HorarioDisciplina? current) {
     final entries = [..._entries, if (_creating) _blank()];
     final bySubject = <String, List<HorarioDisciplina>>{};
@@ -3709,27 +4116,22 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     return bySubject.values.map((groups) {
       if (current != null &&
           _disciplineGroupKey(current) == _disciplineGroupKey(groups.first)) {
-        return current;
+        if (current.modality != 'legacy') return current;
       }
       final sameMode = groups
           .where((entry) => entry.modality == _selectedModality)
           .toList();
-      final sameModeWithClass = sameMode
-          .where((entry) => entry.className.trim().isNotEmpty)
-          .toList();
-      final sameClass = sameModeWithClass
+      final sameClass = sameMode
           .where(
             (entry) =>
+                entry.className.trim().isNotEmpty &&
                 entry.className.trim().toLowerCase() ==
-                current?.className.trim().toLowerCase(),
+                    current?.className.trim().toLowerCase(),
           )
           .firstOrNull;
-      final anyClass = groups
-          .where((entry) => entry.className.trim().isNotEmpty)
-          .firstOrNull;
       return sameClass ??
-          sameModeWithClass.firstOrNull ??
-          anyClass ??
+          _firstConfiguredTurma(groups) ??
+          groups.where((entry) => entry.modality != 'legacy').firstOrNull ??
           groups.first;
     }).toList()..sort((a, b) {
       final acronym = a.acronym.toLowerCase().compareTo(
@@ -4091,6 +4493,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     practiceHours: int.tryParse(_practiceHours.text.trim()) ?? 0,
     eadHours: int.tryParse(_eadHours.text.trim()) ?? 0,
     extensionHours: int.tryParse(_extensionHours.text.trim()) ?? 0,
+    coursePeriods: List<CursoPeriodo>.of(_offerings),
     slots:
         _slots.map((key) {
           final parts = key.split(':');
@@ -4121,6 +4524,16 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Informe ao menos o nome e a sigla da disciplina.'),
+        ),
+      );
+      return false;
+    }
+    if (_offerings.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Associe a disciplina a pelo menos um curso e período.',
+          ),
         ),
       );
       return false;
@@ -4185,6 +4598,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
             practiceHours: edited.practiceHours,
             eadHours: edited.eadHours,
             extensionHours: edited.extensionHours,
+            coursePeriods: List<CursoPeriodo>.of(edited.coursePeriods),
           );
         }
       }
@@ -4350,9 +4764,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
               .firstOrNull
               ?.id;
     return Dialog(
-      child: SizedBox(
-        width: 1000,
-        height: 760,
+      insetPadding: EdgeInsets.zero,
+      child: SizedBox.expand(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -4388,7 +4801,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                     ),
                   ),
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _closeEditor,
                     icon: const Icon(Icons.close_rounded),
                   ),
                 ],
@@ -4398,9 +4811,11 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                 children: [
                   Expanded(
                     child: DropdownMenu<String>(
-                      key: ValueKey(
-                        '$_selectedId-$_creating-${_entries.length}',
-                      ),
+                      // Keep this state stable while its popup is open. A
+                      // changing key deactivates DropdownMenu's inherited
+                      // overlay subtree during selection on some Flutter
+                      // versions, which can trigger _dependents.isEmpty.
+                      key: const ValueKey('schedule-discipline-selector'),
                       initialSelection: selectedDisciplineId,
                       textStyle: TextStyle(
                         color: item == null
@@ -4408,7 +4823,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                             : _disciplineStatusColor(item),
                         fontSize: 16,
                       ),
-                      label: const Text('Disciplina do per\u00edodo'),
+                      label: const Text('Disciplina'),
                       expandedInsets: EdgeInsets.zero,
                       enableFilter: true,
                       requestFocusOnTap: true,
@@ -4472,6 +4887,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                           SizedBox(
                             width: 335,
                             child: SingleChildScrollView(
+                              padding: const EdgeInsets.only(top: 8),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -4486,6 +4902,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                     onChanged: (_) => setState(() {}),
                                   ),
                                   const SizedBox(height: 9),
+                                  _offeringEditor(),
+                                  const SizedBox(height: 16),
                                   Row(
                                     children: [
                                       Expanded(
@@ -4562,106 +4980,132 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                       if (value != null) _changeModality(value);
                                     },
                                   ),
-                                  const SizedBox(height: 9),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        flex: 5,
-                                        child:
-                                            _class.text.trim().isEmpty &&
-                                                classGroups.every(
-                                                  (entry) => entry.className
-                                                      .trim()
-                                                      .isEmpty,
-                                                )
-                                            ? TextField(
-                                                controller: _class,
-                                                readOnly: true,
-                                                maxLines: 1,
-                                                onTap:
-                                                    _promptTurmaIdentification,
-                                                decoration: InputDecoration(
-                                                  labelText:
-                                                      'Turma (${_modalityName(_selectedModality)})',
-                                                  hintText:
-                                                      'Clique para identificar',
-                                                  suffixIcon: const Icon(
-                                                    Icons
-                                                        .arrow_drop_down_rounded,
+                                  if (_hasSelectedModality) ...[
+                                    const SizedBox(height: 9),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          flex: 5,
+                                          child:
+                                              _class.text.trim().isEmpty &&
+                                                  classGroups.every(
+                                                    (entry) => entry.className
+                                                        .trim()
+                                                        .isEmpty,
+                                                  )
+                                              ? TextField(
+                                                  controller: _class,
+                                                  readOnly: true,
+                                                  maxLines: 1,
+                                                  onTap:
+                                                      _promptTurmaIdentification,
+                                                  decoration: InputDecoration(
+                                                    labelText:
+                                                        'Turma (${_modalityName(_selectedModality)})',
+                                                    hintText:
+                                                        'Clique para identificar',
+                                                    suffixIcon: const Icon(
+                                                      Icons
+                                                          .arrow_drop_down_rounded,
+                                                    ),
+                                                    isDense: true,
                                                   ),
-                                                  isDense: true,
-                                                ),
-                                              )
-                                            : DropdownButtonFormField<String>(
-                                                key: ValueKey(
-                                                  'class-$_selectedId-$_selectedModality',
-                                                ),
-                                                initialValue:
-                                                    classGroups.any(
-                                                      (entry) =>
-                                                          entry.id ==
-                                                          _selectedId,
-                                                    )
-                                                    ? _selectedId
-                                                    : null,
-                                                hint: const Text(
-                                                  'Selecione a turma',
-                                                ),
-                                                isExpanded: true,
-                                                decoration: InputDecoration(
-                                                  labelText:
-                                                      'Turma (${_modalityName(_selectedModality)})',
-                                                  isDense: true,
-                                                ),
-                                                items: classGroups
-                                                    .map(
-                                                      (
-                                                        entry,
-                                                      ) => DropdownMenuItem(
-                                                        value: entry.id,
-                                                        child: Text(
-                                                          entry.className
-                                                                  .trim()
-                                                                  .isEmpty
-                                                              ? 'Turma sem identificação'
-                                                              : entry.className,
-                                                          overflow: TextOverflow
-                                                              .ellipsis,
+                                                )
+                                              : DropdownButtonFormField<String>(
+                                                  key: ValueKey(
+                                                    'class-$_selectedId-$_selectedModality',
+                                                  ),
+                                                  initialValue:
+                                                      classGroups.any(
+                                                        (entry) =>
+                                                            entry.id ==
+                                                            _selectedId,
+                                                      )
+                                                      ? _selectedId
+                                                      : null,
+                                                  hint: const Text(
+                                                    'Selecione a turma',
+                                                  ),
+                                                  isExpanded: true,
+                                                  decoration: InputDecoration(
+                                                    labelText:
+                                                        'Turma (${_modalityName(_selectedModality)})',
+                                                    isDense: true,
+                                                  ),
+                                                  items: classGroups
+                                                      .map(
+                                                        (
+                                                          entry,
+                                                        ) => DropdownMenuItem(
+                                                          value: entry.id,
+                                                          child: Text(
+                                                            entry.className
+                                                                    .trim()
+                                                                    .isEmpty
+                                                                ? 'Turma sem identificação'
+                                                                : entry
+                                                                      .className,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                          ),
                                                         ),
-                                                      ),
-                                                    )
-                                                    .toList(),
-                                                onChanged: _switchEntry,
-                                              ),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      IconButton.filledTonal(
-                                        tooltip:
-                                            'Adicionar turma nesta modalidade',
-                                        onPressed: _startAddingTurma,
-                                        icon: const Icon(Icons.add_rounded),
-                                      ),
-                                      const SizedBox(width: 2),
-                                      IconButton.filledTonal(
-                                        tooltip: 'Remover turma selecionada',
-                                        onPressed: _deleteSelected,
-                                        style: IconButton.styleFrom(
-                                          foregroundColor: AppTheme.danger,
+                                                      )
+                                                      .toList(),
+                                                  onChanged: _switchEntry,
+                                                ),
                                         ),
-                                        icon: const Icon(Icons.remove_rounded),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        flex: 4,
-                                        child: _field(
-                                          _room,
-                                          'Sala desta turma',
+                                        const SizedBox(width: 4),
+                                        IconButton.filledTonal(
+                                          tooltip:
+                                              'Adicionar turma nesta modalidade',
+                                          onPressed: _startAddingTurma,
+                                          style: IconButton.styleFrom(
+                                            minimumSize: const Size(36, 36),
+                                            fixedSize: const Size(36, 36),
+                                            maximumSize: const Size(36, 36),
+                                            padding: EdgeInsets.zero,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                          ),
+                                          iconSize: 18,
+                                          icon: const Icon(Icons.add_rounded),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 9),
-                                  _teacherPickerField(),
+                                        const SizedBox(width: 2),
+                                        IconButton.filledTonal(
+                                          tooltip: 'Remover turma selecionada',
+                                          onPressed: _deleteSelected,
+                                          style: IconButton.styleFrom(
+                                            foregroundColor: AppTheme.danger,
+                                            minimumSize: const Size(36, 36),
+                                            fixedSize: const Size(36, 36),
+                                            maximumSize: const Size(36, 36),
+                                            padding: EdgeInsets.zero,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                          ),
+                                          iconSize: 18,
+                                          icon: const Icon(
+                                            Icons.remove_rounded,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Expanded(
+                                          flex: 4,
+                                          child: _field(
+                                            _room,
+                                            'Sala desta turma',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 9),
+                                    _teacherPickerField(),
+                                  ],
                                 ],
                               ),
                             ),
@@ -4671,132 +5115,241 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      'HORÁRIOS DA SEMANA',
-                                      style: TextStyle(
-                                        color: _weeklyHoursStatusColor,
-                                        fontSize: 10,
-                                        letterSpacing: 1.1,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    Text(
-                                      '${_slots.length} blocos selecionados',
-                                      style: TextStyle(
-                                        color: AppTheme.primaryLight,
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    child: Column(
-                                      children: [
-                                        Row(
-                                          children: [
-                                            const SizedBox(width: 105),
-                                            for (final day in horarioDias)
-                                              Expanded(
-                                                child: Center(
-                                                  child: Text(
-                                                    day.substring(0, 3),
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                          ],
+                                if (!_hasSelectedModality)
+                                  const Expanded(child: SizedBox.shrink())
+                                else ...[
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'HORÁRIOS DA SEMANA',
+                                        style: TextStyle(
+                                          color: _weeklyHoursStatusColor,
+                                          fontSize: 10,
+                                          letterSpacing: 1.1,
+                                          fontWeight: FontWeight.w700,
                                         ),
-                                        const SizedBox(height: 6),
-                                        for (
-                                          var slot = 1;
-                                          slot <= horarioFaixas.length;
-                                          slot++
-                                        )
-                                          SizedBox(
-                                            height: 42,
-                                            child: Row(
-                                              children: [
-                                                SizedBox(
-                                                  width: 105,
-                                                  child: Text(
-                                                    horarioFaixas[slot - 1],
-                                                    style: TextStyle(
-                                                      color: AppTheme
-                                                          .textSecondary,
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ),
-                                                for (
-                                                  var day = 1;
-                                                  day <= 5;
-                                                  day++
-                                                )
-                                                  Expanded(
-                                                    child: Center(
-                                                      child: Checkbox(
-                                                        value: _slots.contains(
-                                                          '$day:$slot',
-                                                        ),
-                                                        onChanged:
-                                                            _selectedModality ==
-                                                                'ead'
-                                                            ? null
-                                                            : (
-                                                                selected,
-                                                              ) => setState(() {
-                                                                if (selected ==
-                                                                    true) {
-                                                                  _slots.add(
-                                                                    '$day:$slot',
-                                                                  );
-                                                                } else {
-                                                                  _slots.remove(
-                                                                    '$day:$slot',
-                                                                  );
-                                                                }
-                                                              }),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        '${_slots.length} blocos selecionados',
+                                        style: TextStyle(
+                                          color: AppTheme.primaryLight,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      child: Column(
+                                        children: [
+                                          Row(
+                                            children: [
+                                              const SizedBox(width: 105),
+                                              for (final day in horarioDias)
+                                                Expanded(
+                                                  child: Center(
+                                                    child: Text(
+                                                      day.substring(0, 3),
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .textSecondary,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.w700,
                                                       ),
                                                     ),
                                                   ),
-                                              ],
-                                            ),
+                                                ),
+                                            ],
                                           ),
-                                      ],
+                                          const SizedBox(height: 6),
+                                          for (
+                                            var slot = 1;
+                                            slot <= horarioFaixas.length;
+                                            slot++
+                                          )
+                                            SizedBox(
+                                              height: 42,
+                                              child: Row(
+                                                children: [
+                                                  SizedBox(
+                                                    width: 105,
+                                                    child: Text(
+                                                      horarioFaixas[slot - 1],
+                                                      style: TextStyle(
+                                                        color: AppTheme
+                                                            .textSecondary,
+                                                        fontSize: 10,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  for (
+                                                    var day = 1;
+                                                    day <= 5;
+                                                    day++
+                                                  )
+                                                    Expanded(
+                                                      child: Center(
+                                                        child: Builder(
+                                                          builder: (context) {
+                                                            final slotKey =
+                                                                '$day:$slot';
+                                                            final otherClasses =
+                                                                _otherClassesAtSlot(
+                                                                  slotKey,
+                                                                );
+                                                            final modalities =
+                                                                otherClasses
+                                                                    .map(
+                                                                      (
+                                                                        entry,
+                                                                      ) => entry
+                                                                          .modality,
+                                                                    )
+                                                                    .toSet()
+                                                                    .toList();
+                                                            final markerColor =
+                                                                modalities
+                                                                    .isEmpty
+                                                                ? null
+                                                                : _modalityScheduleColor(
+                                                                    modalities
+                                                                        .first,
+                                                                  );
+                                                            final tooltip =
+                                                                otherClasses
+                                                                    .isEmpty
+                                                                ? null
+                                                                : otherClasses
+                                                                      .map(
+                                                                        (
+                                                                          entry,
+                                                                        ) =>
+                                                                            '${_modalityName(entry.modality)} - turma ${entry.className}',
+                                                                      )
+                                                                      .toSet()
+                                                                      .join(
+                                                                        '\r\n',
+                                                                      );
+                                                            return Tooltip(
+                                                              message:
+                                                                  tooltip ?? '',
+                                                              child: SizedBox(
+                                                                width: 40,
+                                                                height: 40,
+                                                                child: Stack(
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .center,
+                                                                  children: [
+                                                                    CheckboxTheme(
+                                                                      data: CheckboxThemeData(
+                                                                        side:
+                                                                            markerColor ==
+                                                                                null
+                                                                            ? null
+                                                                            : BorderSide(
+                                                                                color: markerColor,
+                                                                                width: 2,
+                                                                              ),
+                                                                      ),
+                                                                      child: Checkbox(
+                                                                        value: _slots.contains(
+                                                                          slotKey,
+                                                                        ),
+                                                                        onChanged:
+                                                                            _selectedModality ==
+                                                                                'ead'
+                                                                            ? null
+                                                                            : (
+                                                                                selected,
+                                                                              ) => setState(() {
+                                                                                if (selected ==
+                                                                                    true) {
+                                                                                  _slots.add(
+                                                                                    slotKey,
+                                                                                  );
+                                                                                } else {
+                                                                                  _slots.remove(
+                                                                                    slotKey,
+                                                                                  );
+                                                                                }
+                                                                              }),
+                                                                      ),
+                                                                    ),
+                                                                    if (modalities
+                                                                            .length >
+                                                                        1)
+                                                                      Positioned(
+                                                                        top: 1,
+                                                                        right:
+                                                                            1,
+                                                                        child: Row(
+                                                                          mainAxisSize:
+                                                                              MainAxisSize.min,
+                                                                          children: [
+                                                                            for (final modality
+                                                                                in modalities)
+                                                                              Container(
+                                                                                width: 5,
+                                                                                height: 5,
+                                                                                margin: const EdgeInsets.only(
+                                                                                  left: 1,
+                                                                                ),
+                                                                                decoration: BoxDecoration(
+                                                                                  color: _modalityScheduleColor(
+                                                                                    modality,
+                                                                                  ),
+                                                                                  shape: BoxShape.circle,
+                                                                                ),
+                                                                              ),
+                                                                          ],
+                                                                        ),
+                                                                      ),
+                                                                  ],
+                                                                ),
+                                                              ),
+                                                            );
+                                                          },
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(height: 9),
-                                Container(
-                                  padding: const EdgeInsets.all(11),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primary.withAlpha(16),
-                                    borderRadius: BorderRadius.circular(11),
+                                  const SizedBox(height: 9),
+                                  Builder(
+                                    builder: (context) {
+                                      final statusColor =
+                                          _disciplineStatusColor(item);
+                                      return Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.all(11),
+                                        decoration: BoxDecoration(
+                                          color: statusColor.withAlpha(16),
+                                          borderRadius: BorderRadius.circular(
+                                            11,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          _disciplineStatusMessage(item),
+                                          style: TextStyle(
+                                            color: statusColor,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            height: 1.35,
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
-                                  child: Text(
-                                    _selectedModality == 'ead'
-                                        ? 'Turmas EaD ficam registradas na carga horária e na distribuição docente, sem ocupar horários presenciais.'
-                                        : _selectedModality == 'extension'
-                                        ? 'Turmas de Extensão podem ter horários na grade; marque os blocos quando houver encontros presenciais.'
-                                        : 'Os blocos usam a mesma codificação da planilha original. Sobreposições são mantidas e destacadas na grade para revisão.',
-                                    style: TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 10,
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                ),
+                                ],
                               ],
                             ),
                           ),
@@ -4814,7 +5367,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                   ),
                   const SizedBox(width: 8),
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: _closeEditor,
                     child: const Text('Fechar'),
                   ),
                 ],
@@ -4891,14 +5444,15 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     final extension = editingThisDiscipline
         ? int.tryParse(_extensionHours.text.trim()) ?? 0
         : _sharedHours(discipline, 'extension');
+    final classGroups = groups.where(_isIdentifiedModalityClass).toList();
     bool hasClassFor(String modality) =>
-        groups.any((entry) => entry.modality == modality);
+        classGroups.any((entry) => entry.modality == modality);
     if ((theory > 0 && !hasClassFor('theory')) ||
         (practice > 0 && !hasClassFor('practice')) ||
         (extension > 0 && !hasClassFor('extension'))) {
       return const Color(0xFFB42318);
     }
-    final checkedGroups = groups.map(
+    final checkedGroups = classGroups.map(
       (entry) => entry.copyWith(
         theoryHours: theory,
         practiceHours: practice,
@@ -4915,6 +5469,86 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     }
     return const Color(0xFF16803C);
   }
+
+  String _disciplineStatusMessage(HorarioDisciplina discipline) {
+    final selected = _selected;
+    final editingThisDiscipline =
+        selected != null && _sameDiscipline(selected, discipline);
+    final groups = _entries
+        .where((entry) => _sameDiscipline(entry, discipline))
+        .map(
+          (entry) => editingThisDiscipline && entry.id == selected.id
+              ? _editedValue(selected)
+              : entry,
+        )
+        .toList();
+    if (_creating &&
+        editingThisDiscipline &&
+        !groups.any((entry) => entry.id == selected.id)) {
+      groups.add(_editedValue(discipline));
+    }
+
+    final theory = editingThisDiscipline
+        ? int.tryParse(_theoryHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'theory');
+    final practice = editingThisDiscipline
+        ? int.tryParse(_practiceHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'practice');
+    final extension = editingThisDiscipline
+        ? int.tryParse(_extensionHours.text.trim()) ?? 0
+        : _sharedHours(discipline, 'extension');
+    final classGroups = groups.where(_isIdentifiedModalityClass).toList();
+    final missingModalities = <String>[
+      if (theory > 0 && !classGroups.any((entry) => entry.modality == 'theory'))
+        'Teórica',
+      if (practice > 0 &&
+          !classGroups.any((entry) => entry.modality == 'practice'))
+        'Prática',
+      if (extension > 0 &&
+          !classGroups.any((entry) => entry.modality == 'extension'))
+        'Extensão',
+    ];
+
+    final draft = editingThisDiscipline ? _editedValue(selected) : null;
+    final shortages = <String>[];
+    final overages = <String>[];
+    for (final storedEntry in classGroups) {
+      final entry = draft != null && storedEntry.id == draft.id
+          ? draft
+          : storedEntry;
+      if (entry.modality == 'ead' || entry.modality == 'extension') continue;
+      final expected = entry.modality == 'theory' ? theory : practice;
+      final scheduled = entry.slots.length;
+      if (scheduled < expected) {
+        shortages.add(
+          '${entry.timetableLabel}: $scheduled/$expected aulas semanais',
+        );
+      } else if (scheduled > expected) {
+        overages.add(
+          '${entry.timetableLabel}: $scheduled/$expected aulas semanais',
+        );
+      }
+    }
+
+    final messages = <String>[
+      if (missingModalities.isNotEmpty)
+        'Falta cadastrar turma para CH ${missingModalities.join(' e CH ')}.',
+      if (shortages.isNotEmpty)
+        'Carga horária incompleta: ${shortages.join('; ')}.',
+      if (overages.isNotEmpty)
+        'Há mais horários que a carga horária: ${overages.join('; ')}.',
+    ];
+    return messages.isEmpty ? 'Disciplina ok.' : messages.join('\r\n');
+  }
+
+  bool _isIdentifiedModalityClass(HorarioDisciplina entry) =>
+      const {
+        'theory',
+        'practice',
+        'ead',
+        'extension',
+      }.contains(entry.modality) &&
+      entry.className.trim().isNotEmpty;
 
   Color _weeklyHoursStatusColorForValues({
     required int scheduled,
@@ -4941,10 +5575,204 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     decoration: InputDecoration(labelText: label, isDense: true),
   );
 
+  Future<void> _addOffering() async {
+    final programIds = widget.programs.keys.toList()..sort();
+    if (programIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cadastre um curso antes de associar a disciplina.'),
+        ),
+      );
+      return;
+    }
+
+    var selectedProgram = programIds.contains(widget.selectedProgram)
+        ? widget.selectedProgram
+        : programIds.first;
+    var selectedPeriod =
+        widget.selectedPeriod >= 1 && widget.selectedPeriod <= 11
+        ? widget.selectedPeriod
+        : 1;
+    final periods = List<int>.generate(11, (index) => index + 1);
+    final offering = await showDialog<CursoPeriodo>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Adicionar oferta'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: selectedProgram,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Curso'),
+                  items: [
+                    for (final id in programIds)
+                      DropdownMenuItem(
+                        value: id,
+                        child: Text(
+                          widget.programs[id] ?? 'Curso $id',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => selectedProgram = value);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<int>(
+                  initialValue: selectedPeriod,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Per\u00edodo'),
+                  items: [
+                    for (final period in periods)
+                      DropdownMenuItem(
+                        value: period,
+                        child: Text(_periodName(period)),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setDialogState(() => selectedPeriod = value);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                CursoPeriodo(program: selectedProgram, period: selectedPeriod),
+              ),
+              icon: const Icon(Icons.check_rounded),
+              label: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (offering == null || !mounted) return;
+
+    final exists = _offerings.any(
+      (item) =>
+          item.program == offering.program && item.period == offering.period,
+    );
+    if (exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Esse curso j? est? associado a esse per?odo.'),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _offerings.add(offering);
+      _offerings.sort((a, b) {
+        final course = a.program.compareTo(b.program);
+        return course != 0 ? course : a.period.compareTo(b.period);
+      });
+    });
+  }
+
+  void _removeOffering(CursoPeriodo offering) {
+    if (_offerings.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A disciplina precisa permanecer ofertada em pelo menos um curso e per?odo.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _offerings.removeWhere(
+        (item) =>
+            item.program == offering.program && item.period == offering.period,
+      );
+    });
+  }
+
+  Widget _offeringEditor() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 20),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  'Cursos e per\u00edodos de oferta',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton.filledTonal(
+                tooltip: 'Adicionar curso e per?odo de oferta',
+                onPressed: _addOffering,
+                style: IconButton.styleFrom(
+                  fixedSize: const Size(34, 34),
+                  padding: EdgeInsets.zero,
+                ),
+                iconSize: 18,
+                icon: const Icon(Icons.add_rounded),
+              ),
+            ],
+          ),
+        ),
+        if (_offerings.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              for (final offering in _offerings)
+                InputChip(
+                  label: Text(
+                    '${widget.programs[offering.program] ?? 'Curso ${offering.program}'} - ${_periodName(offering.period)}',
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  onPressed: () {},
+                  onDeleted: _offerings.length <= 1
+                      ? null
+                      : () => _removeOffering(offering),
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _periodName(int period) =>
+      period == 11 ? 'Optativas' : 'Per\u00edodo $period';
+
   List<String> _teacherNamesFromField() {
     final names = <String>[];
     final normalized = <String>{};
-    for (final value in _teacher.text.split(RegExp(r'[,;\n]'))) {
+    for (final value in _teacher.text.split(RegExp(r'[,;\r\n]'))) {
       final name = value.trim();
       if (name.isNotEmpty && normalized.add(name.toLowerCase())) {
         names.add(name);
@@ -4978,16 +5806,52 @@ class _TermCopyChoice {
 }
 
 class _TeacherRosterResult {
-  const _TeacherRosterResult(this.teachers, this.renamed);
+  const _TeacherRosterResult(this.teachers, this.renamed, this.entries);
 
   final List<String> teachers;
   final Map<String, String> renamed;
+  final List<HorarioDisciplina> entries;
+
+  Map<String, dynamic> toJson() => {
+    'teachers': teachers,
+    'renamed': renamed,
+    'entries': entries.map((entry) => entry.toJson()).toList(),
+  };
+
+  factory _TeacherRosterResult.fromJson(Map<String, dynamic> json) =>
+      _TeacherRosterResult(
+        (json['teachers'] as List).cast<String>(),
+        (json['renamed'] as Map).map(
+          (key, value) => MapEntry(key as String, value as String),
+        ),
+        (json['entries'] as List)
+            .map(
+              (entry) => HorarioDisciplina.fromJson(
+                Map<String, dynamic>.from(entry as Map),
+              ),
+            )
+            .toList(),
+      );
 }
 
 class _TeacherRosterPage extends StatefulWidget {
-  const _TeacherRosterPage({required this.teachers});
+  const _TeacherRosterPage({
+    required this.teachers,
+    required this.entries,
+    required this.programs,
+    required this.onSave,
+    this.initialTeacher,
+    this.onClose,
+    this.channelName,
+  });
 
   final List<String> teachers;
+  final List<HorarioDisciplina> entries;
+  final Map<int, String> programs;
+  final Future<void> Function(_TeacherRosterResult result) onSave;
+  final String? initialTeacher;
+  final Future<void> Function(_TeacherRosterResult result)? onClose;
+  final String? channelName;
 
   @override
   State<_TeacherRosterPage> createState() => _TeacherRosterPageState();
@@ -4995,7 +5859,46 @@ class _TeacherRosterPage extends StatefulWidget {
 
 class _TeacherRosterPageState extends State<_TeacherRosterPage> {
   late final List<String> _teachers = [...widget.teachers];
+  late List<HorarioDisciplina> _entries = [...widget.entries];
   final Map<String, String> _renamed = {};
+  String? _selectedTeacher;
+  int? _selectedProgram;
+  int? _selectedPeriod;
+  bool _showOnlyAssignedClasses = false;
+  final _disciplineSearch = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedTeacher = _teachers.contains(widget.initialTeacher)
+        ? widget.initialTeacher
+        : _teachers.firstOrNull;
+    _selectedProgram = widget.programs.keys.firstOrNull;
+    final channelName = widget.channelName;
+    if (channelName != null) {
+      WindowMethodChannel(
+        channelName,
+        mode: ChannelMode.bidirectional,
+      ).setMethodCallHandler((call) async {
+        if (call.method == 'selectTeacher') {
+          final teacher = call.arguments as String?;
+          if (teacher != null && mounted && _teachers.contains(teacher)) {
+            setState(() => _selectedTeacher = teacher);
+          }
+          return true;
+        }
+        throw MissingPluginException(
+          'M\u00e9todo n\u00e3o reconhecido: ${call.method}',
+        );
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _disciplineSearch.dispose();
+    super.dispose();
+  }
 
   Future<String?> _askName({String? current}) async {
     final controller = TextEditingController(text: current ?? '');
@@ -5050,7 +5953,10 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
   Future<void> _addTeacher() async {
     final name = await _askName();
     if (name == null || !mounted) return;
-    setState(() => _teachers.add(name));
+    setState(() {
+      _teachers.add(name);
+      _selectedTeacher = name;
+    });
   }
 
   Future<void> _editTeacher(String oldName) async {
@@ -5060,6 +5966,16 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
       final index = _teachers.indexOf(oldName);
       _teachers[index] = name;
       _renamed[oldName] = name;
+      _entries = _entries
+          .map(
+            (entry) => entry.copyWith(
+              teachers: entry.teacherNames
+                  .map((assigned) => assigned == oldName ? name : assigned)
+                  .toList(),
+            ),
+          )
+          .toList();
+      if (_selectedTeacher == oldName) _selectedTeacher = name;
     });
   }
 
@@ -5087,7 +6003,126 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
     setState(() {
       _teachers.remove(name);
       _renamed[name] = '';
+      _entries = _entries
+          .map(
+            (entry) => entry.copyWith(
+              teachers: entry.teacherNames
+                  .where((assigned) => assigned != name)
+                  .toList(),
+            ),
+          )
+          .toList();
+      _selectedTeacher = _teachers.firstOrNull;
     });
+  }
+
+  List<int> get _availablePeriods =>
+      _entries
+          .where(
+            (entry) =>
+                _selectedProgram == null ||
+                entry.coursePeriods.any(
+                  (offering) => offering.program == _selectedProgram,
+                ),
+          )
+          .expand(
+            (entry) => entry.coursePeriods
+                .where(
+                  (offering) =>
+                      _selectedProgram == null ||
+                      offering.program == _selectedProgram,
+                )
+                .map((offering) => offering.period),
+          )
+          .toSet()
+          .toList()
+        ..sort();
+
+  List<HorarioDisciplina> get _visibleClasses {
+    final query = _disciplineSearch.text.trim().toLowerCase();
+    return _entries.where((entry) {
+      final isAssigned = entry.teacherNames.any(
+        (name) => name.toLowerCase() == _selectedTeacher?.toLowerCase(),
+      );
+      if (_showOnlyAssignedClasses && !isAssigned) return false;
+      final offerings = entry.coursePeriods.where(
+        (offering) =>
+            (_selectedProgram == null ||
+                offering.program == _selectedProgram) &&
+            (_selectedPeriod == null || offering.period == _selectedPeriod),
+      );
+      if (offerings.isEmpty) return false;
+      if (query.isEmpty) return true;
+      return entry.acronym.toLowerCase().contains(query) ||
+          entry.name.toLowerCase().contains(query) ||
+          entry.code.toLowerCase().contains(query) ||
+          entry.className.toLowerCase().contains(query) ||
+          entry.timetableLabel.toLowerCase().contains(query);
+    }).toList()..sort((a, b) {
+      final course = a.acronym.toLowerCase().compareTo(b.acronym.toLowerCase());
+      if (course != 0) return course;
+      final modality = a.modality.compareTo(b.modality);
+      if (modality != 0) return modality;
+      return a.className.toLowerCase().compareTo(b.className.toLowerCase());
+    });
+  }
+
+  String _modalityName(String modality) => switch (modality) {
+    'theory' => 'Teórica',
+    'practice' => 'Prática',
+    'ead' => 'EaD',
+    'extension' => 'Extensão',
+    _ => 'Anterior',
+  };
+
+  void _setClassAssignment(HorarioDisciplina entry, bool assigned) {
+    final teacher = _selectedTeacher;
+    if (teacher == null) return;
+    setState(() {
+      _entries = _entries.map((candidate) {
+        if (candidate.id != entry.id) return candidate;
+        final names = candidate.teacherNames
+            .where((name) => name.toLowerCase() != teacher.toLowerCase())
+            .toList();
+        if (assigned) names.add(teacher);
+        return candidate.copyWith(teachers: names);
+      }).toList();
+    });
+  }
+
+  Future<void> _editSelectedTeacher() async {
+    final selected = _selectedTeacher;
+    if (selected != null) await _editTeacher(selected);
+  }
+
+  _TeacherRosterResult _currentResult() => _TeacherRosterResult(
+    List.of(_teachers),
+    Map.of(_renamed),
+    List.of(_entries),
+  );
+
+  Future<void> _saveChanges() async {
+    await widget.onSave(_currentResult());
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Alterações salvas. Você pode continuar editando.'),
+      ),
+    );
+  }
+
+  Future<void> _closePage() async {
+    final onClose = widget.onClose;
+    if (onClose != null) {
+      await onClose(_currentResult());
+    } else if (mounted) {
+      Navigator.pop(context, _currentResult());
+    }
+  }
+
+  Future<void> _removeSelectedTeacher() async {
+    final selected = _selectedTeacher;
+    if (selected != null) await _removeTeacher(selected);
   }
 
   @override
@@ -5096,7 +6131,7 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
       leading: IconButton(
         tooltip: 'Voltar',
         icon: const Icon(Icons.arrow_back_rounded),
-        onPressed: () => Navigator.pop(context),
+        onPressed: _closePage,
       ),
       title: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -5109,22 +6144,23 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
         ],
       ),
       actions: [
-        TextButton.icon(
-          onPressed: () => Navigator.pop(
-            context,
-            _TeacherRosterResult(_teachers.toList(), Map.of(_renamed)),
-          ),
-          icon: const Icon(Icons.check_rounded),
-          label: const Text('Concluir'),
+        FilledButton.icon(
+          onPressed: _saveChanges,
+          icon: const Icon(Icons.save_rounded),
+          label: const Text('Salvar'),
         ),
         const SizedBox(width: 8),
-        const ThemeSelector(compact: true),
+        TextButton.icon(
+          onPressed: _closePage,
+          icon: const Icon(Icons.close_rounded),
+          label: const Text('Fechar'),
+        ),
         const SizedBox(width: 16),
       ],
     ),
     body: Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900),
+        constraints: const BoxConstraints(maxWidth: 1120),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -5132,56 +6168,216 @@ class _TeacherRosterPageState extends State<_TeacherRosterPage> {
             children: [
               Row(
                 children: [
-                  Text(
-                    '${_teachers.length} docentes cadastrados',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  Expanded(
+                    child: _teachers.isEmpty
+                        ? const Text('Nenhum docente cadastrado.')
+                        : _SearchableSelect<String>(
+                            key: ValueKey('teacher-roster-$_selectedTeacher'),
+                            value: _selectedTeacher!,
+                            options: _teachers,
+                            label: 'Docente',
+                            optionLabel: (name) => name,
+                            icon: Icons.person_rounded,
+                            onSelected: (name) {
+                              setState(() => _selectedTeacher = name);
+                              final channelName = widget.channelName;
+                              if (channelName != null) {
+                                unawaited(
+                                  WindowMethodChannel(
+                                    channelName,
+                                    mode: ChannelMode.bidirectional,
+                                  ).invokeMethod<bool>('teacherSelected', name),
+                                );
+                              }
+                            },
+                          ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 10),
                   FilledButton.icon(
                     onPressed: _addTeacher,
                     icon: const Icon(Icons.person_add_alt_1_rounded),
-                    label: const Text('Adicionar docente'),
+                    label: const Text('Novo docente'),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton(
+                    tooltip: 'Editar docente selecionado',
+                    onPressed: _selectedTeacher == null
+                        ? null
+                        : _editSelectedTeacher,
+                    icon: const Icon(Icons.edit_rounded),
+                  ),
+                  IconButton(
+                    tooltip: 'Remover docente selecionado',
+                    onPressed: _selectedTeacher == null
+                        ? null
+                        : _removeSelectedTeacher,
+                    color: Theme.of(context).colorScheme.error,
+                    icon: const Icon(Icons.delete_outline_rounded),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              Text(
+                '${_teachers.length} docentes cadastrados - marque as turmas vinculadas ao docente selecionado.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: DropdownButtonFormField<int>(
+                      initialValue: _selectedProgram,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Curso'),
+                      items: [
+                        for (final program in widget.programs.keys)
+                          DropdownMenuItem(
+                            value: program,
+                            child: Text(
+                              widget.programs[program] ?? 'Curso',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (program) => setState(() {
+                        _selectedProgram = program;
+                        _selectedPeriod = null;
+                      }),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: DropdownButtonFormField<int?>(
+                      initialValue: _selectedPeriod,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Período'),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Todos'),
+                        ),
+                        for (final period in _availablePeriods)
+                          DropdownMenuItem<int?>(
+                            value: period,
+                            child: Text(
+                              period == 11 ? 'Optativas' : '$periodº período',
+                            ),
+                          ),
+                      ],
+                      onChanged: (period) =>
+                          setState(() => _selectedPeriod = period),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _disciplineSearch,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search_rounded),
+                  hintText: 'Filtrar disciplina, sigla ou turma',
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _showOnlyAssignedClasses
+                          ? '${_visibleClasses.length} turma(s) vinculada(s)'
+                          : '${_visibleClasses.length} turma(s) encontrada(s)',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  SizedBox(
+                    width: 250,
+                    child: SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: false,
+                          label: Text('Todas', maxLines: 1, softWrap: false),
+                        ),
+                        ButtonSegment<bool>(
+                          value: true,
+                          label: Text(
+                            'Vinculadas',
+                            maxLines: 1,
+                            softWrap: false,
+                          ),
+                        ),
+                      ],
+                      selected: {_showOnlyAssignedClasses},
+                      onSelectionChanged: (value) => setState(
+                        () => _showOnlyAssignedClasses = value.first,
+                      ),
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               Expanded(
-                child: _teachers.isEmpty
-                    ? const Center(child: Text('Nenhum docente cadastrado.'))
+                child: _visibleClasses.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Nenhuma turma encontrada para este curso e período.',
+                        ),
+                      )
                     : Card(
                         clipBehavior: Clip.antiAlias,
                         child: ListView.separated(
-                          itemCount: _teachers.length,
+                          itemCount: _visibleClasses.length,
                           separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
-                            final teacher = _teachers[index];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: AppTheme.accent.withAlpha(24),
-                                child: Icon(
-                                  Icons.person_rounded,
-                                  color: AppTheme.accent,
-                                ),
+                            final entry = _visibleClasses[index];
+                            final offerings = entry.coursePeriods
+                                .where(
+                                  (item) =>
+                                      (_selectedProgram == null ||
+                                          item.program == _selectedProgram) &&
+                                      (_selectedPeriod == null ||
+                                          item.period == _selectedPeriod),
+                                )
+                                .map((item) {
+                                  final course =
+                                      widget.programs[item.program] ?? 'Curso';
+                                  final period = item.period == 11
+                                      ? 'Optativas'
+                                      : '${item.period}º período';
+                                  return '$course - $period';
+                                })
+                                .join(' | ');
+                            final assigned = entry.teacherNames.any(
+                              (name) =>
+                                  name.toLowerCase() ==
+                                  _selectedTeacher?.toLowerCase(),
+                            );
+                            return CheckboxListTile(
+                              dense: true,
+                              value: assigned,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(
+                                '${entry.timetableLabel} - ${entry.name}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              title: Text(teacher),
-                              trailing: Wrap(
-                                spacing: 4,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Editar docente',
-                                    onPressed: () => _editTeacher(teacher),
-                                    icon: const Icon(Icons.edit_rounded),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Remover docente',
-                                    onPressed: () => _removeTeacher(teacher),
-                                    icon: const Icon(
-                                      Icons.delete_outline_rounded,
+                              subtitle: Text(
+                                '${_modalityName(entry.modality)} - Turma ${entry.className.isEmpty ? 'sem identificação' : entry.className}${entry.room.trim().isEmpty ? '' : ' - Sala ${entry.room}'}${offerings.isEmpty ? '' : ' - $offerings'}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onChanged: _selectedTeacher == null
+                                  ? null
+                                  : (value) => _setClassAssignment(
+                                      entry,
+                                      value == true,
                                     ),
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ],
-                              ),
                             );
                           },
                         ),
