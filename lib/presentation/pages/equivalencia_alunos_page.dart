@@ -1026,10 +1026,15 @@ class _CaseDialogState extends State<_CaseDialog> {
             const SizedBox(height: 8),
             Expanded(
               child: _blocks.isEmpty
-                  ? Center(
+                  ? Align(
+                      alignment: Alignment.topCenter,
                       child: Container(
-                        constraints: const BoxConstraints(maxWidth: 520),
-                        padding: const EdgeInsets.all(24),
+                        constraints: const BoxConstraints(maxWidth: 680),
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 14,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.cardGradient.colors.first.withAlpha(
                             90,
@@ -1040,27 +1045,15 @@ class _CaseDialogState extends State<_CaseDialog> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.schema_outlined,
-                              size: 38,
-                              color: AppTheme.accent,
-                            ),
-                            const SizedBox(height: 10),
                             const Text(
-                              'Monte a equivalência por blocos',
+                              'Nenhum bloco adicionado',
                               style: TextStyle(fontWeight: FontWeight.w600),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 4),
                             Text(
-                              'Cadastre manualmente nome, código e cargas horárias no catálogo desta análise. Depois, distribua as disciplinas cadastradas nos blocos.',
+                              'Adicione um bloco para cadastrar manualmente as disciplinas cursadas e compará-las com as do currículo atual. Cada lado precisa ter ao menos uma disciplina.',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: AppTheme.textSecondary),
-                            ),
-                            const SizedBox(height: 14),
-                            FilledButton.icon(
-                              onPressed: () => _block(),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Adicionar primeiro bloco'),
                             ),
                           ],
                         ),

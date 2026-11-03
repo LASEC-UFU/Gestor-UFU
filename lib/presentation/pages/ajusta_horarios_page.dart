@@ -11,7 +11,6 @@ import 'package:go_router/go_router.dart';
 import 'package:pdf/pdf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_pdf_service.dart';
 import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
@@ -38,11 +37,15 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   static const _viewKey = 'ajusta_horarios_visao_selecionada';
   static const _teacherKey = 'ajusta_horarios_docente_selecionado';
   static const _teacherRosterKey = 'ajusta_horarios_docentes_cadastrados';
+  static const _roomKey = 'ajusta_horarios_sala_selecionada';
+  static const _roomRosterKey = 'ajusta_horarios_salas_cadastradas';
   static const _scrollPrefix = 'ajusta_horarios_grade_scroll_';
   final _courseVerticalScroll = ScrollController();
   final _courseHorizontalScroll = ScrollController();
   final _teacherVerticalScroll = ScrollController();
   final _teacherHorizontalScroll = ScrollController();
+  final _roomVerticalScroll = ScrollController();
+  final _roomHorizontalScroll = ScrollController();
   final _distributionHorizontalScroll = ScrollController();
   final Map<String, double> _scrollOffsets = {};
   WindowMethodChannel? _scheduleEditorChannel;
@@ -51,9 +54,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   WindowMethodChannel? _teacherEditorChannel;
   WindowController? _teacherEditorController;
   bool _openingTeacherEditor = false;
+  WindowMethodChannel? _roomEditorChannel;
+  WindowController? _roomEditorController;
+  bool _openingRoomEditor = false;
   Timer? _scrollSaveTimer;
   List<HorarioDisciplina> _entries = [];
   List<String> _teacherRoster = [];
+  List<String> _roomRoster = [];
   Map<int, String> _programs = {...horarioProgramas};
   List<_TeacherDistributionRecord> _distributionRecords = [];
   Set<String> _hiddenDistributionTeachers = {};
@@ -63,6 +70,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   int _period = 1;
   int _view = 0;
   String? _teacher;
+  String? _room;
   List<String> _terms = [AjustaHorariosStore.defaultTerm];
   String _term = AjustaHorariosStore.defaultTerm;
 
@@ -81,6 +89,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       'curso_x': _courseHorizontalScroll,
       'docente_y': _teacherVerticalScroll,
       'docente_x': _teacherHorizontalScroll,
+      'sala_y': _roomVerticalScroll,
+      'sala_x': _roomHorizontalScroll,
     }.entries) {
       entry.value.addListener(() => _trackScroll(entry.key, entry.value));
     }
@@ -94,6 +104,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     _courseHorizontalScroll.dispose();
     _teacherVerticalScroll.dispose();
     _teacherHorizontalScroll.dispose();
+    _roomVerticalScroll.dispose();
+    _roomHorizontalScroll.dispose();
     _distributionHorizontalScroll.dispose();
     super.dispose();
   }
@@ -123,19 +135,33 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     } else {
       await prefs.remove(_termScopedKey(_teacherKey, _term));
     }
+    if (_room != null) {
+      await prefs.setString(_termScopedKey(_roomKey, _term), _room!);
+    } else {
+      await prefs.remove(_termScopedKey(_roomKey, _term));
+    }
   }
 
   void _restoreCurrentTableScroll() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _view > 1) return;
+      if (!mounted || _view > 2) return;
       final vertical = _view == 0
           ? _courseVerticalScroll
-          : _teacherVerticalScroll;
+          : _view == 1
+          ? _teacherVerticalScroll
+          : _roomVerticalScroll;
       final horizontal = _view == 0
           ? _courseHorizontalScroll
-          : _teacherHorizontalScroll;
-      _restoreScroll(vertical, _view == 0 ? 'curso_y' : 'docente_y');
-      _restoreScroll(horizontal, _view == 0 ? 'curso_x' : 'docente_x');
+          : _view == 1
+          ? _teacherHorizontalScroll
+          : _roomHorizontalScroll;
+      final prefix = switch (_view) {
+        0 => 'curso',
+        1 => 'docente',
+        _ => 'sala',
+      };
+      _restoreScroll(vertical, '${prefix}_y');
+      _restoreScroll(horizontal, '${prefix}_x');
     });
   }
 
@@ -185,6 +211,25 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final savedTeacher = prefs.getString(
         _termScopedKey(_teacherKey, activeTerm),
       );
+      final inferredRooms =
+          rows
+              .map((entry) => entry.room.trim())
+              .where((room) => room.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final savedRooms = prefs.getStringList(
+        _termScopedKey(_roomRosterKey, activeTerm),
+      );
+      final roomRoster = (savedRooms ?? inferredRooms).toSet().toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      if (savedRooms == null) {
+        await prefs.setStringList(
+          _termScopedKey(_roomRosterKey, activeTerm),
+          roomRoster,
+        );
+      }
+      final savedRoom = prefs.getString(_termScopedKey(_roomKey, activeTerm));
       final savedDistribution = prefs.getString(
         _termScopedKey(_distributionKey, activeTerm),
       );
@@ -391,6 +436,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         setState(() {
           _entries = rows;
           _teacherRoster = teacherRoster;
+          _roomRoster = roomRoster;
           _terms = terms;
           _term = activeTerm;
           _programs = usablePrograms;
@@ -404,14 +450,19 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   .clamp(1, 11)
                   .toInt();
           _view = (prefs.getInt(_termScopedKey(_viewKey, activeTerm)) ?? _view)
-              .clamp(0, 2)
+              .clamp(0, 3)
               .toInt();
           _teacher = savedTeacher;
+          _room = savedRoom != null && roomRoster.contains(savedRoom)
+              ? savedRoom
+              : roomRoster.firstOrNull;
           for (final key in const [
             'curso_y',
             'curso_x',
             'docente_y',
             'docente_x',
+            'sala_y',
+            'sala_x',
           ]) {
             _scrollOffsets[key] =
                 prefs.getDouble(
@@ -620,15 +671,24 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         .expand((entry) => entry.teacherNames)
         .where((e) => e.isNotEmpty),
   }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  List<String> get _rooms => {
+    ..._roomRoster,
+    ..._entries
+        .map((entry) => entry.room.trim())
+        .where((room) => room.isNotEmpty),
+  }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   Map<String, List<HorarioDisciplina>> _schedule({
     int? program,
     int? period,
     String? teacher,
+    String? room,
   }) {
     final result = <String, List<HorarioDisciplina>>{};
     for (final entry in _entries) {
       if (entry.modality == 'ead') continue;
-      final include = teacher != null
+      final include = room != null
+          ? entry.room.trim().toLowerCase() == room.trim().toLowerCase()
+          : teacher != null
           ? entry.teacherNames.contains(teacher)
           : entry.coursePeriods.any(
               (item) => item.program == program && item.period == period,
@@ -658,6 +718,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                           ? _courseView(compact)
                           : _view == 1
                           ? _teacherView(compact)
+                          : _view == 2
+                          ? _roomView(compact)
                           : _distributionView(compact),
                     ),
                   ],
@@ -753,6 +815,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   ),
                   ButtonSegment(
                     value: 2,
+                    icon: Icon(Icons.meeting_room_outlined),
+                    label: Text('Grade por sala'),
+                  ),
+                  ButtonSegment(
+                    value: 3,
                     icon: Icon(Icons.groups_2_outlined),
                     label: Text('Distribui\u00e7\u00e3o Docente'),
                   ),
@@ -762,6 +829,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   setState(() {
                     _view = v.first;
                     if (_teachers.isNotEmpty) _teacher ??= _teachers.first;
+                    if (_rooms.isNotEmpty) _room ??= _rooms.first;
                   });
                   _saveViewSelection();
                   _restoreCurrentTableScroll();
@@ -974,6 +1042,19 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       roster.toList()
         ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
     );
+    final sourceRooms = prefs.getStringList(
+      _termScopedKey(_roomRosterKey, source),
+    );
+    final copiedRooms = <String>{
+      ...?sourceRooms,
+      ...entries
+          .map((entry) => entry.room.trim())
+          .where((room) => room.isNotEmpty),
+    }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    await prefs.setStringList(
+      _termScopedKey(_roomRosterKey, destination),
+      copiedRooms,
+    );
     final sourceHidden = prefs.getStringList(
       _termScopedKey(_hiddenDistributionTeachersKey, source),
     );
@@ -994,6 +1075,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       _termScopedKey(_teacherRosterKey, term),
       const [],
     );
+    await prefs.setStringList(_termScopedKey(_roomRosterKey, term), const []);
     for (final key in [
       _teacherKey,
       _programKey,
@@ -1004,7 +1086,10 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         'curso_x',
         'docente_y',
         'docente_x',
+        'sala_y',
+        'sala_x',
       ].map((key) => '$_scrollPrefix$key'),
+      _roomKey,
     ]) {
       await prefs.remove(_termScopedKey(key, term));
     }
@@ -1056,6 +1141,21 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         ...roster,
         ...rows.expand((entry) => entry.teacherNames),
       };
+      final inferredRooms = rows
+          .map((entry) => entry.room.trim())
+          .where((room) => room.isNotEmpty)
+          .toSet();
+      final savedRooms = prefs.getStringList(
+        _termScopedKey(_roomRosterKey, term),
+      );
+      final roomRoster = (savedRooms ?? inferredRooms.toList()).toSet().toList()
+        ..addAll(inferredRooms)
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      await prefs.setStringList(
+        _termScopedKey(_roomRosterKey, term),
+        roomRoster,
+      );
+      final savedRoom = prefs.getString(_termScopedKey(_roomKey, term));
       final savedTeacher = prefs.getString(_termScopedKey(_teacherKey, term));
       final savedProgram =
           prefs.getInt(_termScopedKey(_programKey, term)) ?? _program;
@@ -1067,6 +1167,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           'curso_x',
           'docente_y',
           'docente_x',
+          'sala_y',
+          'sala_x',
         ])
           key: prefs.getDouble(_termScopedKey('$_scrollPrefix$key', term)) ?? 0,
       };
@@ -1081,10 +1183,14 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             ? savedProgram
             : _programs.keys.first;
         _period = savedPeriod.clamp(1, 11).toInt();
-        _view = savedView.clamp(0, 2).toInt();
+        _view = savedView.clamp(0, 3).toInt();
         _teacher = names.contains(savedTeacher)
             ? savedTeacher
             : (names.isEmpty ? null : names.first);
+        _roomRoster = roomRoster;
+        _room = roomRoster.contains(savedRoom)
+            ? savedRoom
+            : roomRoster.firstOrNull;
         _scrollOffsets
           ..clear()
           ..addAll(offsets);
@@ -1296,6 +1402,212 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
   }
 
+  Widget _roomView(bool compact) {
+    final rooms = _rooms;
+    final selectedRoom = rooms.contains(_room) ? _room : rooms.firstOrNull;
+    if (_room != selectedRoom) _room = selectedRoom;
+    final schedule = selectedRoom == null
+        ? <String, List<HorarioDisciplina>>{}
+        : _schedule(room: selectedRoom);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        compact ? 16 : 30,
+        12,
+        compact ? 16 : 30,
+        24,
+      ),
+      child: Column(
+        children: [
+          _panel(
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 10,
+              runSpacing: 12,
+              children: [
+                if (selectedRoom != null)
+                  SizedBox(
+                    width: compact ? 280 : 440,
+                    child: _SearchableSelect<String>(
+                      key: ValueKey('room-$selectedRoom'),
+                      value: selectedRoom,
+                      options: rooms,
+                      label: 'Sala',
+                      optionLabel: (room) => room,
+                      icon: Icons.meeting_room_outlined,
+                      onSelected: _selectRoom,
+                    ),
+                  )
+                else
+                  SizedBox(
+                    width: compact ? 280 : 440,
+                    child: const InputDecorator(
+                      decoration: InputDecoration(
+                        labelText: 'Sala',
+                        prefixIcon: Icon(Icons.meeting_room_outlined),
+                      ),
+                      child: Text('Cadastre ou vincule uma sala'),
+                    ),
+                  ),
+                FilledButton.icon(
+                  onPressed: _busy ? null : _editRooms,
+                  icon: const Icon(Icons.meeting_room_outlined),
+                  label: const Text('Editar Sala'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _editPeriod,
+                  icon: const Icon(Icons.tune_rounded),
+                  label: const Text('Editar disciplinas'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: selectedRoom == null
+                ? _emptyState(
+                    'Nenhuma sala cadastrada',
+                    'Use “Editar Sala” para cadastrar salas e vinculá-las às turmas.',
+                  )
+                : _timetable(schedule, compact),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectRoom(String room) async {
+    if (mounted && _room != room) setState(() => _room = room);
+    await _saveViewSelection();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_termScopedKey(_roomKey, _term), room);
+    await _roomEditorChannel?.invokeMethod<bool>('selectRoom', room);
+    _restoreCurrentTableScroll();
+  }
+
+  Future<void> _editRooms() async {
+    final activeChannel = _roomEditorChannel;
+    final activeController = _roomEditorController;
+    if (activeChannel != null && activeController != null) {
+      final windows = await WindowController.getAll();
+      if (windows.any(
+        (window) => window.windowId == activeController.windowId,
+      )) {
+        if (_room != null) {
+          await activeChannel.invokeMethod<bool>('selectRoom', _room);
+        }
+        await activeController.show();
+        return;
+      }
+      await activeChannel.setMethodCallHandler(null);
+      _roomEditorChannel = null;
+      _roomEditorController = null;
+    }
+    if (_openingRoomEditor) return;
+    _openingRoomEditor = true;
+    final channelName = 'gestor_ufu_rooms_${const Uuid().v4()}';
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
+    );
+    try {
+      await channel.setMethodCallHandler((call) async {
+        if (call.method == 'saveRooms' || call.method == 'closed') {
+          final payload = Map<String, dynamic>.from(call.arguments as Map);
+          await _applyRoomRosterResult(
+            (payload['rooms'] as List).cast<String>(),
+            (payload['entries'] as List)
+                .map(
+                  (item) => HorarioDisciplina.fromJson(
+                    Map<String, dynamic>.from(item as Map),
+                  ),
+                )
+                .toList(),
+          );
+          return true;
+        }
+        if (call.method == 'roomSelected') {
+          final room = call.arguments as String?;
+          if (room != null && room.trim().isNotEmpty) {
+            if (mounted) {
+              setState(() {
+                if (!_roomRoster.contains(room)) _roomRoster.add(room);
+                _room = room;
+              });
+            }
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setStringList(
+              _termScopedKey(_roomRosterKey, _term),
+              _roomRoster,
+            );
+            await prefs.setString(_termScopedKey(_roomKey, _term), room);
+            await _saveViewSelection();
+            return true;
+          }
+          return false;
+        }
+        throw MissingPluginException('Método não reconhecido: ${call.method}');
+      });
+      _roomEditorChannel = channel;
+      final controller = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'roomEditor',
+            'channel': channelName,
+            'rooms': _rooms,
+            'entries': _entries.map((entry) => entry.toJson()).toList(),
+            'programs': _programs.map((key, value) => MapEntry('$key', value)),
+            'initialRoom': _room,
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _roomEditorController = controller;
+      await controller.show();
+    } catch (_) {
+      await channel.setMethodCallHandler(null);
+      _roomEditorChannel = null;
+      _roomEditorController = null;
+      rethrow;
+    } finally {
+      _openingRoomEditor = false;
+    }
+  }
+
+  Future<void> _applyRoomRosterResult(
+    List<String> rooms,
+    List<HorarioDisciplina> entries,
+  ) async {
+    final normalizedRooms =
+        rooms
+            .map((room) => room.trim())
+            .where((room) => room.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    setState(() {
+      _roomRoster = normalizedRooms;
+      _entries = entries;
+      if (!_roomRoster.contains(_room)) _room = _roomRoster.firstOrNull;
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _termScopedKey(_roomRosterKey, _term),
+      _roomRoster,
+    );
+    if (_room != null) {
+      await prefs.setString(_termScopedKey(_roomKey, _term), _room!);
+    } else {
+      await prefs.remove(_termScopedKey(_roomKey, _term));
+    }
+    await _persist();
+    await _saveViewSelection();
+  }
+
   Future<void> _filterDistributionTeachers(
     List<_TeacherDistribution> summaries,
   ) async {
@@ -1400,28 +1712,6 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     final summaries = allSummaries
         .where((summary) => !_hiddenDistributionTeachers.contains(summary.name))
         .toList();
-    final totalTheory = summaries.fold<int>(
-      0,
-      (sum, teacher) => sum + teacher.theoryHours,
-    );
-    final totalPractice = summaries.fold<int>(
-      0,
-      (sum, teacher) => sum + teacher.practiceHours,
-    );
-    final totalEad = summaries.fold<int>(
-      0,
-      (sum, teacher) => sum + teacher.eadHours,
-    );
-    final totalExtension = summaries.fold<int>(
-      0,
-      (sum, teacher) => sum + teacher.extensionHours,
-    );
-    final totalClasses = summaries.fold<int>(
-      0,
-      (sum, teacher) => sum + teacher.classCount,
-    );
-    final totalHours = totalTheory + totalPractice + totalEad;
-
     return Padding(
       padding: EdgeInsets.fromLTRB(
         compact ? 16 : 30,
@@ -1527,15 +1817,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                               minWidth: constraints.maxWidth,
                             ),
                             child: Center(
-                              child: _distributionTable(
-                                summaries,
-                                totalTheory,
-                                totalPractice,
-                                totalEad,
-                                totalExtension,
-                                totalHours,
-                                totalClasses,
-                              ),
+                              child: _distributionTableDetailed(summaries),
                             ),
                           ),
                         ),
@@ -1550,141 +1832,434 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
   }
 
-  Widget _distributionTable(
-    List<_TeacherDistribution> summaries,
-    int totalTheory,
-    int totalPractice,
-    int totalEad,
-    int totalExtension,
-    int totalHours,
-    int totalClasses,
-  ) {
-    TableRow makeRow(List<String> values, {Color? color, bool bold = false}) =>
-        TableRow(
-          decoration: BoxDecoration(color: color),
-          children: [
-            for (var index = 0; index < values.length; index++)
-              _distributionCell(
-                values[index],
-                numeric: index == 0 || (index >= 3 && index <= 9),
-                bold: bold,
-              ),
-          ],
-        );
+  static const List<double> _distributionColumnWidths = [
+    48,
+    235,
+    420,
+    70,
+    70,
+    64,
+    70,
+    100,
+    76,
+    76,
+    100,
+  ];
 
-    return Table(
-      border: TableBorder.all(
-        color: AppTheme.divider.withAlpha(150),
-        width: 0.7,
+  Widget _distributionTableDetailed(List<_TeacherDistribution> summaries) {
+    final children = <Widget>[_distributionHeaderRow()];
+    var teacherId = 0;
+    for (final summary in summaries) {
+      final lines = _distributionLines(
+        summary.name,
+      ).where((line) => line.discipline.trim().isNotEmpty).toList();
+      if (lines.isEmpty) continue;
+      teacherId++;
+      final total = lines.fold<int>(0, (sum, line) => sum + line.total);
+      final background = (teacherId - 1).isEven
+          ? AppTheme.bgCard.withAlpha(100)
+          : AppTheme.bgCardAlt.withAlpha(130);
+      children.add(
+        _distributionTeacherGroup(
+          id: teacherId,
+          name: summary.name,
+          lines: lines,
+          total: total,
+          background: background,
+        ),
+      );
+    }
+    children.addAll(_distributionStatisticsWidgets(summaries));
+    return SizedBox(
+      width: _distributionColumnWidths.fold<double>(
+        0,
+        (sum, width) => sum + width,
       ),
-      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      columnWidths: const {
-        0: FixedColumnWidth(48),
-        1: FixedColumnWidth(245),
-        2: FixedColumnWidth(480),
-        3: FixedColumnWidth(78),
-        4: FixedColumnWidth(78),
-        5: FixedColumnWidth(66),
-        6: FixedColumnWidth(70),
-        7: FixedColumnWidth(82),
-        8: FixedColumnWidth(76),
-        9: FixedColumnWidth(96),
-      },
+      child: Column(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+
+  Widget _distributionHeaderRow() {
+    const labels = [
+      'ID',
+      'Professor',
+      'Disciplina',
+      'CH\nTe\u00f3rica',
+      'CH\nPr\u00e1tica',
+      'CH\nEaD',
+      'Soma',
+      'Total\ndocente',
+      'CH\nExtens\u00e3o',
+      'Nº\nTurmas',
+      'Per\u00edodos',
+    ];
+    return Row(
       children: [
-        TableRow(
-          decoration: BoxDecoration(color: AppTheme.primary.withAlpha(40)),
-          children: [
-            for (var index = 0; index < 10; index++)
-              _distributionCell(
-                [
-                  'ID',
-                  'Professor',
-                  'Disciplinas (Sigla Turma)',
-                  'CH\r\nTeórica',
-                  'CH\r\nPrática',
-                  'CH\r\nEaD',
-                  'Total',
-                  'CH\r\nExtensão',
-                  'Nº\r\nTurmas',
-                  'Períodos',
-                ][index],
-                header: true,
-                numeric: index >= 3,
-              ),
-          ],
-        ),
-        for (var index = 0; index < summaries.length; index++)
-          TableRow(
-            decoration: BoxDecoration(
-              color: index.isEven
-                  ? AppTheme.bgCard.withAlpha(100)
-                  : AppTheme.bgCardAlt.withAlpha(130),
-            ),
-            children: [
-              _distributionCell('${index + 1}', numeric: true),
-              _distributionCell(summaries[index].name),
-              _distributionCell(
-                summaries[index].disciplines.join(', '),
-                tooltip: summaries[index].disciplines.join(', '),
-                onTap: () => _editTeacherDisciplines(summaries[index].name),
-              ),
-              _distributionCell(
-                '${summaries[index].theoryHours}',
-                numeric: true,
-              ),
-              _distributionCell(
-                '${summaries[index].practiceHours}',
-                numeric: true,
-              ),
-              _distributionCell('${summaries[index].eadHours}', numeric: true),
-              _distributionCell(
-                '${summaries[index].theoryHours + summaries[index].practiceHours + summaries[index].eadHours}',
-                numeric: true,
-              ),
-              _distributionCell(
-                '${summaries[index].extensionHours}',
-                numeric: true,
-              ),
-              _distributionCell(
-                '${summaries[index].classCount}',
-                numeric: true,
-              ),
-              _distributionCell(
-                summaries[index].periods.join(', '),
-                numeric: true,
-              ),
-            ],
+        for (var index = 0; index < labels.length; index++)
+          _distributionGridCell(
+            labels[index],
+            width: _distributionColumnWidths[index],
+            header: true,
+            centered: index == 0 || index >= 3,
+            leftBorder: index == 0,
+            bottomBorder: true,
+            background: AppTheme.primary.withAlpha(40),
           ),
-        makeRow(
-          [
-            '',
-            'TOTAL',
-            '',
-            '$totalTheory',
-            '$totalPractice',
-            '$totalEad',
-            '$totalHours',
-            '$totalExtension',
-            '$totalClasses',
-            '',
-          ],
-          color: AppTheme.primary.withAlpha(36),
-          bold: true,
-        ),
-        makeRow([
-          '',
-          'MÉDIA por professor',
-          '',
-          (totalTheory / summaries.length).toStringAsFixed(1),
-          (totalPractice / summaries.length).toStringAsFixed(1),
-          (totalEad / summaries.length).toStringAsFixed(1),
-          (totalHours / summaries.length).toStringAsFixed(1),
-          (totalExtension / summaries.length).toStringAsFixed(1),
-          '',
-          '',
-        ], color: AppTheme.bgCardAlt.withAlpha(150)),
       ],
     );
+  }
+
+  Widget _distributionTeacherGroup({
+    required int id,
+    required String name,
+    required List<_TeacherDistributionLine> lines,
+    required int total,
+    required Color background,
+  }) {
+    final onTap = () => _editTeacherDisciplines(name);
+    final coreWidth = _distributionColumnWidths
+        .sublist(2, 7)
+        .fold<double>(0, (sum, width) => sum + width);
+    final trailingWidth = _distributionColumnWidths
+        .sublist(8)
+        .fold<double>(0, (sum, width) => sum + width);
+    final lastRow = lines.length - 1;
+
+    Widget disciplineRows({required bool trailing}) => Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 0; index < lines.length; index++)
+          SizedBox(
+            height: 48,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: trailing
+                  ? [
+                      _distributionGridCell(
+                        '${lines[index].extensionHours}',
+                        width: _distributionColumnWidths[8],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        '${lines[index].classCount}',
+                        width: _distributionColumnWidths[9],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        lines[index].periods.join(', '),
+                        width: _distributionColumnWidths[10],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                    ]
+                  : [
+                      _distributionGridCell(
+                        lines[index].discipline,
+                        width: _distributionColumnWidths[2],
+                        tooltip: lines[index].discipline,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        '${lines[index].theoryHours}',
+                        width: _distributionColumnWidths[3],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        '${lines[index].practiceHours}',
+                        width: _distributionColumnWidths[4],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        '${lines[index].eadHours}',
+                        width: _distributionColumnWidths[5],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                      _distributionGridCell(
+                        '${lines[index].total}',
+                        width: _distributionColumnWidths[6],
+                        centered: true,
+                        onTap: onTap,
+                        background: background,
+                        bottomBorder: index == lastRow,
+                      ),
+                    ],
+            ),
+          ),
+      ],
+    );
+
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _distributionGridCell(
+            '$id',
+            width: _distributionColumnWidths[0],
+            centered: true,
+            onTap: onTap,
+            background: background,
+            leftBorder: true,
+            bottomBorder: true,
+          ),
+          _distributionGridCell(
+            name,
+            width: _distributionColumnWidths[1],
+            onTap: onTap,
+            background: background,
+            bottomBorder: true,
+          ),
+          SizedBox(width: coreWidth, child: disciplineRows(trailing: false)),
+          _distributionGridCell(
+            '$total',
+            width: _distributionColumnWidths[7],
+            centered: true,
+            onTap: onTap,
+            background: background,
+            bottomBorder: true,
+          ),
+          SizedBox(width: trailingWidth, child: disciplineRows(trailing: true)),
+        ],
+      ),
+    );
+  }
+
+  Widget _distributionGridCell(
+    String value, {
+    required double width,
+    bool header = false,
+    bool centered = false,
+    bool bold = false,
+    bool leftBorder = false,
+    bool bottomBorder = false,
+    Color? background,
+    String? tooltip,
+    VoidCallback? onTap,
+  }) {
+    final side = BorderSide(color: AppTheme.divider.withAlpha(150), width: 0.7);
+    final text = Text(
+      value,
+      softWrap: true,
+      maxLines: header ? 2 : 2,
+      overflow: TextOverflow.ellipsis,
+      textAlign: centered ? TextAlign.center : TextAlign.left,
+      style: TextStyle(
+        color: AppTheme.textPrimary,
+        fontSize: 12,
+        fontWeight: header || bold ? FontWeight.w700 : FontWeight.w500,
+      ),
+    );
+    return Container(
+      width: width,
+      decoration: BoxDecoration(
+        color: background,
+        border: Border(
+          left: leftBorder ? side : BorderSide.none,
+          right: side,
+          bottom: bottomBorder ? side : BorderSide.none,
+        ),
+      ),
+      alignment: centered ? Alignment.center : Alignment.centerLeft,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: header ? 9 : 10,
+            vertical: header ? 9 : 7,
+          ),
+          child: tooltip == null
+              ? text
+              : Tooltip(message: tooltip, child: text),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _distributionStatisticsWidgets(
+    List<_TeacherDistribution> summaries,
+  ) {
+    final lines = summaries
+        .expand((summary) => _distributionLines(summary.name))
+        .where((line) => line.discipline.trim().isNotEmpty)
+        .toList();
+    if (lines.isEmpty) return const [];
+    final teacherCount = summaries
+        .where((summary) => _distributionLines(summary.name).isNotEmpty)
+        .length;
+    final theory = lines.fold<int>(0, (sum, line) => sum + line.theoryHours);
+    final practice = lines.fold<int>(
+      0,
+      (sum, line) => sum + line.practiceHours,
+    );
+    final ead = lines.fold<int>(0, (sum, line) => sum + line.eadHours);
+    final extension = lines.fold<int>(
+      0,
+      (sum, line) => sum + line.extensionHours,
+    );
+    final total = lines.fold<int>(0, (sum, line) => sum + line.total);
+    final classes = lines.fold<int>(0, (sum, line) => sum + line.classCount);
+    Widget statsRow(
+      List<String> values, {
+      Color? background,
+      bool bold = false,
+    }) => Row(
+      children: [
+        for (var index = 0; index < values.length; index++)
+          _distributionGridCell(
+            values[index],
+            width: _distributionColumnWidths[index],
+            centered: index == 0 || index >= 3,
+            bold: bold,
+            leftBorder: index == 0,
+            bottomBorder: true,
+            background: background,
+          ),
+      ],
+    );
+    return [
+      statsRow(
+        [
+          '',
+          'TOTAL',
+          '',
+          '$theory',
+          '$practice',
+          '$ead',
+          '$total',
+          '$total',
+          '$extension',
+          '$classes',
+          '',
+        ],
+        background: AppTheme.primary.withAlpha(36),
+        bold: true,
+      ),
+      statsRow([
+        '',
+        'M\u00c9DIA por professor',
+        '',
+        (theory / teacherCount).toStringAsFixed(1),
+        (practice / teacherCount).toStringAsFixed(1),
+        (ead / teacherCount).toStringAsFixed(1),
+        (total / teacherCount).toStringAsFixed(1),
+        (total / teacherCount).toStringAsFixed(1),
+        (extension / teacherCount).toStringAsFixed(1),
+        '',
+        '',
+      ], background: AppTheme.bgCardAlt.withAlpha(150)),
+    ];
+  }
+
+  List<_TeacherDistributionLine> _distributionLines(String teacher) {
+    if (_distributionRecords.isNotEmpty) {
+      return _distributionRecords
+          .where(
+            (record) => record.teacher.toLowerCase() == teacher.toLowerCase(),
+          )
+          .map(
+            (record) => _TeacherDistributionLine(
+              discipline: record.discipline,
+              theoryHours: record.theoryHours,
+              practiceHours: record.practiceHours,
+              eadHours: record.eadHours,
+              extensionHours: record.extensionHours,
+              classCount: 1,
+              periods: [
+                if (record.period.isEmpty)
+                  '—'
+                else if (record.period.toLowerCase().contains('optativas'))
+                  'Optativas'
+                else if (record.period.contains('º'))
+                  record.period
+                else
+                  '${record.period}º',
+              ],
+            ),
+          )
+          .toList();
+    }
+
+    final grouped = <String, List<HorarioDisciplina>>{};
+    for (final entry in _entries) {
+      if (!entry.teacherNames.any(
+            (name) => name.toLowerCase() == teacher.toLowerCase(),
+          ) ||
+          !const {
+            'theory',
+            'practice',
+            'ead',
+            'extension',
+          }.contains(entry.modality) ||
+          entry.className.trim().isEmpty) {
+        continue;
+      }
+      grouped.putIfAbsent(entry.subjectId, () => []).add(entry);
+    }
+    final lines = <_TeacherDistributionLine>[];
+    for (final entries in grouped.values) {
+      int modalityHours(String modality) => entries
+          .where((entry) => entry.modality == modality)
+          .map(
+            (entry) => switch (modality) {
+              'theory' => entry.theoryHours,
+              'practice' => entry.practiceHours,
+              'ead' => entry.eadHours,
+              'extension' => entry.extensionHours,
+              _ => 0,
+            },
+          )
+          .fold<int>(0, (maximum, hours) => hours > maximum ? hours : maximum);
+      final subject = entries.first;
+      final acronym = subject.acronym.trim();
+      final discipline = acronym.isEmpty
+          ? subject.name
+          : '$acronym - ${subject.name}';
+      final periods =
+          entries
+              .expand((entry) => entry.coursePeriods.map((item) => item.period))
+              .toSet()
+              .toList()
+            ..sort();
+      lines.add(
+        _TeacherDistributionLine(
+          discipline: discipline,
+          theoryHours: modalityHours('theory'),
+          practiceHours: modalityHours('practice'),
+          eadHours: modalityHours('ead'),
+          extensionHours: modalityHours('extension'),
+          classCount: entries
+              .map((entry) => '${entry.modality}:${entry.className}')
+              .toSet()
+              .length,
+          periods: periods
+              .map((period) => period == 11 ? 'Optativas' : '$periodº')
+              .toList(),
+        ),
+      );
+    }
+    lines.sort(
+      (a, b) =>
+          a.discipline.toLowerCase().compareTo(b.discipline.toLowerCase()),
+    );
+    return lines;
   }
 
   Widget _distributionCell(
@@ -1694,6 +2269,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     bool bold = false,
     String? tooltip,
     VoidCallback? onTap,
+    bool bottomBorder = false,
   }) {
     final text = Text(
       value,
@@ -1704,18 +2280,30 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         fontWeight: header || bold ? FontWeight.w700 : FontWeight.w500,
       ),
     );
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: header ? 10 : 11,
-        vertical: header ? 10 : 7,
+    return Container(
+      decoration: BoxDecoration(
+        border: bottomBorder
+            ? Border(
+                bottom: BorderSide(
+                  color: AppTheme.divider.withAlpha(150),
+                  width: 0.7,
+                ),
+              )
+            : null,
       ),
-      child: InkWell(
-        onTap: onTap,
-        child: Align(
-          alignment: numeric ? Alignment.center : Alignment.centerLeft,
-          child: tooltip == null
-              ? text
-              : Tooltip(message: tooltip, child: text),
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: header ? 10 : 11,
+          vertical: header ? 10 : 7,
+        ),
+        child: InkWell(
+          onTap: onTap,
+          child: Align(
+            alignment: numeric ? Alignment.center : Alignment.centerLeft,
+            child: tooltip == null
+                ? text
+                : Tooltip(message: tooltip, child: text),
+          ),
         ),
       ),
     );
@@ -2066,9 +2654,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                     : constraints.maxWidth;
                 final verticalController = _view == 1
                     ? _teacherVerticalScroll
+                    : _view == 2
+                    ? _roomVerticalScroll
                     : _courseVerticalScroll;
                 final horizontalController = _view == 1
                     ? _teacherHorizontalScroll
+                    : _view == 2
+                    ? _roomHorizontalScroll
                     : _courseHorizontalScroll;
                 return Scrollbar(
                   controller: verticalController,
@@ -2153,7 +2745,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                     ),
                   ),
                 ),
-                if (_view == 1) ...[
+                if (_view == 1 || _view == 2) ...[
                   const SizedBox(width: 10),
                   Text(
                     '$weeklyLessonCount aulas por semana',
@@ -3267,6 +3859,42 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
   Future<void> _exportSchedule() async {
     final teacherMode = _view == 1;
+    if (_view == 2) {
+      final room = _room;
+      if (room == null) {
+        _message('Selecione uma sala para exportar.');
+        return;
+      }
+      final schedule = _schedule(room: room);
+      final rows = <List<String>>[
+        ['Sala', room],
+        ['Faixa horária', ...horarioDias],
+        for (var slot = 1; slot <= horarioFaixas.length; slot++)
+          [
+            horarioFaixas[slot - 1],
+            for (var day = 1; day <= 5; day++)
+              (schedule['$day:$slot'] ?? const [])
+                  .map((entry) => entry.timetableLabel)
+                  .join(' | '),
+          ],
+      ];
+      final csv = rows
+          .map(
+            (row) =>
+                row.map((cell) => '"${cell.replaceAll('"', '""')}"').join(';'),
+          )
+          .join('\r\n');
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Exportar grade da sala',
+        fileName: 'grade-sala-${_safeFileName(room)}.csv',
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+      );
+      if (path == null) return;
+      await File(path).writeAsBytes([0xEF, 0xBB, 0xBF, ...utf8.encode(csv)]);
+      _message('Grade da sala exportada em CSV.');
+      return;
+    }
     final choice = await _chooseExportPeriods(pdf: false);
     if (choice == null) return;
     final rows = <List<String>>[];
@@ -3310,6 +3938,34 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
   Future<void> _exportPdf() async {
     final teacherMode = _view == 1;
+    if (_view == 2) {
+      final room = _room;
+      if (room == null) {
+        _message('Selecione uma sala para exportar.');
+        return;
+      }
+      try {
+        final path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Exportar grade colorida da sala',
+          fileName: 'grade-sala-${_safeFileName(room)}.pdf',
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+        );
+        if (path == null) return;
+        final bytes = await _pdfService.generate(
+          term: _term,
+          sheets: [_createPdfSheet('Sala: $room', _schedule(room: room))],
+          isLightTheme: AppTheme.isLight,
+        );
+        await File(
+          path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf',
+        ).writeAsBytes(bytes, flush: true);
+        _message('PDF colorido da sala exportado com sucesso.');
+      } catch (error) {
+        _message('Não foi possível exportar o PDF da sala: $error');
+      }
+      return;
+    }
     if (teacherMode) {
       final selectedTeacher = _teacher;
       if (selectedTeacher == null) return;
@@ -3496,6 +4152,28 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   );
 }
 
+class _TeacherDistributionLine {
+  const _TeacherDistributionLine({
+    required this.discipline,
+    required this.theoryHours,
+    required this.practiceHours,
+    required this.eadHours,
+    required this.extensionHours,
+    required this.classCount,
+    required this.periods,
+  });
+
+  final String discipline;
+  final int theoryHours;
+  final int practiceHours;
+  final int eadHours;
+  final int extensionHours;
+  final int classCount;
+  final List<String> periods;
+
+  int get total => theoryHours + practiceHours + eadHours;
+}
+
 class _TeacherDistribution {
   const _TeacherDistribution({
     required this.name,
@@ -3668,6 +4346,538 @@ class TeacherRosterWindowApp extends StatelessWidget {
             await (await WindowController.fromCurrentEngine()).hide();
           }
         },
+      ),
+    );
+  }
+}
+
+class RoomRosterWindowApp extends StatelessWidget {
+  const RoomRosterWindowApp({
+    required this.rooms,
+    required this.entries,
+    required this.programs,
+    required this.channelName,
+    required this.initialRoom,
+    required this.isLight,
+    super.key,
+  });
+
+  final List<String> rooms;
+  final List<HorarioDisciplina> entries;
+  final Map<int, String> programs;
+  final String channelName;
+  final String? initialRoom;
+  final bool isLight;
+
+  @override
+  Widget build(BuildContext context) {
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
+    );
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: isLight ? ThemeMode.light : ThemeMode.dark,
+      home: _RoomRosterPage(
+        rooms: rooms,
+        entries: entries,
+        programs: programs,
+        initialRoom: initialRoom,
+        channelName: channelName,
+        onSelect: (room) => channel.invokeMethod<bool>('roomSelected', room),
+        onSave: (result) =>
+            channel.invokeMethod<bool>('saveRooms', result.toJson()),
+        onClose: (result) async {
+          try {
+            await channel.invokeMethod<bool>('closed', result.toJson());
+          } finally {
+            await (await WindowController.fromCurrentEngine()).hide();
+          }
+        },
+      ),
+    );
+  }
+}
+
+class _RoomRosterResult {
+  const _RoomRosterResult(this.rooms, this.entries);
+  final List<String> rooms;
+  final List<HorarioDisciplina> entries;
+
+  Map<String, dynamic> toJson() => {
+    'rooms': rooms,
+    'entries': entries.map((entry) => entry.toJson()).toList(),
+  };
+}
+
+class _RoomRosterPage extends StatefulWidget {
+  const _RoomRosterPage({
+    required this.rooms,
+    required this.entries,
+    required this.programs,
+    required this.initialRoom,
+    required this.channelName,
+    required this.onSelect,
+    required this.onSave,
+    required this.onClose,
+  });
+
+  final List<String> rooms;
+  final List<HorarioDisciplina> entries;
+  final Map<int, String> programs;
+  final String? initialRoom;
+  final String channelName;
+  final Future<void> Function(String room) onSelect;
+  final Future<void> Function(_RoomRosterResult result) onSave;
+  final Future<void> Function(_RoomRosterResult result) onClose;
+
+  @override
+  State<_RoomRosterPage> createState() => _RoomRosterPageState();
+}
+
+class _RoomRosterPageState extends State<_RoomRosterPage> {
+  late final List<String> _rooms = [...widget.rooms];
+  late List<HorarioDisciplina> _entries = [...widget.entries];
+  final _search = TextEditingController();
+  String? _selectedRoom;
+  int? _program;
+  int? _period;
+  bool _assignedOnly = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedRoom = _rooms.contains(widget.initialRoom)
+        ? widget.initialRoom
+        : _rooms.firstOrNull;
+    _program = widget.programs.keys.firstOrNull;
+    WindowMethodChannel(
+      widget.channelName,
+      mode: ChannelMode.bidirectional,
+    ).setMethodCallHandler((call) async {
+      if (call.method == 'selectRoom') {
+        final room = call.arguments as String?;
+        if (room != null && _rooms.contains(room) && mounted) {
+          setState(() => _selectedRoom = room);
+        }
+        return true;
+      }
+      throw MissingPluginException('Método não reconhecido: ${call.method}');
+    });
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  _RoomRosterResult get _result =>
+      _RoomRosterResult(List.of(_rooms), List.of(_entries));
+
+  Future<void> _chooseRoom(String room) async {
+    setState(() => _selectedRoom = room);
+    await widget.onSelect(room);
+  }
+
+  Future<void> _editRoom({String? current}) async {
+    final controller = TextEditingController(text: current ?? '');
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(current == null ? 'Adicionar sala' : 'Editar sala'),
+        content: SizedBox(
+          width: 420,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.characters,
+            decoration: const InputDecoration(
+              labelText: 'Nome ou código da sala',
+              prefixIcon: Icon(Icons.meeting_room_outlined),
+            ),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmed = name?.trim() ?? '';
+    if (trimmed.isEmpty || !mounted) return;
+    if (_rooms.any(
+      (room) => room.toLowerCase() == trimmed.toLowerCase() && room != current,
+    )) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Essa sala já está cadastrada.')),
+      );
+      return;
+    }
+    setState(() {
+      if (current == null) {
+        _rooms.add(trimmed);
+        _rooms.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        _selectedRoom = trimmed;
+      } else {
+        final index = _rooms.indexOf(current);
+        if (index >= 0) _rooms[index] = trimmed;
+        _entries = _entries
+            .map(
+              (entry) =>
+                  entry.room.trim().toLowerCase() == current.toLowerCase()
+                  ? entry.copyWith(room: trimmed)
+                  : entry,
+            )
+            .toList();
+        _selectedRoom = trimmed;
+      }
+    });
+    await widget.onSelect(trimmed);
+  }
+
+  Future<void> _removeRoom() async {
+    final room = _selectedRoom;
+    if (room == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover sala?'),
+        content: Text(
+          'A sala "$room" será removida do cadastro e desvinculada das turmas. Os horários e demais dados das turmas serão mantidos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _rooms.remove(room);
+      _entries = _entries
+          .map(
+            (entry) => entry.room.trim().toLowerCase() == room.toLowerCase()
+                ? entry.copyWith(room: '')
+                : entry,
+          )
+          .toList();
+      _selectedRoom = _rooms.firstOrNull;
+    });
+    if (_selectedRoom != null) await widget.onSelect(_selectedRoom!);
+  }
+
+  List<HorarioDisciplina> get _visibleEntries {
+    final query = _search.text.trim().toLowerCase();
+    return _entries.where((entry) {
+      final offeringMatches = entry.coursePeriods.any(
+        (item) =>
+            (_program == null || item.program == _program) &&
+            (_period == null || item.period == _period),
+      );
+      if (!offeringMatches) return false;
+      final assigned =
+          entry.room.trim().toLowerCase() == _selectedRoom?.toLowerCase();
+      if (_assignedOnly && !assigned) return false;
+      if (query.isEmpty) return true;
+      return entry.acronym.toLowerCase().contains(query) ||
+          entry.name.toLowerCase().contains(query) ||
+          entry.code.toLowerCase().contains(query) ||
+          entry.className.toLowerCase().contains(query) ||
+          entry.timetableLabel.toLowerCase().contains(query);
+    }).toList()..sort(
+      (a, b) => a.timetableLabel.toLowerCase().compareTo(
+        b.timetableLabel.toLowerCase(),
+      ),
+    );
+  }
+
+  void _setAssignment(HorarioDisciplina entry, bool assigned) {
+    final room = _selectedRoom;
+    if (room == null) return;
+    setState(() {
+      _entries = _entries.map((candidate) {
+        if (candidate.id != entry.id) return candidate;
+        return candidate.copyWith(
+          room: assigned
+              ? room
+              : (candidate.room == room ? '' : candidate.room),
+        );
+      }).toList();
+    });
+  }
+
+  Future<void> _save() async {
+    await widget.onSave(_result);
+    if (mounted)
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Salas e vínculos salvos. Você pode continuar editando.',
+          ),
+        ),
+      );
+  }
+
+  Future<void> _close() => widget.onClose(_result);
+
+  @override
+  Widget build(BuildContext context) {
+    final periods =
+        _entries
+            .expand((entry) => entry.coursePeriods)
+            .where((item) => _program == null || item.program == _program)
+            .map((item) => item.period)
+            .toSet()
+            .toList()
+          ..sort();
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Fechar',
+          onPressed: _close,
+          icon: const Icon(Icons.close_rounded),
+        ),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Editar salas'),
+            Text(
+              'Cadastre salas e vincule cada turma à sala em que ocorre.',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton.icon(
+            onPressed: _save,
+            icon: const Icon(Icons.save_rounded),
+            label: const Text('Salvar'),
+          ),
+          const SizedBox(width: 8),
+          TextButton.icon(
+            onPressed: _close,
+            icon: const Icon(Icons.close_rounded),
+            label: const Text('Fechar'),
+          ),
+          const SizedBox(width: 16),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 400,
+                  child: _rooms.isEmpty
+                      ? const InputDecorator(
+                          decoration: InputDecoration(labelText: 'Sala'),
+                          child: Text('Nenhuma sala cadastrada'),
+                        )
+                      : DropdownButtonFormField<String>(
+                          value: _selectedRoom,
+                          decoration: const InputDecoration(
+                            labelText: 'Sala',
+                            prefixIcon: Icon(Icons.meeting_room_outlined),
+                          ),
+                          items: _rooms
+                              .map(
+                                (room) => DropdownMenuItem(
+                                  value: room,
+                                  child: Text(room),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value != null) _chooseRoom(value);
+                          },
+                        ),
+                ),
+                FilledButton.icon(
+                  onPressed: () => _editRoom(),
+                  icon: const Icon(Icons.add_rounded),
+                  label: const Text('Nova sala'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _selectedRoom == null
+                      ? null
+                      : () => _editRoom(current: _selectedRoom),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Renomear'),
+                ),
+                IconButton(
+                  tooltip: 'Remover sala',
+                  onPressed: _selectedRoom == null ? null : _removeRoom,
+                  color: Colors.red,
+                  icon: const Icon(Icons.delete_outline_rounded),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '${_entries.length} turmas cadastradas - marque as turmas vinculadas à sala selecionada.',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    value: _program,
+                    decoration: const InputDecoration(labelText: 'Curso'),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Todos os cursos'),
+                      ),
+                      ...widget.programs.entries.map(
+                        (item) => DropdownMenuItem<int?>(
+                          value: item.key,
+                          child: Text(item.value),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() {
+                      _program = value;
+                      _period = null;
+                    }),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 220,
+                  child: DropdownButtonFormField<int?>(
+                    value: _period,
+                    decoration: const InputDecoration(labelText: 'Período'),
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('Todos'),
+                      ),
+                      ...periods.map(
+                        (period) => DropdownMenuItem<int?>(
+                          value: period,
+                          child: Text(
+                            period == 11 ? 'Optativas' : '$periodº período',
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() => _period = value),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search_rounded),
+                hintText: 'Filtrar disciplina, sigla ou turma',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  '${_visibleEntries.length} turma(s) encontrada(s)',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+                const Spacer(),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('Todas as turmas')),
+                    ButtonSegment(value: true, label: Text('Vinculadas')),
+                  ],
+                  selected: {_assignedOnly},
+                  onSelectionChanged: (value) =>
+                      setState(() => _assignedOnly = value.first),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _visibleEntries.isEmpty
+                  ? Center(
+                      child: Text(
+                        _rooms.isEmpty
+                            ? 'Cadastre uma sala para começar.'
+                            : 'Nenhuma turma corresponde aos filtros.',
+                      ),
+                    )
+                  : Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: ListView.separated(
+                        itemCount: _visibleEntries.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final entry = _visibleEntries[index];
+                          final assigned =
+                              entry.room.trim().toLowerCase() ==
+                              _selectedRoom?.toLowerCase();
+                          final offerLabels = entry.coursePeriods
+                              .map(
+                                (item) =>
+                                    '${widget.programs[item.program] ?? 'Curso'} - ${item.period == 11 ? 'Optativas' : '${item.period}º período'}',
+                              )
+                              .toSet()
+                              .join(', ');
+                          return CheckboxListTile(
+                            value: assigned,
+                            onChanged: _selectedRoom == null
+                                ? null
+                                : (value) =>
+                                      _setAssignment(entry, value == true),
+                            title: Text(
+                              '${entry.timetableLabel} - ${entry.name}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              '${entry.modality == 'theory'
+                                  ? 'Teórica'
+                                  : entry.modality == 'practice'
+                                  ? 'Prática'
+                                  : entry.modality == 'ead'
+                                  ? 'EaD'
+                                  : entry.modality == 'extension'
+                                  ? 'Extensão'
+                                  : 'Turma'} - $offerLabels${entry.room.isNotEmpty && !assigned ? ' - Sala atual: ${entry.room}' : ''}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            controlAffinity: ListTileControlAffinity.leading,
+                          );
+                        },
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

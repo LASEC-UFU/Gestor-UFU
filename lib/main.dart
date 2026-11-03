@@ -113,6 +113,47 @@ Future<void> main(List<String> args) async {
         );
         return;
       }
+      if (payload['type'] == 'roomEditor') {
+        final isLight = payload['isLight'] as bool? ?? false;
+        AppTheme.isLight = isLight;
+        final entries = (payload['entries'] as List)
+            .map(
+              (item) => HorarioDisciplina.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .toList();
+        final rooms = (payload['rooms'] as List).cast<String>();
+        final programs = (payload['programs'] as Map).map(
+          (key, value) => MapEntry(int.parse(key as String), value as String),
+        );
+        await windowManager.ensureInitialized();
+        unawaited(
+          windowManager.waitUntilReadyToShow(
+            const WindowOptions(
+              size: Size(1120, 820),
+              minimumSize: Size(900, 650),
+              center: true,
+              title: 'Editar salas - Gestor UFU',
+            ),
+            () async {
+              await windowManager.show();
+              await windowManager.focus();
+            },
+          ),
+        );
+        runApp(
+          RoomRosterWindowApp(
+            rooms: rooms,
+            entries: entries,
+            programs: programs,
+            channelName: payload['channel'] as String,
+            initialRoom: payload['initialRoom'] as String?,
+            isLight: isLight,
+          ),
+        );
+        return;
+      }
     }
   }
   final preferences = await SharedPreferences.getInstance();
