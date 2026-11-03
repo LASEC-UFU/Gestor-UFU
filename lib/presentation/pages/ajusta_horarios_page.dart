@@ -3187,17 +3187,6 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     );
   }
 
-  List<int> _exportPeriodsForTeacher(String teacher) {
-    final periods =
-        _entries
-            .where((entry) => entry.teacherNames.contains(teacher))
-            .expand((entry) => entry.coursePeriods.map((item) => item.period))
-            .toSet()
-            .toList()
-          ..sort();
-    return periods;
-  }
-
   String _safeFileName(String value) {
     final safe = value
         .trim()
@@ -3356,15 +3345,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
         var exported = 0;
         for (final teacher in teachers) {
-          final periods = _exportPeriodsForTeacher(teacher);
-          if (periods.isEmpty) continue;
-          final sheets = [
-            for (final period in periods)
-              _createPdfSheet(
-                _exportTitle([period], teacher: teacher),
-                _scheduleForExportPeriod(period, teacher: teacher),
-              ),
-          ];
+          // A grade shown in the teacher view combines the teacher's classes
+          // across all curriculum periods. Keep the PDF identical in scope and
+          // export it as one page per selected teacher.
+          final schedule = _schedule(teacher: teacher);
+          if (schedule.isEmpty) continue;
+          final sheets = [_createPdfSheet('Grade: $teacher', schedule)];
           final bytes = await _pdfService.generate(
             term: _term,
             sheets: sheets,
