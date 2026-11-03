@@ -214,18 +214,26 @@ class WindowsUpdateService {
     );
     await logDirectory.create(recursive: true);
     final logPath = p.join(logDirectory.path, 'atualizacao.log');
+    final readyPath = p.join(
+      logDirectory.path,
+      'atualizacao_${DateTime.now().microsecondsSinceEpoch}.ready',
+    );
     final installer = File(installerPath);
     if (!await installer.exists() || await installer.length() == 0) {
       throw const FileSystemException(
         'O instalador da atualização não existe ou está vazio.',
       );
     }
-    await helper.writeAsBytes(
-      [0xef, 0xbb, 0xbf, ...utf8.encode(_installerHelper)],
-      flush: true,
-    );
+    await helper.writeAsBytes([
+      0xef,
+      0xbb,
+      0xbf,
+      ...utf8.encode(_installerHelper),
+    ], flush: true);
+    Process? updater;
     try {
-      await Process.start(powershell, [
+      await _writeLog(logPath, 'Preparando instalação $expectedVersion.');
+      final startedUpdater = await Process.start(powershell, [
         '-NoLogo',
         '-NoProfile',
         '-NonInteractive',
@@ -245,11 +253,57 @@ class WindowsUpdateService {
         expectedVersion,
         '-LogPath',
         logPath,
+        '-ReadyPath',
+        readyPath,
       ], mode: ProcessStartMode.detached);
+      updater = startedUpdater;
+      await _writeLog(
+        logPath,
+        'Processo auxiliar iniciado (PID ${startedUpdater.pid}); aguardando confirmação.',
+      );
+      final deadline = DateTime.now().add(const Duration(seconds: 12));
+      while (DateTime.now().isBefore(deadline)) {
+        if (await File(readyPath).exists()) {
+          await File(readyPath).delete();
+          await _writeLog(
+            logPath,
+            'Processo auxiliar confirmou a inicialização.',
+          );
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      await _writeLog(
+        logPath,
+        'ERRO: o processo auxiliar não confirmou a inicialização; aplicativo mantido aberto.',
+      );
+      try {
+        Process.killPid(startedUpdater.pid);
+      } on Object {
+        // O auxiliar pode já ter encerrado sozinho.
+      }
+      throw FileSystemException(
+        'O Windows não confirmou o início do instalador. O aplicativo foi mantido aberto. Consulte o diagnóstico em $logPath.',
+        helper.path,
+      );
     } on Object {
-      if (await helper.exists()) await helper.delete();
+      if (updater == null && await helper.exists()) await helper.delete();
       rethrow;
+    } finally {
+      if (await File(readyPath).exists()) {
+        await File(readyPath).delete();
+      }
     }
+  }
+
+  Future<void> _writeLog(String path, String message) async {
+    final file = File(path);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(
+      '${DateTime.now().toIso8601String()} $message\r\n',
+      mode: FileMode.append,
+      flush: true,
+    );
   }
 
   static String? _normalizedVersion(String value) {
@@ -285,7 +339,8 @@ param(
   [string]$MsiPath,
   [string]$AppPath,
   [string]$ExpectedVersion,
-  [string]$LogPath
+  [string]$LogPath,
+  [string]$ReadyPath
 )
 $ErrorActionPreference = 'Stop'
 $installSucceeded = $false
@@ -305,6 +360,7 @@ function Show-UpdateError([string]$Message) {
   } catch { }
 }
 try {
+  [System.IO.File]::WriteAllText($ReadyPath, [DateTime]::UtcNow.ToString('o'))
   Write-UpdateLog "Atualização para $ExpectedVersion iniciada. Instalador: $MsiPath"
   if (-not (Test-Path -LiteralPath $MsiPath)) {
     throw "O instalador baixado não foi encontrado: $MsiPath"
