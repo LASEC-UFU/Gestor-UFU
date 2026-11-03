@@ -1916,7 +1916,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     required int total,
     required Color background,
   }) {
-    final onTap = () => _editTeacherDisciplines(name);
+    void onTap() => _editTeacherDisciplines(name);
     final coreWidth = _distributionColumnWidths
         .sublist(2, 7)
         .fold<double>(0, (sum, width) => sum + width);
@@ -2211,22 +2211,53 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           entry.className.trim().isEmpty) {
         continue;
       }
-      grouped.putIfAbsent(entry.subjectId, () => []).add(entry);
+      final code = entry.code.trim().toLowerCase();
+      final acronym = entry.acronym.trim().toLowerCase();
+      final name = entry.name.trim().toLowerCase();
+      final disciplineKey = code.isNotEmpty
+          ? 'code:$code'
+          : acronym.isNotEmpty && name.isNotEmpty
+          ? 'subject:$acronym|$name'
+          : 'id:${entry.subjectId}';
+      grouped.putIfAbsent(disciplineKey, () => []).add(entry);
     }
     final lines = <_TeacherDistributionLine>[];
     for (final entries in grouped.values) {
-      int modalityHours(String modality) => entries
-          .where((entry) => entry.modality == modality)
-          .map(
-            (entry) => switch (modality) {
-              'theory' => entry.theoryHours,
-              'practice' => entry.practiceHours,
-              'ead' => entry.eadHours,
-              'extension' => entry.extensionHours,
-              _ => 0,
-            },
-          )
-          .fold<int>(0, (maximum, hours) => hours > maximum ? hours : maximum);
+      int hoursFor(HorarioDisciplina entry, String modality) =>
+          switch (modality) {
+            'theory' => entry.theoryHours,
+            'practice' => entry.practiceHours,
+            'ead' => entry.eadHours,
+            'extension' => entry.extensionHours,
+            _ => 0,
+          };
+
+      // The distribution has one row per discipline, so add the workload of
+      // its distinct turmas into the matching modality column. When duplicate
+      // rows refer to the same turma, retain one CH value to avoid double
+      // counting it.
+      String turmaKey(HorarioDisciplina entry) {
+        final offerings =
+            entry.coursePeriods
+                .map((item) => '${item.program}:${item.period}')
+                .toList()
+              ..sort();
+        return '${entry.modality}:${entry.className.trim().toLowerCase()}:${offerings.join(',')}';
+      }
+
+      int modalityHours(String modality) {
+        final hoursByTurma = <String, int>{};
+        for (final entry in entries.where(
+          (entry) => entry.modality == modality,
+        )) {
+          final key = turmaKey(entry);
+          final hours = hoursFor(entry, modality);
+          final previous = hoursByTurma[key] ?? 0;
+          if (hours > previous) hoursByTurma[key] = hours;
+        }
+        return hoursByTurma.values.fold<int>(0, (sum, hours) => sum + hours);
+      }
+
       final subject = entries.first;
       final acronym = subject.acronym.trim();
       final discipline = acronym.isEmpty
@@ -2245,10 +2276,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           practiceHours: modalityHours('practice'),
           eadHours: modalityHours('ead'),
           extensionHours: modalityHours('extension'),
-          classCount: entries
-              .map((entry) => '${entry.modality}:${entry.className}')
-              .toSet()
-              .length,
+          classCount: entries.map(turmaKey).toSet().length,
           periods: periods
               .map((period) => period == 11 ? 'Optativas' : '$periodº')
               .toList(),
@@ -2260,53 +2288,6 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           a.discipline.toLowerCase().compareTo(b.discipline.toLowerCase()),
     );
     return lines;
-  }
-
-  Widget _distributionCell(
-    String value, {
-    bool header = false,
-    bool numeric = false,
-    bool bold = false,
-    String? tooltip,
-    VoidCallback? onTap,
-    bool bottomBorder = false,
-  }) {
-    final text = Text(
-      value,
-      softWrap: true,
-      style: TextStyle(
-        color: AppTheme.textPrimary,
-        fontSize: 12,
-        fontWeight: header || bold ? FontWeight.w700 : FontWeight.w500,
-      ),
-    );
-    return Container(
-      decoration: BoxDecoration(
-        border: bottomBorder
-            ? Border(
-                bottom: BorderSide(
-                  color: AppTheme.divider.withAlpha(150),
-                  width: 0.7,
-                ),
-              )
-            : null,
-      ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(
-          horizontal: header ? 10 : 11,
-          vertical: header ? 10 : 7,
-        ),
-        child: InkWell(
-          onTap: onTap,
-          child: Align(
-            alignment: numeric ? Alignment.center : Alignment.centerLeft,
-            child: tooltip == null
-                ? text
-                : Tooltip(message: tooltip, child: text),
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _editTeacherDisciplines(String teacher) async {
@@ -2709,13 +2690,16 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                                 var slot = 1;
                                 slot <= horarioFaixas.length;
                                 slot++
-                              )
+                              ) ...[
                                 _scheduleDataRow(
                                   slot,
                                   schedule,
                                   disciplineColors,
                                   tableWidth,
                                 ),
+                                if (slot == 6 || slot == 12)
+                                  _scheduleGapRow(slot),
+                              ],
                             ],
                           ),
                         ),
@@ -2780,10 +2764,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   ) {
     final cellWidth = (tableWidth - 136) / 5;
     const rowHeight = 34.0;
+    final visualRow = slot + (slot > 6 ? 1 : 0) + (slot > 12 ? 1 : 0);
 
     return TableRow(
       decoration: BoxDecoration(
-        color: slot.isEven
+        color: visualRow.isEven
             ? AppTheme.bgCard.withAlpha(90)
             : AppTheme.bgCardAlt.withAlpha(105),
       ),
@@ -2801,6 +2786,19 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               cellWidth: cellWidth,
             ),
           ),
+      ],
+    );
+  }
+
+  TableRow _scheduleGapRow(int afterSlot) {
+    final visualGapRow = afterSlot + (afterSlot > 6 ? 1 : 0) + 1;
+    final color = visualGapRow.isEven
+        ? AppTheme.bgCard.withAlpha(90)
+        : AppTheme.bgCardAlt.withAlpha(105);
+    return TableRow(
+      decoration: BoxDecoration(color: color),
+      children: [
+        for (var column = 0; column < 6; column++) const SizedBox(height: 14),
       ],
     );
   }
@@ -3678,7 +3676,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   Future<List<String>?> _choosePdfTeachers() {
     final availableTeachers = _teachers;
     var scope = 0;
-    final selected = <String>{if (_teacher != null) _teacher!};
+    final selected = <String>{
+      ...[_teacher].whereType<String>(),
+    };
     return showDialog<List<String>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -3689,23 +3689,25 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                RadioListTile<int>(
-                  value: 0,
+                RadioGroup<int>(
                   groupValue: scope,
-                  title: Text('Professor corrente - ${_teacher ?? ""}'),
                   onChanged: (value) => dialogSetState(() => scope = value!),
-                ),
-                RadioListTile<int>(
-                  value: 1,
-                  groupValue: scope,
-                  title: const Text('Todos os professores'),
-                  onChanged: (value) => dialogSetState(() => scope = value!),
-                ),
-                RadioListTile<int>(
-                  value: 2,
-                  groupValue: scope,
-                  title: const Text('Escolher professores'),
-                  onChanged: (value) => dialogSetState(() => scope = value!),
+                  child: Column(
+                    children: const [
+                      RadioListTile<int>(
+                        value: 0,
+                        title: Text('Professor corrente'),
+                      ),
+                      RadioListTile<int>(
+                        value: 1,
+                        title: Text('Todos os professores'),
+                      ),
+                      RadioListTile<int>(
+                        value: 2,
+                        title: Text('Escolher professores'),
+                      ),
+                    ],
+                  ),
                 ),
                 if (scope == 2) ...[
                   Row(
@@ -3829,8 +3831,10 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
 
   AjustaHorariosPdfSheet _createPdfSheet(
     String title,
-    Map<String, List<HorarioDisciplina>> schedule,
-  ) {
+    Map<String, List<HorarioDisciplina>> schedule, {
+    bool teacherLegend = false,
+    List<HorarioDisciplina> legendEntries = const [],
+  }) {
     final colors = _colorsForSchedule(
       schedule,
     ).map((key, color) => MapEntry(key, PdfColor(color.r, color.g, color.b)));
@@ -3854,6 +3858,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       schedule: schedule,
       disciplineColors: colors,
       cellColorStops: cellColorStops,
+      legendEntries: legendEntries,
+      teacherLegend: teacherLegend,
     );
   }
 
@@ -3945,6 +3951,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         return;
       }
       try {
+        final legendEntries = _entries.where((entry) {
+          if (room.trim().toLowerCase() == 'ead') {
+            return entry.modality == 'ead';
+          }
+          return entry.modality != 'ead' &&
+              entry.room.trim().toLowerCase() == room.trim().toLowerCase();
+        }).toList();
         final path = await FilePicker.platform.saveFile(
           dialogTitle: 'Exportar grade colorida da sala',
           fileName: 'grade-sala-${_safeFileName(room)}.pdf',
@@ -3954,7 +3967,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         if (path == null) return;
         final bytes = await _pdfService.generate(
           term: _term,
-          sheets: [_createPdfSheet('Sala: $room', _schedule(room: room))],
+          sheets: [
+            _createPdfSheet(
+              'Sala: $room',
+              _schedule(room: room),
+              legendEntries: legendEntries,
+            ),
+          ],
           isLightTheme: AppTheme.isLight,
         );
         await File(
@@ -4005,8 +4024,18 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           // across all curriculum periods. Keep the PDF identical in scope and
           // export it as one page per selected teacher.
           final schedule = _schedule(teacher: teacher);
-          if (schedule.isEmpty) continue;
-          final sheets = [_createPdfSheet('Grade: $teacher', schedule)];
+          final legendEntries = _entries
+              .where((entry) => entry.teacherNames.contains(teacher))
+              .toList();
+          if (schedule.isEmpty && legendEntries.isEmpty) continue;
+          final sheets = [
+            _createPdfSheet(
+              'Grade: $teacher',
+              schedule,
+              teacherLegend: true,
+              legendEntries: legendEntries,
+            ),
+          ];
           final bytes = await _pdfService.generate(
             term: _term,
             sheets: sheets,
@@ -4036,11 +4065,22 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     final selectedSchedules = choice.periods
         .map(_scheduleForExportPeriod)
         .toList();
+    final selectedLegendEntries = [
+      for (final period in choice.periods)
+        _entries
+            .where(
+              (entry) => entry.coursePeriods.any(
+                (item) => item.program == _program && item.period == period,
+              ),
+            )
+            .toList(),
+    ];
     final sheets = [
       for (var index = 0; index < choice.periods.length; index++)
         _createPdfSheet(
           _exportTitle([choice.periods[index]]),
           selectedSchedules[index],
+          legendEntries: selectedLegendEntries[index],
         ),
     ];
     final periodSuffix = choice.periods.join('-');
@@ -4626,7 +4666,7 @@ class _RoomRosterPageState extends State<_RoomRosterPage> {
 
   Future<void> _save() async {
     await widget.onSave(_result);
-    if (mounted)
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -4634,6 +4674,7 @@ class _RoomRosterPageState extends State<_RoomRosterPage> {
           ),
         ),
       );
+    }
   }
 
   Future<void> _close() => widget.onClose(_result);
@@ -4698,7 +4739,7 @@ class _RoomRosterPageState extends State<_RoomRosterPage> {
                           child: Text('Nenhuma sala cadastrada'),
                         )
                       : DropdownButtonFormField<String>(
-                          value: _selectedRoom,
+                          initialValue: _selectedRoom,
                           decoration: const InputDecoration(
                             labelText: 'Sala',
                             prefixIcon: Icon(Icons.meeting_room_outlined),
@@ -4746,7 +4787,7 @@ class _RoomRosterPageState extends State<_RoomRosterPage> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<int?>(
-                    value: _program,
+                    initialValue: _program,
                     decoration: const InputDecoration(labelText: 'Curso'),
                     items: [
                       const DropdownMenuItem<int?>(
@@ -4770,7 +4811,7 @@ class _RoomRosterPageState extends State<_RoomRosterPage> {
                 SizedBox(
                   width: 220,
                   child: DropdownButtonFormField<int?>(
-                    value: _period,
+                    initialValue: _period,
                     decoration: const InputDecoration(labelText: 'Período'),
                     items: [
                       const DropdownMenuItem<int?>(

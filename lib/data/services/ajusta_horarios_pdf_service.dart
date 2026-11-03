@@ -11,12 +11,16 @@ class AjustaHorariosPdfSheet {
     required this.schedule,
     required this.disciplineColors,
     required this.cellColorStops,
+    this.legendEntries = const [],
+    this.teacherLegend = false,
   });
 
   final String title;
   final Map<String, List<HorarioDisciplina>> schedule;
   final Map<String, PdfColor> disciplineColors;
   final Map<String, List<double>> cellColorStops;
+  final List<HorarioDisciplina> legendEntries;
+  final bool teacherLegend;
 }
 
 class AjustaHorariosPdfService {
@@ -43,6 +47,8 @@ class AjustaHorariosPdfService {
       final schedule = sheet.schedule;
       final disciplineColors = sheet.disciplineColors;
       final cellColorStops = sheet.cellColorStops;
+      final teacherLegend = sheet.teacherLegend;
+      final legendEntries = sheet.legendEntries;
       final weeklyLessonCount = schedule.values.fold<int>(
         0,
         (sum, entries) => sum + entries.map((entry) => entry.id).toSet().length,
@@ -99,7 +105,11 @@ class AjustaHorariosPdfService {
                           _headerCell(day, textColor),
                       ],
                     ),
-                    for (var slot = 1; slot <= horarioFaixas.length; slot++)
+                    for (
+                      var slot = 1;
+                      slot <= horarioFaixas.length;
+                      slot++
+                    ) ...[
                       _scheduleRow(
                         slot: slot,
                         schedule: schedule,
@@ -110,16 +120,26 @@ class AjustaHorariosPdfService {
                         paletteOpacity: paletteOpacity,
                         textColor: textColor,
                       ),
+                      if (slot == 6 || slot == 12)
+                        _scheduleGapRow(
+                          afterSlot: slot,
+                          panelBackground: panelBackground,
+                          alternateRow: alternateRow,
+                        ),
+                    ],
                   ],
                 ),
               ),
               pw.SizedBox(height: 8),
               _disciplineLegend(
                 schedule,
+                legendEntries,
                 panelBackground,
                 gridColor,
                 textColor,
                 secondaryColor,
+                headerBackground,
+                teacherLegend,
               ),
               pw.SizedBox(height: 6),
               pw.Row(
@@ -238,7 +258,8 @@ class AjustaHorariosPdfService {
     required PdfColor textColor,
   }) {
     final rowHeight = _scheduleRowHeight(slot, schedule);
-    final rowColor = slot.isEven ? panelBackground : alternateRow;
+    final visualRow = slot + (slot > 6 ? 1 : 0) + (slot > 12 ? 1 : 0);
+    final rowColor = visualRow.isEven ? panelBackground : alternateRow;
     return pw.TableRow(
       decoration: pw.BoxDecoration(color: rowColor),
       children: [
@@ -295,10 +316,13 @@ class AjustaHorariosPdfService {
 
   pw.Widget _disciplineLegend(
     Map<String, List<HorarioDisciplina>> schedule,
+    List<HorarioDisciplina> legendEntries,
     PdfColor background,
     PdfColor border,
     PdfColor textColor,
     PdfColor secondaryColor,
+    PdfColor headerBackground,
+    bool teacherLegend,
   ) {
     final unique = <String, HorarioDisciplina>{};
     for (final entries in schedule.values) {
@@ -307,16 +331,74 @@ class AjustaHorariosPdfService {
         unique[legendKey] = entry;
       }
     }
-    final items = unique.values.toList()
-      ..sort(
-        (a, b) => a.timetableLabel.toLowerCase().compareTo(
-          b.timetableLabel.toLowerCase(),
-        ),
-      );
-    final rows = [
-      for (var index = 0; index < items.length; index += 3)
-        items.skip(index).take(3).toList(),
-    ];
+    for (final entry in legendEntries) {
+      unique[_scheduleColorKey(entry)] = entry;
+    }
+    final List<({String labels, String name, String room, String teachers})>
+    items;
+    if (teacherLegend) {
+      final grouped = <String, List<HorarioDisciplina>>{};
+      for (final entry in unique.values) {
+        final code = entry.code.trim().toLowerCase();
+        final acronym = entry.acronym.trim().toLowerCase();
+        final name = entry.name.trim().toLowerCase();
+        final subjectKey = code.isNotEmpty
+            ? 'code:$code'
+            : acronym.isNotEmpty && name.isNotEmpty
+            ? 'subject:$acronym|$name'
+            : 'id:${entry.subjectId}';
+        final key = '$subjectKey|modality:${entry.modality}';
+        grouped.putIfAbsent(key, () => []).add(entry);
+      }
+      items =
+          grouped.values.map((entries) {
+            final labels =
+                entries
+                    .map((entry) => entry.timetableLabel)
+                    .where((label) => label.isNotEmpty)
+                    .toSet()
+                    .toList()
+                  ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+            final teachers =
+                entries.expand((entry) => entry.teacherNames).toSet().toList()
+                  ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+            final rooms =
+                entries
+                    .map(_legendRoom)
+                    .where((room) => room.isNotEmpty)
+                    .toSet()
+                    .toList()
+                  ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+            return (
+              labels: labels.join(', '),
+              name: _legendDisciplineName(entries.first),
+              room: rooms.join(', '),
+              teachers: teachers.join(', '),
+            );
+          }).toList()..sort(
+            (a, b) => a.labels.toLowerCase().compareTo(b.labels.toLowerCase()),
+          );
+    } else {
+      final entries = unique.values.toList()
+        ..sort(
+          (a, b) => a.timetableLabel.toLowerCase().compareTo(
+            b.timetableLabel.toLowerCase(),
+          ),
+        );
+      items = entries
+          .map(
+            (entry) => (
+              labels: entry.timetableLabel,
+              name: _legendDisciplineName(entry),
+              room: _legendRoom(entry),
+              teachers: entry.teacherNames.join(', '),
+            ),
+          )
+          .toList();
+    }
+    final split = (items.length + 1) ~/ 2;
+    final firstHalf = items.take(split).toList();
+    final secondHalf = items.skip(split).toList();
     return pw.Container(
       padding: const pw.EdgeInsets.fromLTRB(8, 5, 8, 6),
       decoration: pw.BoxDecoration(
@@ -335,35 +417,143 @@ class AjustaHorariosPdfService {
             ),
           ),
           pw.SizedBox(height: 3),
-          for (final row in rows)
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(bottom: 2),
-              child: pw.Row(
-                children: [
-                  for (var index = 0; index < 3; index++)
-                    pw.Expanded(
-                      child: index < row.length
-                          ? pw.Text(
-                              '${row[index].timetableLabel} | ${row[index].name}\n${row[index].teacherNames.join(', ')}',
-                              maxLines: 4,
-                              overflow: pw.TextOverflow.clip,
-                              style: pw.TextStyle(
-                                color: textColor,
-                                fontSize: 6.5,
-                              ),
-                            )
-                          : pw.SizedBox(),
-                    ),
-                ],
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: _legendHalf(
+                  firstHalf,
+                  teacherLegend: teacherLegend,
+                  textColor: textColor,
+                  headerColor: secondaryColor,
+                  headerBackground: headerBackground,
+                  borderColor: border,
+                ),
               ),
-            ),
+              pw.SizedBox(width: 8),
+              pw.Expanded(
+                child: _legendHalf(
+                  secondHalf,
+                  teacherLegend: teacherLegend,
+                  textColor: textColor,
+                  headerColor: secondaryColor,
+                  headerBackground: headerBackground,
+                  borderColor: border,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
 
+  pw.Widget _legendHalf(
+    List<({String labels, String name, String room, String teachers})> items, {
+    required bool teacherLegend,
+    required PdfColor textColor,
+    required PdfColor headerColor,
+    required PdfColor headerBackground,
+    required PdfColor borderColor,
+  }) {
+    final headers = teacherLegend
+        ? const ['SIGLA', 'DISCIPLINA', 'SALA']
+        : const ['SIGLA', 'DISCIPLINA', 'PROFESSOR', 'SALA'];
+    final widths = teacherLegend
+        ? const <int, pw.TableColumnWidth>{
+            0: pw.FlexColumnWidth(1.05),
+            1: pw.FlexColumnWidth(2.35),
+            2: pw.FlexColumnWidth(0.9),
+          }
+        : const <int, pw.TableColumnWidth>{
+            0: pw.FlexColumnWidth(1.0),
+            1: pw.FlexColumnWidth(2.2),
+            2: pw.FlexColumnWidth(1.5),
+            3: pw.FlexColumnWidth(0.8),
+          };
+    return pw.Table(
+      border: pw.TableBorder.all(color: borderColor, width: 0.35),
+      columnWidths: widths,
+      children: [
+        pw.TableRow(
+          decoration: pw.BoxDecoration(color: headerBackground),
+          children: [
+            for (final label in headers)
+              pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(
+                  horizontal: 3,
+                  vertical: 3,
+                ),
+                child: pw.Text(
+                  label,
+                  style: pw.TextStyle(
+                    color: headerColor,
+                    fontSize: 5.8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        for (final item in items)
+          pw.TableRow(
+            children: [
+              _legendCell(item.labels, textColor),
+              _legendCell(
+                teacherLegend || item.teachers.isEmpty
+                    ? item.name
+                    : '${item.name}\n${item.teachers}',
+                textColor,
+              ),
+              if (!teacherLegend) _legendCell(item.teachers, textColor),
+              _legendCell(item.room, textColor),
+            ],
+          ),
+      ],
+    );
+  }
+
+  pw.Widget _legendCell(String value, PdfColor textColor) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+    child: pw.Text(
+      value,
+      maxLines: 4,
+      overflow: pw.TextOverflow.clip,
+      style: pw.TextStyle(color: textColor, fontSize: 5.7),
+    ),
+  );
+
+  String _legendDisciplineName(HorarioDisciplina entry) {
+    final modality = switch (entry.modality) {
+      'theory' => 'Teórica',
+      'practice' => 'Prática',
+      'ead' => 'EaD',
+      'extension' => 'Extensão',
+      _ => '',
+    };
+    return modality.isEmpty ? entry.name : '$modality - ${entry.name}';
+  }
+
+  String _legendRoom(HorarioDisciplina entry) =>
+      entry.modality.trim().toLowerCase() == 'ead' ? 'EaD' : entry.room.trim();
+
+  pw.TableRow _scheduleGapRow({
+    required int afterSlot,
+    required PdfColor panelBackground,
+    required PdfColor alternateRow,
+  }) {
+    final visualGapRow = afterSlot + (afterSlot > 6 ? 1 : 0) + 1;
+    final background = visualGapRow.isEven ? panelBackground : alternateRow;
+    return pw.TableRow(
+      decoration: pw.BoxDecoration(color: background),
+      children: [
+        for (var column = 0; column < 6; column++) pw.Container(height: 14),
+      ],
+    );
+  }
+
   String _scheduleColorKey(HorarioDisciplina entry) =>
-      '${entry.id}:${entry.modality}:${entry.className.trim().toLowerCase()}';
+      '${entry.id}:${entry.className.trim().toLowerCase()}';
 
   Future<pw.Font> _loadWindowsFont(String fileName) async {
     final bytes = await File('C:/Windows/Fonts/$fileName').readAsBytes();
