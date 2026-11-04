@@ -91,6 +91,10 @@ jobs:
         shell: powershell
         run: |
           $buildDir = "build\windows\x64\runner\Release"
+          # Older app versions relaunch config_moodle.exe after the MSI upgrade.
+          # Ship a compatibility copy so their updater can complete the first
+          # transition to GestorUFU.exe. New shortcuts point to GestorUFU.exe.
+          Copy-Item "$buildDir\GestorUFU.exe" "$buildDir\config_moodle.exe"
           heat.exe dir $buildDir `
             -nologo -srd -scom -sreg `
             -cg HarvestedFiles `
@@ -111,6 +115,13 @@ jobs:
           )
           if (-not $exeComponent) { throw "Main executable component not found in harvested.wxs" }
           $exeComponent.SetAttribute("Guid", "{B289B4F1-59CE-4E18-BF80-2AF4EF13D683}")
+          $compatComponent = $harvest.SelectSingleNode(
+            "//w:Component[w:File[contains(@Source, 'config_moodle.exe')]]",
+            $ns
+          )
+          if (-not $compatComponent) { throw "Compatibility executable component not found in harvested.wxs" }
+          # This is the component identity used by prior MSIs for config_moodle.exe.
+          $compatComponent.SetAttribute("Guid", "{A178A3F0-48BD-4D07-AF79-1FE3EF49C572}")
           $harvest.Save((Resolve-Path "windows\installer\harvested.wxs").Path)
 
       - name: Compilar WiX (candle.exe)
