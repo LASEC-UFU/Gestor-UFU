@@ -1,4 +1,4 @@
-import 'package:config_moodle/domain/entities/moodle_entities.dart';
+import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 
 abstract class IMoodleRepository {
   Future<MoodleCredential> login(

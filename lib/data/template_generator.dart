@@ -1,5 +1,5 @@
 import 'package:excel/excel.dart';
-import 'package:config_moodle/core/utils/date_calculator.dart';
+import 'package:gestor_ufu/core/utils/date_calculator.dart';
 
 /// Gera uma planilha-template de exemplo para importação.
 class TemplateGenerator {

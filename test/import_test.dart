@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:config_moodle/data/repositories/config_repository_impl.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/data/datasources/local_datasource.dart';
+import 'package:gestor_ufu/data/repositories/config_repository_impl.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/data/datasources/local_datasource.dart';
 
 /// Mock datasource que guarda em memória (sem path_provider).
 class MockDatasource extends LocalDatasource {

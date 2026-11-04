@@ -99,25 +99,25 @@ jobs:
             -ag `
             -out "windows\installer\harvested.wxs"
 
-          # Keep a new, stable identity for the main executable component.
-          # Older MSIs could consider a stale EXE newer than the package,
-          # skip installing the replacement and then remove the old file.
+          # Give the renamed GestorUFU.exe its own stable component identity.
+          # The prior MSI owns config_moodle.exe under a different component;
+          # MajorUpgrade removes it while this component installs the new file.
           [xml]$harvest = Get-Content "windows\installer\harvested.wxs"
           $ns = New-Object System.Xml.XmlNamespaceManager($harvest.NameTable)
           $ns.AddNamespace("w", "http://schemas.microsoft.com/wix/2006/wi")
           $exeComponent = $harvest.SelectSingleNode(
-            "//w:Component[w:File[contains(@Source, 'config_moodle.exe')]]",
+            "//w:Component[w:File[contains(@Source, 'GestorUFU.exe')]]",
             $ns
           )
           if (-not $exeComponent) { throw "Main executable component not found in harvested.wxs" }
-          $exeComponent.SetAttribute("Guid", "{A178A3F0-48BD-4D07-AF79-1FE3EF49C572}")
+          $exeComponent.SetAttribute("Guid", "{B289B4F1-59CE-4E18-BF80-2AF4EF13D683}")
           $harvest.Save((Resolve-Path "windows\installer\harvested.wxs").Path)
 
       - name: Compilar WiX (candle.exe)
         shell: powershell
         run: |
           $buildDir = (Resolve-Path "build\windows\x64\runner\Release").Path
-          $appExe   = "$buildDir\config_moodle.exe"
+          $appExe   = "$buildDir\GestorUFU.exe"
           New-Item -ItemType Directory -Force -Path "windows\installer\obj" | Out-Null
           candle.exe -nologo -arch x64 `
             "-dProductVersion=$env:WIX_VER" `

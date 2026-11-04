@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

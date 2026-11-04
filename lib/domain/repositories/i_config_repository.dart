@@ -1,6 +1,6 @@
 import 'dart:typed_data';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 
 abstract class IConfigRepository {
   Future<List<CourseConfig>> getAll();

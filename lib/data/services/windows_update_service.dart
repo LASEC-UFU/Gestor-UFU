@@ -364,6 +364,13 @@ function Show-UpdateError([string]$Message) {
     ) | Out-Null
   } catch { }
 }
+function Resolve-InstalledAppPath([string]$PreviousPath) {
+  if (Test-Path -LiteralPath $PreviousPath) { return $PreviousPath }
+  $directory = Split-Path -Parent $PreviousPath
+  $renamedPath = Join-Path $directory 'GestorUFU.exe'
+  if (Test-Path -LiteralPath $renamedPath) { return $renamedPath }
+  return $PreviousPath
+}
 try {
   [System.IO.File]::WriteAllText($ReadyPath, [DateTime]::UtcNow.ToString('o'))
   Write-UpdateLog "Atualização para $ExpectedVersion iniciada. Instalador: $MsiPath"
@@ -381,6 +388,7 @@ try {
   if ($result.ExitCode -ne 0 -and $result.ExitCode -ne 3010) {
     throw "A instalação MSI falhou com o código $($result.ExitCode)."
   }
+  $AppPath = Resolve-InstalledAppPath $AppPath
   if (-not (Test-Path -LiteralPath $AppPath)) {
     throw "A instalação terminou, mas o executável não foi encontrado: $AppPath"
   }
@@ -402,6 +410,7 @@ try {
   $message = $_.Exception.Message
   try { Write-UpdateLog "ERRO: $message`r`n$($_ | Out-String)" } catch { }
   Show-UpdateError "Não foi possível concluir a atualização. O Gestor UFU não foi fechado definitivamente. $message"
+  $AppPath = Resolve-InstalledAppPath $AppPath
   if (Test-Path -LiteralPath $AppPath) {
     Start-Process -FilePath $AppPath -WorkingDirectory (Split-Path -Parent $AppPath)
   }

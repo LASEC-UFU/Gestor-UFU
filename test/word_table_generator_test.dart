@@ -1,5 +1,5 @@
-import 'package:config_moodle/data/word_table_generator.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:gestor_ufu/data/word_table_generator.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

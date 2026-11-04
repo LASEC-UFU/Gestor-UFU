@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 
 class AjustaHorariosPdfSheet {
   const AjustaHorariosPdfSheet({

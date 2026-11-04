@@ -3,7 +3,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
-import 'package:config_moodle/core/utils/text_encoding.dart';
+import 'package:gestor_ufu/core/utils/text_encoding.dart';
 
 const _plansKey = 'gestor_ufu_planos_ensino_v1';
 

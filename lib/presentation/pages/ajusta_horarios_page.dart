@@ -11,11 +11,11 @@ import 'package:go_router/go_router.dart';
 import 'package:pdf/pdf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/data/services/ajusta_horarios_pdf_service.dart';
-import 'package:config_moodle/data/services/ajusta_horarios_store.dart';
-import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
-import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_pdf_service.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class AjustaHorariosPage extends StatefulWidget {
   const AjustaHorariosPage({super.key});

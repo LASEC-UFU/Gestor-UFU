@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
-import 'package:config_moodle/domain/entities/moodle_entities.dart';
+import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 
 class MoodleDatasource {
   // ── Sessão web para chamadas AJAX ──────────────────────────────────────

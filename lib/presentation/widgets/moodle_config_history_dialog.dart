@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
-import 'package:config_moodle/presentation/controllers/config_controller.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
+import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
 
 class MoodleConfigHistoryDialog extends StatefulWidget {
   const MoodleConfigHistoryDialog({

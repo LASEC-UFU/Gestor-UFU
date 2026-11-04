@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:config_moodle/domain/entities/plano_trabalho.dart';
+import 'package:gestor_ufu/domain/entities/plano_trabalho.dart';
 
 /// Dados do módulo permanecem no mesmo armazenamento local do Gestor UFU.
 class PlanosTrabalhoStore {

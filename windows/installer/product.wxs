@@ -59,7 +59,7 @@
           Id="StartMenuEntry"
           Name="Gestor UFU"
           Description="Ferramentas acadêmicas UFU"
-          Target="[INSTALLFOLDER]config_moodle.exe"
+          Target="[INSTALLFOLDER]GestorUFU.exe"
           WorkingDirectory="INSTALLFOLDER" />
         <!-- Remove a pasta ao desinstalar -->
         <RemoveFolder Id="RemoveAppMenuFolder"
@@ -81,7 +81,7 @@
           Id="DesktopEntry"
           Name="Gestor UFU"
           Description="Ferramentas acadêmicas UFU"
-          Target="[INSTALLFOLDER]config_moodle.exe"
+          Target="[INSTALLFOLDER]GestorUFU.exe"
           WorkingDirectory="INSTALLFOLDER" />
         <RegistryValue Root="HKCU"
                        Key="Software\JosueMorais\ConfigMoodle"

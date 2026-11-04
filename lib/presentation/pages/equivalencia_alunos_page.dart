@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';

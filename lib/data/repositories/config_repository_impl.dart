@@ -2,12 +2,12 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:uuid/uuid.dart';
-import 'package:config_moodle/core/utils/date_calculator.dart';
-import 'package:config_moodle/core/utils/macro_resolver.dart';
-import 'package:config_moodle/data/datasources/local_datasource.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
-import 'package:config_moodle/domain/repositories/i_config_repository.dart';
+import 'package:gestor_ufu/core/utils/date_calculator.dart';
+import 'package:gestor_ufu/core/utils/macro_resolver.dart';
+import 'package:gestor_ufu/data/datasources/local_datasource.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
+import 'package:gestor_ufu/domain/repositories/i_config_repository.dart';
 
 /// Padrão para referência de célula com operação: E2+3, B7+1, B10-5
 final _formulaRefPattern = RegExp(r'^([A-Z]+)(\d+)([+-])(\d+)$');

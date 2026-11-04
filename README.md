@@ -100,14 +100,14 @@ Para que a sincronização funcione, o administrador do Moodle precisa garantir:
 
 ### Windows (MSI)
 
-1. Acesse a página de [Releases](https://github.com/josuemoraisgh/config_moodle/releases)
+1. Acesse a página de [Releases](https://github.com/LASEC-UFU/Gestor-UFU/releases)
 2. Baixe o arquivo `GestorUFU-X.Y.Z-windows.msi`
 3. Execute o instalador e siga as instruções
 4. O aplicativo ficará disponível no Menu Iniciar e na Área de Trabalho
 
 ### Android (APK)
 
-1. Acesse a página de [Releases](https://github.com/josuemoraisgh/config_moodle/releases)
+1. Acesse a página de [Releases](https://github.com/LASEC-UFU/Gestor-UFU/releases)
 2. Baixe o arquivo `GestorUFU-X.Y.Z-android.apk`
 3. No dispositivo, habilite "Instalar de fontes desconhecidas"
 4. Instale o APK
@@ -115,8 +115,8 @@ Para que a sincronização funcione, o administrador do Moodle precisa garantir:
 ### A partir do código-fonte
 
 ```bash
-git clone https://github.com/josuemoraisgh/config_moodle.git
-cd config_moodle
+git clone https://github.com/LASEC-UFU/Gestor-UFU.git
+cd Gestor-UFU
 flutter pub get
 flutter run          # Executa no dispositivo/emulador conectado
 flutter run -d windows  # Executa especificamente no Windows
@@ -716,8 +716,8 @@ O projeto inclui um workflow GitHub Actions para build e release automatizados.
 flutter doctor
 
 # Clonar o repositório
-git clone https://github.com/josuemoraisgh/config_moodle.git
-cd config_moodle
+git clone https://github.com/LASEC-UFU/Gestor-UFU.git
+cd Gestor-UFU
 ```
 
 ### Comandos Úteis

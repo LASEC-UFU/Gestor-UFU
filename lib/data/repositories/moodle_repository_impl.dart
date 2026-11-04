@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/data/datasources/moodle_datasource.dart';
-import 'package:config_moodle/domain/entities/moodle_entities.dart';
-import 'package:config_moodle/domain/repositories/i_moodle_repository.dart';
+import 'package:gestor_ufu/data/datasources/moodle_datasource.dart';
+import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
+import 'package:gestor_ufu/domain/repositories/i_moodle_repository.dart';
 
 class MoodleRepositoryImpl implements IMoodleRepository {
   final MoodleDatasource _datasource;

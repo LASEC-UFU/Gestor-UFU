@@ -1,9 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import 'package:config_moodle/core/utils/date_calculator.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
-import 'package:config_moodle/domain/repositories/i_config_repository.dart';
+import 'package:gestor_ufu/core/utils/date_calculator.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
+import 'package:gestor_ufu/domain/repositories/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
   final IConfigRepository _repo;

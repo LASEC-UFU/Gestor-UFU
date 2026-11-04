@@ -7,10 +7,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import 'package:config_moodle/presentation/controllers/theme_controller.dart';
-import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class SeiTreePage extends StatefulWidget {
   const SeiTreePage({super.key});

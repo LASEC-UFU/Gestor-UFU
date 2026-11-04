@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:config_moodle/presentation/pages/dashboard_page.dart';
-import 'package:config_moodle/presentation/pages/home_page.dart';
-import 'package:config_moodle/presentation/pages/sei_tree_page.dart';
-import 'package:config_moodle/presentation/pages/table_editor_page.dart';
-import 'package:config_moodle/presentation/pages/sync_preview_page.dart';
-import 'package:config_moodle/presentation/pages/preenche_diarios_page.dart';
-import 'package:config_moodle/presentation/pages/planos_ensino_page.dart';
-import 'package:config_moodle/presentation/pages/planos_trabalho_page.dart';
-import 'package:config_moodle/presentation/pages/ajusta_horarios_page.dart';
-import 'package:config_moodle/presentation/pages/equivalencia_alunos_page.dart';
+import 'package:gestor_ufu/presentation/pages/dashboard_page.dart';
+import 'package:gestor_ufu/presentation/pages/home_page.dart';
+import 'package:gestor_ufu/presentation/pages/sei_tree_page.dart';
+import 'package:gestor_ufu/presentation/pages/table_editor_page.dart';
+import 'package:gestor_ufu/presentation/pages/sync_preview_page.dart';
+import 'package:gestor_ufu/presentation/pages/preenche_diarios_page.dart';
+import 'package:gestor_ufu/presentation/pages/planos_ensino_page.dart';
+import 'package:gestor_ufu/presentation/pages/planos_trabalho_page.dart';
+import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
+import 'package:gestor_ufu/presentation/pages/equivalencia_alunos_page.dart';
 
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();

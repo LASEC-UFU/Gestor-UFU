@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
 
 class ThemeController extends ChangeNotifier {
   static const storageKey = 'gestor_ufu_theme_light';

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/data/services/preferences_backup_service.dart';
-import 'package:config_moodle/presentation/widgets/common_widgets.dart';
-import 'package:config_moodle/data/services/shared_preferences_sync_service.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/services/preferences_backup_service.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';

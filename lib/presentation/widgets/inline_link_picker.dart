@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
 
 /// Item para o picker inline de vínculos.
 class LinkOption {

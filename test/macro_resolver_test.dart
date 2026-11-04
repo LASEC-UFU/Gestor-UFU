@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:config_moodle/core/utils/macro_resolver.dart';
+import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 
 void main() {
   group('replaceDatesWithMacros', () {

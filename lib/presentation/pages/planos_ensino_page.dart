@@ -6,13 +6,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/core/utils/macro_resolver.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/presentation/controllers/config_controller.dart';
-import 'package:config_moodle/data/services/planos_ensino_service.dart';
-import 'package:config_moodle/data/services/planos_ensino_automation_service.dart';
-import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/core/utils/macro_resolver.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
+import 'package:gestor_ufu/data/services/planos_ensino_service.dart';
+import 'package:gestor_ufu/data/services/planos_ensino_automation_service.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class PlanosEnsinoPage extends StatefulWidget {
   const PlanosEnsinoPage({super.key});

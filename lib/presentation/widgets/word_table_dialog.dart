@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/data/web_table_clipboard.dart';
-import 'package:config_moodle/data/word_table_generator.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/web_table_clipboard.dart';
+import 'package:gestor_ufu/data/word_table_generator.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';

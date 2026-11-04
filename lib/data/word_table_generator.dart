@@ -1,5 +1,5 @@
-import 'package:config_moodle/core/utils/macro_resolver.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:gestor_ufu/core/utils/macro_resolver.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:intl/intl.dart';
 
 enum WordTableColumn {

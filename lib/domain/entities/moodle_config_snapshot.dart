@@ -1,4 +1,4 @@
-import 'package:config_moodle/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
 
 /// Imutável: uma fotografia completa da configuração em um momento do tempo.
 class MoodleConfigSnapshot {

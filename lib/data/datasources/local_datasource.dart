@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/domain/entities/course_config.dart';
-import 'package:config_moodle/domain/entities/moodle_config_snapshot.dart';
+import 'package:gestor_ufu/domain/entities/course_config.dart';
+import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:uuid/uuid.dart';
-import 'package:config_moodle/core/utils/text_encoding.dart';
+import 'package:gestor_ufu/core/utils/text_encoding.dart';
 
 class LocalDatasource {
   static const _storageKey = 'config_moodle_data';

@@ -4,12 +4,12 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/core/theme/app_theme.dart';
-import 'package:config_moodle/data/services/plano_trabalho_automation_service.dart';
-import 'package:config_moodle/data/services/planilha_trabalho_service.dart';
-import 'package:config_moodle/data/services/planos_trabalho_store.dart';
-import 'package:config_moodle/domain/entities/plano_trabalho.dart';
-import 'package:config_moodle/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/services/plano_trabalho_automation_service.dart';
+import 'package:gestor_ufu/data/services/planilha_trabalho_service.dart';
+import 'package:gestor_ufu/data/services/planos_trabalho_store.dart';
+import 'package:gestor_ufu/domain/entities/plano_trabalho.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class PlanosTrabalhoPage extends StatefulWidget {
   const PlanosTrabalhoPage({super.key});

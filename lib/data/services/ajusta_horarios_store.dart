@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 
 class AjustaHorariosStore {
   static const _storageKey = 'ajusta_horarios_disciplinas_2026_2_ca_v2';
