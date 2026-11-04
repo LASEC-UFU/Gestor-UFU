@@ -255,13 +255,18 @@ class WindowsUpdateService {
         logPath,
         '-ReadyPath',
         readyPath,
-      ], mode: ProcessStartMode.detached);
+      ], mode: ProcessStartMode.normal);
       updater = startedUpdater;
+      // Keep the child process independent while draining its inherited pipes.
+      // On Windows, detached mode could return a PID without executing the
+      // PowerShell script, so the helper never created its readiness marker.
+      startedUpdater.stdout.listen((_) {});
+      startedUpdater.stderr.listen((_) {});
       await _writeLog(
         logPath,
         'Processo auxiliar iniciado (PID ${startedUpdater.pid}); aguardando confirmação.',
       );
-      final deadline = DateTime.now().add(const Duration(seconds: 12));
+      final deadline = DateTime.now().add(const Duration(seconds: 45));
       while (DateTime.now().isBefore(deadline)) {
         if (await File(readyPath).exists()) {
           await File(readyPath).delete();
