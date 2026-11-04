@@ -26,6 +26,8 @@ class AjustaHorariosStore {
   static const _termsKey = 'ajusta_horarios_periodos_letivos';
   static const _textEncodingMigrationKey =
       'ajusta_horarios_migracao_codificacao_texto_v1';
+  static const _teacherNamesMigrationKey =
+      'ajusta_horarios_migracao_nomes_docentes_v1';
   static const defaultTerm = '2\u00ba semestre de 2026';
 
   String _keyForTerm(String term) {
@@ -38,6 +40,7 @@ class AjustaHorariosStore {
   Future<List<HorarioDisciplina>> load({String term = defaultTerm}) async {
     final prefs = await SharedPreferences.getInstance();
     await _repairStoredTextEncoding(prefs);
+    await _normalizeStoredTeacherNames(prefs);
     if (prefs.getBool(_initialResetKey) != true) {
       // Some shared databases were created before this marker existed. Never
       // replace an existing timetable with the bundled seed on those installs.
@@ -330,6 +333,118 @@ class AjustaHorariosStore {
       }
     }
     await prefs.setBool(_textEncodingMigrationKey, true);
+  }
+
+  Future<void> _normalizeStoredTeacherNames(SharedPreferences prefs) async {
+    if (prefs.getBool(_teacherNamesMigrationKey) == true) return;
+
+    List<String> normalizeNames(Iterable<Object?> values) {
+      final names = <String>[];
+      final seen = <String>{};
+      for (final value in values) {
+        if (value is! String) continue;
+        final name = repairMojibake(value).trim();
+        if (name.isEmpty || !seen.add(name.toLowerCase())) continue;
+        names.add(name);
+      }
+      return names;
+    }
+
+    for (final key in prefs.getKeys()) {
+      if (key.startsWith('ajusta_horarios_docentes_cadastrados_') ||
+          key.startsWith('ajusta_horarios_docentes_ocultos_distribuicao_')) {
+        final values = prefs.getStringList(key);
+        if (values == null) continue;
+        final normalized = normalizeNames(values);
+        if (!_sameStrings(values, normalized)) {
+          await prefs.setStringList(key, normalized);
+        }
+        continue;
+      }
+
+      if (key.startsWith('ajusta_horarios_docente_selecionado_')) {
+        final value = prefs.getString(key);
+        if (value == null) continue;
+        final normalized = repairMojibake(value).trim();
+        if (normalized != value) await prefs.setString(key, normalized);
+        continue;
+      }
+
+      if (key.startsWith('${_storageKey}_')) {
+        final stored = prefs.getString(key);
+        if (stored == null || stored.isEmpty) continue;
+        try {
+          final rows = (jsonDecode(stored) as List)
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+          var changed = false;
+          for (final row in rows) {
+            final teachers = row['teachers'];
+            if (teachers is List) {
+              final normalized = normalizeNames(teachers);
+              if (!_sameStrings(
+                teachers.whereType<String>().toList(),
+                normalized,
+              )) {
+                row['teachers'] = normalized;
+                changed = true;
+              }
+            }
+            final teacher = row['teacher'];
+            if (teacher is String) {
+              final normalized = repairMojibake(teacher).trim();
+              if (normalized != teacher) {
+                row['teacher'] = normalized;
+                changed = true;
+              }
+            }
+            final coTeachers = row['coTeachers'];
+            if (coTeachers is List) {
+              final normalized = normalizeNames(coTeachers);
+              if (!_sameStrings(
+                coTeachers.whereType<String>().toList(),
+                normalized,
+              )) {
+                row['coTeachers'] = normalized;
+                changed = true;
+              }
+            }
+          }
+          if (changed) {
+            await prefs.setString(key, jsonEncode(rows));
+          }
+        } on Object {
+          // Keep malformed schedules intact so the existing recovery path can
+          // report them without discarding user data.
+        }
+        continue;
+      }
+
+      if (key.startsWith('ajusta_horarios_distribuicao_docente')) {
+        final stored = prefs.getString(key);
+        if (stored == null || stored.isEmpty) continue;
+        try {
+          final rows = (jsonDecode(stored) as List)
+              .map((row) => Map<String, dynamic>.from(row as Map))
+              .toList();
+          var changed = false;
+          for (final row in rows) {
+            final teacher = row['teacher'];
+            if (teacher is! String) continue;
+            final normalized = repairMojibake(teacher).trim();
+            if (normalized != teacher) {
+              row['teacher'] = normalized;
+              changed = true;
+            }
+          }
+          if (changed) await prefs.setString(key, jsonEncode(rows));
+        } on Object {
+          // Leave unknown distribution data untouched.
+        }
+      }
+    }
+
+    await prefs.setBool(_teacherNamesMigrationKey, true);
   }
 
   bool _sameStrings(List<String> left, List<String> right) {

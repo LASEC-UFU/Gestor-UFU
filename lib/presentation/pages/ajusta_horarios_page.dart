@@ -3523,6 +3523,97 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           await _savePeriodEntries(values, term: editorTerm);
           return true;
         }
+        if (call.method == 'copyDisciplineToTerm') {
+          final payload = Map<String, dynamic>.from(call.arguments as Map);
+          final targetTerm = (payload['term'] as String? ?? '').trim();
+          final sourceEntries = (payload['entries'] as List? ?? const [])
+              .map(
+                (value) => HorarioDisciplina.fromJson(
+                  Map<String, dynamic>.from(value as Map),
+                ),
+              )
+              .toList();
+          if (targetTerm.isEmpty || sourceEntries.isEmpty) return 'empty';
+          if (targetTerm == editorTerm) return 'same_term';
+
+          final source = sourceEntries.first;
+          final targetEntries = await _store.load(term: targetTerm);
+          final sourcePeriods = sourceEntries
+              .expand((entry) => entry.coursePeriods)
+              .map((item) => '${item.program}:${item.period}')
+              .toSet();
+          final alreadyExists = targetEntries.any((entry) {
+            final sameIdentity = source.code.trim().isNotEmpty
+                ? entry.code.trim().toLowerCase() ==
+                      source.code.trim().toLowerCase()
+                : entry.acronym.trim().toLowerCase() ==
+                          source.acronym.trim().toLowerCase() &&
+                      entry.name.trim().toLowerCase() ==
+                          source.name.trim().toLowerCase();
+            if (!sameIdentity) return false;
+            return entry.coursePeriods.any(
+              (item) =>
+                  sourcePeriods.contains('${item.program}:${item.period}'),
+            );
+          });
+          if (alreadyExists) return 'already_exists';
+
+          final copiedSubjectId = const Uuid().v4();
+          final copies = sourceEntries
+              .map(
+                (entry) => entry.copyWith(
+                  id: const Uuid().v4(),
+                  subjectId: copiedSubjectId,
+                  coursePeriods: entry.coursePeriods
+                      .map(
+                        (item) => CursoPeriodo(
+                          program: item.program,
+                          period: item.period,
+                        ),
+                      )
+                      .toList(),
+                  slots: entry.slots
+                      .map(
+                        (slot) =>
+                            HorarioSlot(weekday: slot.weekday, slot: slot.slot),
+                      )
+                      .toList(),
+                ),
+              )
+              .toList();
+          await _store.save([...targetEntries, ...copies], term: targetTerm);
+
+          final prefs = await SharedPreferences.getInstance();
+          final teachers =
+              (prefs.getStringList(
+                        _termScopedKey(_teacherRosterKey, targetTerm),
+                      ) ??
+                      const <String>[])
+                  .toSet()
+                ..addAll(copies.expand((entry) => entry.teacherNames));
+          await prefs.setStringList(
+            _termScopedKey(_teacherRosterKey, targetTerm),
+            teachers.toList()
+              ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+          );
+          final rooms =
+              (prefs.getStringList(
+                        _termScopedKey(_roomRosterKey, targetTerm),
+                      ) ??
+                      const <String>[])
+                  .toSet()
+                ..addAll(
+                  copies
+                      .map((entry) => entry.room.trim())
+                      .where((room) => room.isNotEmpty),
+                );
+          await prefs.setStringList(
+            _termScopedKey(_roomRosterKey, targetTerm),
+            rooms.toList()
+              ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())),
+          );
+          return 'copied:${copies.length}';
+        }
         if (call.method == 'closed') {
           return true;
         }
@@ -3543,6 +3634,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             'selectedProgram': _program,
             'selectedPeriod': _period,
             'initialEntryId': initialEntryId,
+            'term': editorTerm,
+            'terms': _terms,
             'isLight': AppTheme.isLight,
           }),
         ),
@@ -4596,6 +4689,8 @@ class HorarioEditorWindowApp extends StatelessWidget {
     required this.selectedPeriod,
     required this.channelName,
     required this.initialEntryId,
+    required this.term,
+    required this.terms,
     required this.isLight,
     super.key,
   });
@@ -4607,6 +4702,8 @@ class HorarioEditorWindowApp extends StatelessWidget {
   final int selectedPeriod;
   final String channelName;
   final String? initialEntryId;
+  final String term;
+  final List<String> terms;
   final bool isLight;
 
   @override
@@ -4625,6 +4722,8 @@ class HorarioEditorWindowApp extends StatelessWidget {
             selectedProgram: selectedProgram,
             selectedPeriod: selectedPeriod,
             initialEntryId: initialEntryId,
+            term: term,
+            terms: terms,
             channelName: channelName,
             onSave: (updated) async {
               await WindowMethodChannel(
@@ -5242,6 +5341,8 @@ class _HorarioEditorDialog extends StatefulWidget {
     required this.selectedProgram,
     required this.selectedPeriod,
     required this.initialEntryId,
+    required this.term,
+    required this.terms,
     required this.channelName,
     required this.onSave,
     this.onClose,
@@ -5252,6 +5353,8 @@ class _HorarioEditorDialog extends StatefulWidget {
   final int selectedProgram;
   final int selectedPeriod;
   final String? initialEntryId;
+  final String term;
+  final List<String> terms;
   final String channelName;
   final Future<void> Function(List<HorarioDisciplina>) onSave;
   final Future<void> Function()? onClose;
@@ -6355,6 +6458,115 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     });
   }
 
+  Future<void> _copyDisciplineToAnotherTerm() async {
+    final selected = _selected;
+    if (selected == null || _creating) return;
+    final destinations = widget.terms
+        .where((term) => term != widget.term)
+        .toList();
+    if (destinations.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cadastre outro período letivo primeiro.'),
+        ),
+      );
+      return;
+    }
+
+    var destination = destinations.first;
+    final targetTerm = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Copiar disciplina para outro semestre'),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '${selected.acronym} - ${selected.name}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Serão copiadas as modalidades, turmas, horários, salas, docentes e cursos/períodos de oferta. A cópia terá cadastros independentes no semestre escolhido.',
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: destination,
+                  decoration: const InputDecoration(
+                    labelText: 'Semestre de destino',
+                  ),
+                  items: destinations
+                      .map(
+                        (term) =>
+                            DropdownMenuItem(value: term, child: Text(term)),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null)
+                      setDialogState(() => destination = value);
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, destination),
+              icon: const Icon(Icons.copy_rounded),
+              label: const Text('Copiar disciplina'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (targetTerm == null || !mounted) return;
+    if (!_commitCurrent()) return;
+    final current = _entries
+        .where((entry) => entry.id == _selectedId)
+        .firstOrNull;
+    if (current == null) return;
+    final subjectEntries = _entries
+        .where((entry) => _sameDiscipline(entry, current))
+        .toList();
+
+    try {
+      await widget.onSave(_entries);
+      final result =
+          await WindowMethodChannel(
+            widget.channelName,
+            mode: ChannelMode.bidirectional,
+          ).invokeMethod<String>('copyDisciplineToTerm', {
+            'term': targetTerm,
+            'entries': subjectEntries.map((entry) => entry.toJson()).toList(),
+          });
+      if (!mounted) return;
+      final message = switch (result) {
+        final value when value != null && value.startsWith('copied:') =>
+          'Disciplina copiada para $targetTerm com ${value.substring(7)} turma(s).',
+        'already_exists' =>
+          'Essa disciplina já existe no semestre $targetTerm para um dos mesmos cursos/períodos.',
+        'same_term' => 'Escolha um semestre diferente do atual.',
+        _ => 'Não foi possível copiar a disciplina para $targetTerm.',
+      };
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Falha ao copiar disciplina: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = _selected;
@@ -6469,6 +6681,14 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                     tooltip: 'Adicionar disciplina ou copiar um modelo',
                     onPressed: _startCreating,
                     icon: const Icon(Icons.add_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    tooltip: 'Copiar disciplina para outro semestre',
+                    onPressed: item == null || _creating
+                        ? null
+                        : _copyDisciplineToAnotherTerm,
+                    icon: const Icon(Icons.copy_all_rounded),
                   ),
                   const SizedBox(width: 4),
                   IconButton.filledTonal(

@@ -73,6 +73,8 @@ Future<void> main(List<String> args) async {
             selectedPeriod: payload['selectedPeriod'] as int,
             channelName: payload['channel'] as String,
             initialEntryId: payload['initialEntryId'] as String?,
+            term: payload['term'] as String? ?? '',
+            terms: (payload['terms'] as List? ?? const []).cast<String>(),
             isLight: isLight,
           ),
         );
