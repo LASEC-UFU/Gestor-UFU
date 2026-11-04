@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:gestor_ufu/core/utils/text_encoding.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
@@ -23,6 +24,8 @@ class AjustaHorariosStore {
   static const _teacherAssignmentsMigrationKey =
       'ajusta_horarios_migracao_alocacao_docentes_turma_v1';
   static const _termsKey = 'ajusta_horarios_periodos_letivos';
+  static const _textEncodingMigrationKey =
+      'ajusta_horarios_migracao_codificacao_texto_v1';
   static const defaultTerm = '2\u00ba semestre de 2026';
 
   String _keyForTerm(String term) {
@@ -34,6 +37,7 @@ class AjustaHorariosStore {
 
   Future<List<HorarioDisciplina>> load({String term = defaultTerm}) async {
     final prefs = await SharedPreferences.getInstance();
+    await _repairStoredTextEncoding(prefs);
     if (prefs.getBool(_initialResetKey) != true) {
       // Some shared databases were created before this marker existed. Never
       // replace an existing timetable with the bundled seed on those installs.
@@ -270,6 +274,70 @@ class AjustaHorariosStore {
     }
 
     return const <HorarioDisciplina>[];
+  }
+
+  Future<void> _repairStoredTextEncoding(SharedPreferences prefs) async {
+    if (prefs.getBool(_textEncodingMigrationKey) == true) return;
+
+    dynamic repairTree(dynamic value) {
+      if (value is String) return repairMojibake(value);
+      if (value is List) return value.map(repairTree).toList();
+      if (value is Map) {
+        return value.map<String, dynamic>(
+          (key, item) => MapEntry(key as String, repairTree(item)),
+        );
+      }
+      return value;
+    }
+
+    for (final key in prefs.getKeys().where(
+      (key) => key.startsWith('${_storageKey}_'),
+    )) {
+      final stored = prefs.getString(key);
+      if (stored == null || stored.isEmpty) continue;
+      try {
+        final repaired = jsonEncode(repairTree(jsonDecode(stored)));
+        if (repaired != stored) await prefs.setString(key, repaired);
+      } on Object {
+        // Preserve unknown or malformed periods for recovery.
+      }
+    }
+
+    final programsRaw = prefs.getString('ajusta_horarios_cursos');
+    if (programsRaw != null) {
+      try {
+        final repaired = jsonEncode(repairTree(jsonDecode(programsRaw)));
+        if (repaired != programsRaw) {
+          await prefs.setString('ajusta_horarios_cursos', repaired);
+        }
+      } on Object {
+        // Keep an unrecognized program catalog intact.
+      }
+    }
+
+    final terms = prefs.getStringList(_termsKey);
+    if (terms != null) {
+      final repaired = terms.map(repairMojibake).toList();
+      if (!_sameStrings(terms, repaired)) {
+        await prefs.setStringList(_termsKey, repaired);
+      }
+    }
+    final activeTerm = prefs.getString('ajusta_horarios_periodo_letivo');
+    if (activeTerm != null) {
+      final repaired = repairMojibake(activeTerm);
+      if (repaired != activeTerm) {
+        await prefs.setString('ajusta_horarios_periodo_letivo', repaired);
+      }
+    }
+    await prefs.setBool(_textEncodingMigrationKey, true);
+  }
+
+  bool _sameStrings(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
   }
 
   Future<List<HorarioDisciplina>> _loadSeed() async {

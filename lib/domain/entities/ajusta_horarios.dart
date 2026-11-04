@@ -1,3 +1,5 @@
+import 'package:gestor_ufu/core/utils/text_encoding.dart';
+
 class HorarioSlot {
   const HorarioSlot({required this.weekday, required this.slot});
 
@@ -146,7 +148,7 @@ class HorarioDisciplina {
     final seen = <String>{};
 
     void add(Object? value) {
-      final name = value?.toString().trim() ?? '';
+      final name = repairMojibake(value?.toString().trim() ?? '');
       if (name.isEmpty || !seen.add(name.toLowerCase())) return;
       names.add(name);
     }
@@ -174,12 +176,12 @@ class HorarioDisciplina {
         id: json['id'] as String,
         subjectId: json['subjectId'] as String? ?? json['id'] as String,
         modality: json['modality'] as String? ?? 'legacy',
-        code: json['code'] as String? ?? '',
-        acronym: json['acronym'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        className: json['className'] as String? ?? '',
+        code: repairMojibake(json['code'] as String? ?? ''),
+        acronym: repairMojibake(json['acronym'] as String? ?? ''),
+        name: repairMojibake(json['name'] as String? ?? ''),
+        className: repairMojibake(json['className'] as String? ?? ''),
         teachers: _readTeacherNames(json),
-        room: json['room'] as String? ?? '',
+        room: repairMojibake(json['room'] as String? ?? ''),
         coursePeriods: ((json['coursePeriods'] as List?) ?? const [])
             .map(
               (item) =>

@@ -82,6 +82,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     return '${key}_$token';
   }
 
+  String _normalizeTermLabel(String value) => value
+      .trim()
+      .replaceAll('\u00c2\u00ba', '\u00ba')
+      .replaceAll('\u00c2\u00aa', '\u00aa');
+
   @override
   void initState() {
     super.initState();
@@ -180,9 +185,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   Future<void> _load() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedTerm = prefs.getString(_termKey)?.trim();
+      final rawSavedTerm = prefs.getString(_termKey)?.trim();
+      final savedTerm = rawSavedTerm == null
+          ? null
+          : _normalizeTermLabel(rawSavedTerm);
       final terms = (prefs.getStringList(_termsKey) ?? const <String>[])
-          .map((term) => term.trim())
+          .map(_normalizeTermLabel)
           .where((term) => term.isNotEmpty)
           .toSet()
           .toList();
@@ -274,24 +282,98 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final usablePrograms = programs.isEmpty
           ? {...horarioProgramas}
           : programs;
-      const canonicalAbiName = 'ABI em Automação, Robótica e IA';
-      final canonicalAbiProgram = usablePrograms.entries
-          .where((entry) => entry.value.trim() == canonicalAbiName)
-          .map((entry) => entry.key)
-          .firstOrNull;
+      const canonicalAbiName = 'ABI em Automa\u00e7\u00e3o, Rob\u00f3tica e IA';
+      final referencedProgramIds =
+          rows
+              .expand((row) => row.coursePeriods.map((item) => item.program))
+              .toSet()
+              .toList()
+            ..sort();
+      final missingProgramIds = referencedProgramIds
+          .where((id) => !usablePrograms.containsKey(id))
+          .toList();
+      final canonicalAbiProgram =
+          usablePrograms.entries
+              .where((entry) => entry.value.trim() == canonicalAbiName)
+              .map((entry) => entry.key)
+              .firstOrNull ??
+          missingProgramIds.firstOrNull;
       var programsChanged = false;
+      var selectedAbiProgram = canonicalAbiProgram;
       for (final entry in usablePrograms.entries.toList()) {
         final name = entry.value.trim();
-        final looksLikeAbi = name.toLowerCase().startsWith('abi em automa');
-        if (!looksLikeAbi) continue;
-        if (canonicalAbiProgram != null && entry.key != canonicalAbiProgram) {
+        if (!name.toLowerCase().startsWith('abi em automa')) continue;
+        selectedAbiProgram ??= entry.key;
+        if (entry.key != selectedAbiProgram) {
+          final targetProgram = selectedAbiProgram;
+          // Merge schedules from duplicate, mojibaked course IDs before
+          // removing the duplicate label from the course selector.
+          final currentStorageKey = _termScopedKey(
+            'ajusta_horarios_disciplinas_2026_2_ca_v2',
+            activeTerm,
+          );
+          for (final storageKey in prefs.getKeys().where(
+            (key) =>
+                key.startsWith('ajusta_horarios_disciplinas_2026_2_ca_v2_'),
+          )) {
+            final stored = prefs.getString(storageKey);
+            if (stored == null) continue;
+            try {
+              final storedRows = (jsonDecode(stored) as List)
+                  .map(
+                    (raw) => HorarioDisciplina.fromJson(
+                      Map<String, dynamic>.from(raw as Map),
+                    ),
+                  )
+                  .toList();
+              var changed = false;
+              final migratedRows = storedRows.map((row) {
+                final seen = <String>{};
+                final offerings = <CursoPeriodo>[];
+                for (final offering in row.coursePeriods) {
+                  final program = offering.program == entry.key
+                      ? targetProgram
+                      : offering.program;
+                  if (program != offering.program) changed = true;
+                  if (seen.add('$program:${offering.period}')) {
+                    offerings.add(
+                      CursoPeriodo(program: program, period: offering.period),
+                    );
+                  } else {
+                    changed = true;
+                  }
+                }
+                return changed || offerings.length != row.coursePeriods.length
+                    ? row.copyWith(coursePeriods: offerings)
+                    : row;
+              }).toList();
+              if (!changed) continue;
+              if (storageKey == currentStorageKey) {
+                rows
+                  ..clear()
+                  ..addAll(migratedRows);
+              }
+              await prefs.setString(
+                storageKey,
+                jsonEncode(migratedRows.map((row) => row.toJson()).toList()),
+              );
+            } on Object {
+              // Preserve unknown period data; do not rewrite unrecognized JSON.
+            }
+          }
           usablePrograms.remove(entry.key);
           programsChanged = true;
-        } else if (canonicalAbiProgram == null && name != canonicalAbiName) {
+        } else if (name != canonicalAbiName) {
           usablePrograms[entry.key] = canonicalAbiName;
           programsChanged = true;
         }
       }
+      if (selectedAbiProgram != null &&
+          usablePrograms[selectedAbiProgram] != canonicalAbiName) {
+        usablePrograms[selectedAbiProgram] = canonicalAbiName;
+        programsChanged = true;
+      }
+      if (programsChanged) await _store.save(rows, term: activeTerm);
       if (programsChanged) {
         await prefs.setString(
           _programsKey,
