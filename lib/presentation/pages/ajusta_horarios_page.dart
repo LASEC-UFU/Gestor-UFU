@@ -5119,6 +5119,35 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     _ => AppTheme.textSecondary,
   };
 
+  ({List<HorarioDisciplina> teachers, List<HorarioDisciplina> rooms})
+  _scheduleConflictsAt(String slotKey, HorarioDisciplina candidate) {
+    final teacherNames = candidate.teacherNames
+        .map((name) => name.toLowerCase())
+        .toSet();
+    final room = candidate.room.trim().toLowerCase();
+    final sameSlot = _entries.where(
+      (entry) =>
+          entry.id != candidate.id &&
+          entry.slots.any((slot) => slot.key == slotKey),
+    );
+    return (
+      teachers: teacherNames.isEmpty
+          ? <HorarioDisciplina>[]
+          : sameSlot
+                .where(
+                  (entry) => entry.teacherNames.any(
+                    (name) => teacherNames.contains(name.toLowerCase()),
+                  ),
+                )
+                .toList(),
+      rooms: room.isEmpty
+          ? <HorarioDisciplina>[]
+          : sameSlot
+                .where((entry) => entry.room.trim().toLowerCase() == room)
+                .toList(),
+    );
+  }
+
   List<HorarioDisciplina> _otherClassesAtSlot(String slotKey) {
     final current = _selected;
     if (current == null) return const [];
@@ -5131,6 +5160,36 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
               entry.slots.any((slot) => slot.key == slotKey),
         )
         .toList();
+  }
+
+  String _conflictingClassLabel(HorarioDisciplina entry) {
+    final classLabel = entry.timetableLabel;
+    final disciplineName = entry.name.trim();
+    return disciplineName.isEmpty
+        ? classLabel
+        : '$classLabel - $disciplineName';
+  }
+
+  List<String> _selectedScheduleConflictMessages(HorarioDisciplina? item) {
+    if (item == null || !_hasSelectedModality || _selectedModality == 'ead') {
+      return const [];
+    }
+    final candidate = _editedValue(item);
+    final conflicts = <String>[];
+    for (final slotKey in _slots) {
+      final details = _scheduleConflictsAt(slotKey, candidate);
+      if (details.teachers.isNotEmpty) {
+        conflicts.add(
+          'Docente${details.teachers.length == 1 ? '' : 's'} ${candidate.teacherNames.join(', ')}: ${details.teachers.map(_conflictingClassLabel).toSet().join(', ')}',
+        );
+      }
+      if (details.rooms.isNotEmpty) {
+        conflicts.add(
+          'Sala ${candidate.room.trim()}: ${details.rooms.map(_conflictingClassLabel).toSet().join(', ')}',
+        );
+      }
+    }
+    return conflicts.toSet().toList();
   }
 
   List<String> get _availableModalities => [
@@ -6336,6 +6395,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                           child: _field(
                                             _room,
                                             'Sala desta turma',
+                                            onChanged: (_) => setState(() {}),
                                           ),
                                         ),
                                       ],
@@ -6433,6 +6493,27 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                           builder: (context) {
                                                             final slotKey =
                                                                 '$day:$slot';
+                                                            final draft =
+                                                                _editedValue(
+                                                                  item,
+                                                                );
+                                                            final conflicts =
+                                                                _scheduleConflictsAt(
+                                                                  slotKey,
+                                                                  draft,
+                                                                );
+                                                            final isChecked =
+                                                                _slots.contains(
+                                                                  slotKey,
+                                                                );
+                                                            final hasConflict =
+                                                                isChecked &&
+                                                                (conflicts
+                                                                        .teachers
+                                                                        .isNotEmpty ||
+                                                                    conflicts
+                                                                        .rooms
+                                                                        .isNotEmpty);
                                                             final otherClasses =
                                                                 _otherClassesAtSlot(
                                                                   slotKey,
@@ -6447,32 +6528,54 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                     )
                                                                     .toSet()
                                                                     .toList();
+                                                            final conflictMarkers =
+                                                                <Color>[
+                                                                  if (conflicts
+                                                                      .teachers
+                                                                      .isNotEmpty)
+                                                                    const Color(
+                                                                      0xFF1685E5,
+                                                                    ),
+                                                                  if (conflicts
+                                                                      .rooms
+                                                                      .isNotEmpty)
+                                                                    const Color(
+                                                                      0xFFE5A000,
+                                                                    ),
+                                                                ];
                                                             final markerColor =
                                                                 modalities
                                                                     .isEmpty
-                                                                ? null
+                                                                ? conflictMarkers
+                                                                      .firstOrNull
                                                                 : _modalityScheduleColor(
                                                                     modalities
                                                                         .first,
                                                                   );
+                                                            final tooltipLines = <String>[
+                                                              if (conflicts
+                                                                  .teachers
+                                                                  .isNotEmpty)
+                                                                'Docente ocupado: ${conflicts.teachers.map(_conflictingClassLabel).toSet().join(', ')}',
+                                                              if (conflicts
+                                                                  .rooms
+                                                                  .isNotEmpty)
+                                                                'Sala ocupada: ${conflicts.rooms.map(_conflictingClassLabel).toSet().join(', ')}',
+                                                              if (otherClasses
+                                                                  .isNotEmpty)
+                                                                ...otherClasses.map(
+                                                                  (entry) =>
+                                                                      '${_modalityName(entry.modality)} - turma ${entry.className}',
+                                                                ),
+                                                            ];
                                                             final tooltip =
-                                                                otherClasses
-                                                                    .isEmpty
-                                                                ? null
-                                                                : otherClasses
-                                                                      .map(
-                                                                        (
-                                                                          entry,
-                                                                        ) =>
-                                                                            '${_modalityName(entry.modality)} - turma ${entry.className}',
-                                                                      )
-                                                                      .toSet()
-                                                                      .join(
-                                                                        '\r\n',
-                                                                      );
+                                                                tooltipLines
+                                                                    .toSet()
+                                                                    .join(
+                                                                      '\r\n',
+                                                                    );
                                                             return Tooltip(
-                                                              message:
-                                                                  tooltip ?? '',
+                                                              message: tooltip,
                                                               child: SizedBox(
                                                                 width: 40,
                                                                 height: 40,
@@ -6483,6 +6586,12 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                   children: [
                                                                     CheckboxTheme(
                                                                       data: CheckboxThemeData(
+                                                                        fillColor:
+                                                                            hasConflict
+                                                                            ? WidgetStatePropertyAll(
+                                                                                AppTheme.danger,
+                                                                              )
+                                                                            : null,
                                                                         side:
                                                                             markerColor ==
                                                                                 null
@@ -6493,9 +6602,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                               ),
                                                                       ),
                                                                       child: Checkbox(
-                                                                        value: _slots.contains(
-                                                                          slotKey,
-                                                                        ),
+                                                                        value:
+                                                                            isChecked,
                                                                         onChanged:
                                                                             _selectedModality ==
                                                                                 'ead'
@@ -6516,8 +6624,8 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                               }),
                                                                       ),
                                                                     ),
-                                                                    if (modalities
-                                                                            .length >
+                                                                    if (modalities.length +
+                                                                            conflictMarkers.length >
                                                                         1)
                                                                       Positioned(
                                                                         top: 1,
@@ -6527,8 +6635,12 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                           mainAxisSize:
                                                                               MainAxisSize.min,
                                                                           children: [
-                                                                            for (final modality
-                                                                                in modalities)
+                                                                            for (final color in [
+                                                                              ...modalities.map(
+                                                                                _modalityScheduleColor,
+                                                                              ),
+                                                                              ...conflictMarkers,
+                                                                            ])
                                                                               Container(
                                                                                 width: 5,
                                                                                 height: 5,
@@ -6536,9 +6648,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                                                                                   left: 1,
                                                                                 ),
                                                                                 decoration: BoxDecoration(
-                                                                                  color: _modalityScheduleColor(
-                                                                                    modality,
-                                                                                  ),
+                                                                                  color: color,
                                                                                   shape: BoxShape.circle,
                                                                                 ),
                                                                               ),
@@ -6682,6 +6792,10 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
         ? int.tryParse(_extensionHours.text.trim()) ?? 0
         : _sharedHours(discipline, 'extension');
     final classGroups = groups.where(_isIdentifiedModalityClass).toList();
+    if (editingThisDiscipline &&
+        _selectedScheduleConflictMessages(selected).isNotEmpty) {
+      return const Color(0xFFB42318);
+    }
     bool hasClassFor(String modality) =>
         classGroups.any((entry) => entry.modality == modality);
     if ((theory > 0 && !hasClassFor('theory')) ||
@@ -6775,6 +6889,12 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       if (overages.isNotEmpty)
         'Há mais horários que a carga horária: ${overages.join('; ')}.',
     ];
+    if (editingThisDiscipline) {
+      final conflicts = _selectedScheduleConflictMessages(selected);
+      if (conflicts.isNotEmpty) {
+        messages.add('Conflito de horário: ${conflicts.join('; ')}.');
+      }
+    }
     return messages.isEmpty ? 'Disciplina ok.' : messages.join('\r\n');
   }
 

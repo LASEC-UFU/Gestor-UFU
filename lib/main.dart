@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:config_moodle/core/theme/app_theme.dart';
@@ -23,8 +24,13 @@ import 'package:config_moodle/domain/entities/ajusta_horarios.dart';
 import 'package:config_moodle/presentation/pages/ajusta_horarios_page.dart';
 import 'package:window_manager/window_manager.dart';
 
+String _appVersion = 'desconhecida';
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  final packageInfo = await PackageInfo.fromPlatform();
+  _appVersion = packageInfo.version;
+  final appTitle = 'Gestor UFU v${packageInfo.version}';
   if (Platform.isWindows) {
     final window = await WindowController.fromCurrentEngine();
     if (window.arguments.isNotEmpty) {
@@ -46,11 +52,11 @@ Future<void> main(List<String> args) async {
         await windowManager.ensureInitialized();
         unawaited(
           windowManager.waitUntilReadyToShow(
-            const WindowOptions(
+            WindowOptions(
               size: Size(1100, 780),
               minimumSize: Size(1000, 760),
               center: true,
-              title: 'Editar disciplinas - Gestor UFU',
+              title: 'Editar disciplinas - $appTitle',
             ),
             () async {
               await windowManager.show();
@@ -89,11 +95,11 @@ Future<void> main(List<String> args) async {
         await windowManager.ensureInitialized();
         unawaited(
           windowManager.waitUntilReadyToShow(
-            const WindowOptions(
+            WindowOptions(
               size: Size(1120, 820),
               minimumSize: Size(900, 650),
               center: true,
-              title: 'Editar docentes - Gestor UFU',
+              title: 'Editar docentes - $appTitle',
             ),
             () async {
               await windowManager.show();
@@ -130,11 +136,11 @@ Future<void> main(List<String> args) async {
         await windowManager.ensureInitialized();
         unawaited(
           windowManager.waitUntilReadyToShow(
-            const WindowOptions(
+            WindowOptions(
               size: Size(1120, 820),
               minimumSize: Size(900, 650),
               center: true,
-              title: 'Editar salas - Gestor UFU',
+              title: 'Editar salas - $appTitle',
             ),
             () async {
               await windowManager.show();
@@ -155,6 +161,8 @@ Future<void> main(List<String> args) async {
         return;
       }
     }
+    await windowManager.ensureInitialized();
+    await windowManager.setTitle(appTitle);
   }
   final preferences = await SharedPreferences.getInstance();
   final sharedDatabase = SharedPreferencesSyncService();
@@ -273,7 +281,7 @@ class _GestorUfuAppState extends State<GestorUfuApp> {
   Widget build(BuildContext context) {
     final themeController = context.watch<ThemeController>();
     return MaterialApp.router(
-      title: 'Gestor UFU',
+      title: 'Gestor UFU v$_appVersion',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
