@@ -50,6 +50,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   final Map<String, double> _scrollOffsets = {};
   WindowMethodChannel? _scheduleEditorChannel;
   WindowController? _scheduleEditorController;
+  String? _scheduleEditorTerm;
   bool _openingScheduleEditor = false;
   WindowMethodChannel? _teacherEditorChannel;
   WindowController? _teacherEditorController;
@@ -194,7 +195,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           : terms.first;
       await prefs.setStringList(_termsKey, terms);
       await prefs.setString(_termKey, activeTerm);
-      var rows = await _store.load(term: activeTerm);
+      final rows = List<HorarioDisciplina>.of(
+        await _store.load(term: activeTerm),
+      );
       final inferredTeachers =
           rows.expand((entry) => entry.teacherNames).toSet().toList()..sort();
       final savedRoster = prefs.getStringList(
@@ -271,6 +274,33 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final usablePrograms = programs.isEmpty
           ? {...horarioProgramas}
           : programs;
+      const canonicalAbiName = 'ABI em Automação, Robótica e IA';
+      final canonicalAbiProgram = usablePrograms.entries
+          .where((entry) => entry.value.trim() == canonicalAbiName)
+          .map((entry) => entry.key)
+          .firstOrNull;
+      var programsChanged = false;
+      for (final entry in usablePrograms.entries.toList()) {
+        final name = entry.value.trim();
+        final looksLikeAbi = name.toLowerCase().startsWith('abi em automa');
+        if (!looksLikeAbi) continue;
+        if (canonicalAbiProgram != null && entry.key != canonicalAbiProgram) {
+          usablePrograms.remove(entry.key);
+          programsChanged = true;
+        } else if (canonicalAbiProgram == null && name != canonicalAbiName) {
+          usablePrograms[entry.key] = canonicalAbiName;
+          programsChanged = true;
+        }
+      }
+      if (programsChanged) {
+        await prefs.setString(
+          _programsKey,
+          jsonEncode({
+            for (final entry in usablePrograms.entries)
+              '${entry.key}': entry.value,
+          }),
+        );
+      }
       final abiMigrationKey =
           'ajusta_horarios_abi_automacao_v1_${base64Url.encode(utf8.encode(activeTerm)).replaceAll('=', '')}';
       if (prefs.getBool(abiMigrationKey) != true) {
@@ -429,6 +459,164 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         );
         if (entriesChanged) await _store.save(rows, term: activeTerm);
         await prefs.setBool(abiMigrationKey, true);
+      }
+
+      final abiSecondPeriodMigrationKey =
+          'ajusta_horarios_abi_2_periodo_v1_${base64Url.encode(utf8.encode(activeTerm)).replaceAll('=', '')}';
+      if (prefs.getBool(abiSecondPeriodMigrationKey) != true) {
+        const abiSecondPeriodSubjects =
+            <
+              ({
+                String id,
+                String acronym,
+                String name,
+                int theory,
+                int practice,
+                int ead,
+              })
+            >[
+              (
+                id: '09',
+                acronym: 'AS II',
+                name: 'An\u00e1lise de Sistemas II',
+                theory: 30,
+                practice: 0,
+                ead: 30,
+              ),
+              (
+                id: '10',
+                acronym: 'CDASM',
+                name:
+                    'Ci\u00eancia de Dados Aplicada \u00e0 Metrologia e aos Sistemas de Medi\u00e7\u00e3o',
+                theory: 0,
+                practice: 30,
+                ead: 30,
+              ),
+              (
+                id: '11',
+                acronym: 'CEE I',
+                name: 'Circuitos Eletroeletr\u00f4nicos I',
+                theory: 60,
+                practice: 15,
+                ead: 15,
+              ),
+              (
+                id: '12',
+                acronym: 'IAA',
+                name: 'IA Aplicada em Automa\u00e7\u00e3o',
+                theory: 0,
+                practice: 0,
+                ead: 45,
+              ),
+              (
+                id: '13',
+                acronym: 'II I',
+                name: 'Inform\u00e1tica Industrial I',
+                theory: 15,
+                practice: 30,
+                ead: 15,
+              ),
+              (
+                id: '14',
+                acronym: 'MS I',
+                name: 'Modelagem de Sistemas I',
+                theory: 60,
+                practice: 0,
+                ead: 0,
+              ),
+            ];
+
+        final abiProgramId = usablePrograms.entries
+            .where(
+              (item) =>
+                  item.value.trim().toLowerCase() ==
+                  'ABI em Automa\u00e7\u00e3o, Rob\u00f3tica e IA'
+                      .toLowerCase(),
+            )
+            .map((item) => item.key)
+            .firstOrNull;
+        if (abiProgramId != null) {
+          final termToken = base64Url
+              .encode(utf8.encode(activeTerm))
+              .replaceAll('=', '');
+          final usedIds = rows.map((entry) => entry.id).toSet();
+          var entriesChanged = false;
+
+          for (final subject in abiSecondPeriodSubjects) {
+            final normalizedName = subject.name.trim().toLowerCase();
+            final matchingRows = rows
+                .where(
+                  (entry) =>
+                      entry.name.trim().toLowerCase() == normalizedName &&
+                      entry.coursePeriods.any(
+                        (item) =>
+                            item.program == abiProgramId && item.period == 2,
+                      ),
+                )
+                .toList();
+            final subjectId = matchingRows.isEmpty
+                ? 'abi_${termToken}_2_${subject.id}'
+                : matchingRows.first.subjectId;
+            final offerings = <String, List<String>>{
+              if (subject.theory > 0) 'theory': ['1'],
+              if (subject.practice > 0) 'practice': ['1', '2'],
+              if (subject.ead > 0) 'ead': ['1'],
+            };
+
+            for (final offering in offerings.entries) {
+              final existingClasses = rows
+                  .where(
+                    (entry) =>
+                        entry.subjectId == subjectId &&
+                        entry.modality == offering.key &&
+                        entry.coursePeriods.any(
+                          (item) =>
+                              item.program == abiProgramId && item.period == 2,
+                        ),
+                  )
+                  .map((entry) => entry.className.trim().toLowerCase())
+                  .where((name) => name.isNotEmpty)
+                  .toSet();
+              for (final className in offering.value) {
+                if (existingClasses.contains(className.toLowerCase())) continue;
+                var id =
+                    'abi_${termToken}_2_${subject.id}_${offering.key}_$className';
+                var suffix = 2;
+                while (usedIds.contains(id)) {
+                  id =
+                      'abi_${termToken}_2_${subject.id}_${offering.key}_${className}_$suffix';
+                  suffix++;
+                }
+                usedIds.add(id);
+                rows.add(
+                  HorarioDisciplina(
+                    id: id,
+                    subjectId: subjectId,
+                    modality: offering.key,
+                    code: '',
+                    acronym: subject.acronym,
+                    name: subject.name,
+                    className: className,
+                    teachers: const [],
+                    room: '',
+                    theoryHours: subject.theory,
+                    practiceHours: subject.practice,
+                    eadHours: subject.ead,
+                    extensionHours: 0,
+                    coursePeriods: [
+                      CursoPeriodo(program: abiProgramId, period: 2),
+                    ],
+                    slots: const [],
+                  ),
+                );
+                entriesChanged = true;
+              }
+            }
+          }
+
+          if (entriesChanged) await _store.save(rows, term: activeTerm);
+          await prefs.setBool(abiSecondPeriodMigrationKey, true);
+        }
       }
       final savedProgram =
           prefs.getInt(_termScopedKey(_programKey, activeTerm)) ?? _program;
@@ -3204,17 +3392,33 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       if (windows.any(
         (window) => window.windowId == activeController.windowId,
       )) {
-        if (selectDefault) {
-          await activeChannel.invokeMethod<bool>('selectDefault');
-        } else if (initialEntryId != null) {
-          await activeChannel.invokeMethod<bool>('selectEntry', initialEntryId);
+        if (_scheduleEditorTerm == _term) {
+          if (selectDefault) {
+            await activeChannel.invokeMethod<bool>('selectDefault');
+          } else if (initialEntryId != null) {
+            await activeChannel.invokeMethod<bool>(
+              'selectEntry',
+              initialEntryId,
+            );
+          }
+          await activeController.show();
+          return;
         }
-        await activeController.show();
-        return;
+        // A detached editor contains a snapshot of the term it was opened
+        // for. Hide it before opening the newly selected term so its stale
+        // controls cannot be mistaken for the active timetable.
+        await activeController.hide();
+        await activeChannel.setMethodCallHandler(null);
+        _scheduleEditorChannel = null;
+        _scheduleEditorController = null;
+        _scheduleEditorTerm = null;
       }
-      await activeChannel.setMethodCallHandler(null);
-      _scheduleEditorChannel = null;
-      _scheduleEditorController = null;
+      if (_scheduleEditorController == activeController) {
+        await activeChannel.setMethodCallHandler(null);
+        _scheduleEditorChannel = null;
+        _scheduleEditorController = null;
+        _scheduleEditorTerm = null;
+      }
     }
     if (_openingScheduleEditor) return;
     _openingScheduleEditor = true;
@@ -3223,6 +3427,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       channelName,
       mode: ChannelMode.bidirectional,
     );
+    final editorTerm = _term;
     try {
       await channel.setMethodCallHandler((call) async {
         if (call.method == 'saveEntries') {
@@ -3233,7 +3438,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 ),
               )
               .toList();
-          await _savePeriodEntries(values);
+          await _savePeriodEntries(values, term: editorTerm);
           return true;
         }
         if (call.method == 'closed') {
@@ -3244,6 +3449,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         );
       });
       _scheduleEditorChannel = channel;
+      _scheduleEditorTerm = editorTerm;
       final controller = await WindowController.create(
         WindowConfiguration(
           arguments: jsonEncode({
@@ -3265,6 +3471,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       await channel.setMethodCallHandler(null);
       _scheduleEditorChannel = null;
       _scheduleEditorController = null;
+      _scheduleEditorTerm = null;
       rethrow;
     } finally {
       _openingScheduleEditor = false;
@@ -3272,48 +3479,69 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   }
 
   Future<void> _savePeriodEntries(
-    List<HorarioDisciplina> returnedEntries,
-  ) async {
-    final previousById = {for (final entry in _entries) entry.id: entry};
+    List<HorarioDisciplina> returnedEntries, {
+    required String term,
+  }) async {
+    final previousEntries = term == _term
+        ? _entries
+        : await _store.load(term: term);
+    final previousById = {for (final entry in previousEntries) entry.id: entry};
+    final prefs = await SharedPreferences.getInstance();
+    final storedDistribution = term == _term
+        ? null
+        : prefs.getString(_termScopedKey(_distributionKey, term));
+    var updatedDistribution = term == _term
+        ? List<_TeacherDistributionRecord>.of(_distributionRecords)
+        : storedDistribution == null
+        ? <_TeacherDistributionRecord>[]
+        : (jsonDecode(storedDistribution) as List)
+              .map(
+                (item) => _TeacherDistributionRecord.fromJson(
+                  Map<String, dynamic>.from(item as Map),
+                ),
+              )
+              .toList();
     var distributionChanged = false;
-    setState(() {
-      for (final entry in returnedEntries) {
-        final previous = previousById[entry.id];
-        if (previous != null &&
-            (previous.theoryHours != entry.theoryHours ||
-                previous.practiceHours != entry.practiceHours ||
-                previous.eadHours != entry.eadHours ||
-                previous.extensionHours != entry.extensionHours)) {
-          distributionChanged = true;
-          final label = _classLabel(entry);
-          _distributionRecords = _distributionRecords.map((record) {
-            if (!entry.teacherNames.contains(record.teacher) ||
-                record.discipline != label) {
-              return record;
-            }
-            return _TeacherDistributionRecord(
-              teacher: record.teacher,
-              discipline: record.discipline,
-              period: record.period,
-              theoryHours: entry.theoryHours,
-              practiceHours: entry.practiceHours,
-              eadHours: entry.eadHours,
-              extensionHours: entry.extensionHours,
-            );
-          }).toList();
-        }
+    for (final entry in returnedEntries) {
+      final previous = previousById[entry.id];
+      if (previous != null &&
+          (previous.theoryHours != entry.theoryHours ||
+              previous.practiceHours != entry.practiceHours ||
+              previous.eadHours != entry.eadHours ||
+              previous.extensionHours != entry.extensionHours)) {
+        distributionChanged = true;
+        final label = _classLabel(entry);
+        updatedDistribution = updatedDistribution.map((record) {
+          if (!entry.teacherNames.contains(record.teacher) ||
+              record.discipline != label) {
+            return record;
+          }
+          return _TeacherDistributionRecord(
+            teacher: record.teacher,
+            discipline: record.discipline,
+            period: record.period,
+            theoryHours: entry.theoryHours,
+            practiceHours: entry.practiceHours,
+            eadHours: entry.eadHours,
+            extensionHours: entry.extensionHours,
+          );
+        }).toList();
       }
-      _entries = returnedEntries;
-    });
-    await _persist();
-    if (distributionChanged && _distributionRecords.isNotEmpty) {
-      final prefs = await SharedPreferences.getInstance();
+    }
+    await _store.save(returnedEntries, term: term);
+    if (distributionChanged && updatedDistribution.isNotEmpty) {
       await prefs.setString(
-        _termScopedKey(_distributionKey, _term),
+        _termScopedKey(_distributionKey, term),
         jsonEncode(
-          _distributionRecords.map((record) => record.toJson()).toList(),
+          updatedDistribution.map((record) => record.toJson()).toList(),
         ),
       );
+    }
+    if (term == _term && mounted) {
+      setState(() {
+        _entries = returnedEntries;
+        _distributionRecords = updatedDistribution;
+      });
     }
   }
 
