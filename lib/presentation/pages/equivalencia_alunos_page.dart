@@ -1311,7 +1311,7 @@ class _CaseDialogState extends State<_CaseDialog> {
   }
 
   Widget _blockCard(_Block b, int index) {
-    final ok = b.currentHours >= b.priorHours;
+    final ok = b.currentHours <= b.priorHours;
     final color = ok ? AppTheme.green : AppTheme.danger;
     return Card(
       child: Padding(
@@ -1328,7 +1328,7 @@ class _CaseDialogState extends State<_CaseDialog> {
                   ),
                 ),
                 Text(
-                  '${b.currentHours} h destino  ≥  ${b.priorHours} h cursado',
+                  '${b.currentHours} h destino  ≤  ${b.priorHours} h cursado',
                   style: TextStyle(color: color, fontWeight: FontWeight.w600),
                 ),
                 IconButton(
@@ -1360,7 +1360,7 @@ class _CaseDialogState extends State<_CaseDialog> {
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
-                  'Carga do destino inferior em ${b.priorHours - b.currentHours} h; este bloco ainda não atende ao critério de transferência.',
+                  'Carga do destino superior à cursada em ${b.currentHours - b.priorHours} h; este bloco ainda não atende ao critério de dispensa.',
                   style: TextStyle(color: AppTheme.danger, fontSize: 12),
                 ),
               ),
