@@ -602,13 +602,23 @@ class _Curriculum {
     required this.id,
     required this.course,
     required this.name,
+    this.subjects = const [],
   });
   final String id, course, name;
-  Map<String, dynamic> toJson() => {'id': id, 'course': course, 'name': name};
+  final List<_Subject> subjects;
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'course': course,
+    'name': name,
+    'subjects': subjects.map((e) => e.toJson()).toList(),
+  };
   factory _Curriculum.fromJson(Map<String, dynamic> j) => _Curriculum(
     id: j['id'] ?? '',
     course: j['course'] ?? '',
     name: j['name'] ?? '',
+    subjects: (j['subjects'] as List? ?? const [])
+        .map((e) => _Subject.fromJson(Map<String, dynamic>.from(e)))
+        .toList(),
   );
 }
 
@@ -743,6 +753,7 @@ class _CurriculumDialog extends StatefulWidget {
 class _CurriculumDialogState extends State<_CurriculumDialog> {
   late final List<_Curriculum> _items = [...widget.initial];
   final _course = TextEditingController(), _name = TextEditingController();
+  List<_Subject> _subjects = [];
   @override
   void dispose() {
     _course.dispose();
@@ -758,11 +769,174 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
           id: DateTime.now().microsecondsSinceEpoch.toString(),
           course: _course.text.trim(),
           name: _name.text.trim(),
+          subjects: List.of(_subjects),
         ),
       );
       _course.clear();
       _name.clear();
+      _subjects = [];
     });
+  }
+
+  Future<void> _importSubjects() async {
+    final picked = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Importar disciplinas do currículo',
+      type: FileType.custom,
+      allowedExtensions: const ['xlsx', 'xlsm'],
+      withData: true,
+    );
+    if (picked == null) return;
+    final bytes = picked.files.single.bytes;
+    if (bytes == null) {
+      _notice('Não foi possível ler o arquivo selecionado.');
+      return;
+    }
+    try {
+      final book = xls.Excel.decodeBytes(bytes);
+      List<_Subject>? parsed;
+      for (final sheet in book.tables.values) {
+        String value(int r, int c) {
+          if (r >= sheet.maxRows || c >= sheet.maxColumns) return '';
+          return sheet
+                  .cell(
+                    xls.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r),
+                  )
+                  .value
+                  ?.toString()
+                  .trim() ??
+              '';
+        }
+
+        String norm(String s) => s
+            .toLowerCase()
+            .replaceAll('á', 'a')
+            .replaceAll('à', 'a')
+            .replaceAll('ã', 'a')
+            .replaceAll('â', 'a')
+            .replaceAll('é', 'e')
+            .replaceAll('ê', 'e')
+            .replaceAll('í', 'i')
+            .replaceAll('ó', 'o')
+            .replaceAll('ô', 'o')
+            .replaceAll('õ', 'o')
+            .replaceAll('ú', 'u')
+            .replaceAll('ç', 'c')
+            .replaceAll(RegExp(r'[^a-z0-9]'), '');
+        for (
+          var headerRow = 0;
+          headerRow < sheet.maxRows && headerRow < 30;
+          headerRow++
+        ) {
+          final columnsByKey = <String, int>{};
+          for (var c = 0; c < sheet.maxColumns; c++) {
+            final key = norm(value(headerRow, c));
+            if (key.isNotEmpty) columnsByKey.putIfAbsent(key, () => c);
+          }
+          int column(List<String> keys) {
+            for (final key in keys) {
+              final index = columnsByKey[key];
+              if (index != null) return index;
+            }
+            return -1;
+          }
+
+          // Resolve source fields by header key; column order is irrelevant.
+          final codeKey = column([
+            'codigodisciplina',
+            'coddisc',
+            'coddisciplina',
+            'codigocomponente',
+            'codigo',
+            'codcomponente',
+            'codcomponenteorganizacional',
+            'sigla',
+          ]);
+          final nameKey = column([
+            'nomedisciplina',
+            'disciplina',
+            'nomecomponente',
+            'componente',
+            'nomedocomponente',
+          ]);
+          if (nameKey < 0) continue;
+          final theorKey = column([
+            'chteorica',
+            'cargahorariateorica',
+            'horasteoricas',
+            'ch',
+          ]);
+          final pracKey = column([
+            'chpratica',
+            'cargahorariapratica',
+            'horaspraticas',
+          ]);
+          final typeKey = column([
+            'tipo',
+            'natureza',
+            'categoria',
+            'classificacao',
+          ]);
+          Map<String, String> rowByKey(int rowIndex) => {
+            for (final entry in columnsByKey.entries)
+              entry.key: value(rowIndex, entry.value),
+          };
+          String number(String raw) => raw
+              .replaceAll(',', '.')
+              .replaceAll(RegExp(r'[^0-9.]'), '')
+              .split('.')
+              .first;
+          final result = <_Subject>[];
+          for (var r = headerRow + 1; r < sheet.maxRows; r++) {
+            final row = rowByKey(r);
+            String field(int key) => key < 0
+                ? ''
+                : row[columnsByKey.entries
+                          .firstWhere((entry) => entry.value == key)
+                          .key] ??
+                      '';
+            final subjectName = field(nameKey);
+            if (subjectName.isEmpty) continue;
+            final details = '$subjectName ${field(typeKey)}'.toLowerCase();
+            if (RegExp(
+              r'equival|est[aá]gio|atividade complementar|optativa',
+            ).hasMatch(details))
+              continue;
+            final code = field(codeKey);
+            if (code.isEmpty && subjectName.toLowerCase().contains('total'))
+              continue;
+            result.add(
+              _Subject(
+                code: code,
+                name: subjectName,
+                theoretical: int.tryParse(number(field(theorKey))) ?? 0,
+                practical: int.tryParse(number(field(pracKey))) ?? 0,
+              ),
+            );
+          }
+          if (result.isNotEmpty) {
+            parsed = result;
+            break;
+          }
+        }
+        if (parsed != null) break;
+      }
+      if (parsed == null)
+        throw const FormatException(
+          'Não encontrei colunas de disciplina e nome. Confira se a planilha contém o código/nome das disciplinas.',
+        );
+      setState(() => _subjects = _mergeSubjects(parsed!));
+      _notice(
+        '${_subjects.length} disciplinas importadas. Equivalências automáticas, estágio, atividades complementares e optativas foram ignoradas.',
+      );
+    } on Object catch (e) {
+      _notice('Falha ao importar disciplinas: $e');
+    }
+  }
+
+  void _notice(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -785,6 +959,18 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
             ),
           ),
           Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _importSubjects,
+              icon: const Icon(Icons.upload_file),
+              label: Text(
+                _subjects.isEmpty
+                    ? 'Carregar disciplinas da planilha'
+                    : 'Planilha carregada · ${_subjects.length} disciplinas',
+              ),
+            ),
+          ),
+          Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _add,
@@ -799,7 +985,9 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                   .map(
                     (c) => ListTile(
                       title: Text(c.course),
-                      subtitle: Text(c.name),
+                      subtitle: Text(
+                        '${c.name}${c.subjects.isEmpty ? '' : ' · ${c.subjects.length} disciplinas'}',
+                      ),
                       trailing: IconButton(
                         onPressed: () => setState(() => _items.remove(c)),
                         icon: const Icon(Icons.delete_outline),
@@ -841,6 +1029,10 @@ class _CaseDialogState extends State<_CaseDialog> {
       _status = widget.value.status;
   late List<_Block> _blocks = [...widget.value.blocks];
   late final List<_Subject> _currentCatalog = _mergeSubjects([
+    ...?widget.curricula
+        .where((c) => c.id == widget.value.currentCurriculumId)
+        .firstOrNull
+        ?.subjects,
     ...widget.value.currentCatalog,
     ...widget.value.blocks.expand((b) => b.current),
   ]);
@@ -861,7 +1053,13 @@ class _CaseDialogState extends State<_CaseDialog> {
       context: context,
       builder: (_) => _BlockDialog(
         value: old,
-        currentCatalog: _currentCatalog,
+        currentCatalog: _mergeSubjects([
+          ..._currentCatalog,
+          ...?widget.curricula
+              .where((c) => c.id == _current)
+              .firstOrNull
+              ?.subjects,
+        ]),
         priorCatalog: _priorCatalog,
       ),
     );
@@ -928,7 +1126,13 @@ class _CaseDialogState extends State<_CaseDialog> {
         status: _status,
         notes: _notes.text.trim(),
         blocks: _blocks,
-        currentCatalog: _currentCatalog,
+        currentCatalog: _mergeSubjects([
+          ..._currentCatalog,
+          ...?widget.curricula
+              .where((c) => c.id == _current)
+              .firstOrNull
+              ?.subjects,
+        ]),
         priorCatalog: _priorCatalog,
       ),
     );
