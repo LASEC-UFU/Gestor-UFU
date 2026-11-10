@@ -1,8 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -172,6 +176,187 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
     }
     return null;
   }
+
+  Future<void> _printCertificate(_Case item) async {
+    try {
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Salvar certidão de estudos em PDF',
+        fileName: 'certidao-estudos-${_safeFileName(item.student)}.pdf',
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+      );
+      if (path == null) return;
+      final bytes = await _certificatePdf(
+        item,
+        _curriculum(item.currentCurriculumId),
+      );
+      await File(
+        path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf',
+      ).writeAsBytes(bytes, flush: true);
+      _message('PDF da certidão gerado com sucesso.');
+    } catch (error) {
+      _message('Não foi possível gerar o PDF: $error');
+    }
+  }
+
+  Future<Uint8List> _certificatePdf(_Case item, _Curriculum? curriculum) async {
+    final regular = pw.Font.ttf(
+      ByteData.sublistView(
+        await File('C:/Windows/Fonts/arial.ttf').readAsBytes(),
+      ),
+    );
+    final bold = pw.Font.ttf(
+      ByteData.sublistView(
+        await File('C:/Windows/Fonts/arialbd.ttf').readAsBytes(),
+      ),
+    );
+    final document = pw.Document(
+      theme: pw.ThemeData.withFont(base: regular, bold: bold),
+    );
+    final blocks = item.blocks;
+    final totalCurrent = blocks.fold<int>(
+      0,
+      (sum, block) => sum + block.currentHours,
+    );
+    final totalPrior = blocks.fold<int>(
+      0,
+      (sum, block) => sum + block.priorHours,
+    );
+    final rows = <pw.TableRow>[];
+    for (final block in blocks) {
+      final count = block.current.length > block.prior.length
+          ? block.current.length
+          : block.prior.length;
+      for (var index = 0; index < count; index++) {
+        final current = index < block.current.length
+            ? block.current[index]
+            : null;
+        final prior = index < block.prior.length ? block.prior[index] : null;
+        rows.add(
+          pw.TableRow(
+            children: [
+              _pdfCell(
+                current == null
+                    ? ''
+                    : '${current.code.isEmpty ? '' : '${current.code} – '}${current.name}',
+              ),
+              _pdfCell(
+                current == null ? '' : '${current.hours} h',
+                centered: true,
+              ),
+              _pdfCell(
+                prior == null
+                    ? ''
+                    : '${prior.code.isEmpty ? '' : '${prior.code} – '}${prior.name}',
+              ),
+              _pdfCell(prior == null ? '' : '${prior.hours} h', centered: true),
+            ],
+          ),
+        );
+      }
+    }
+    document.addPage(
+      pw.MultiPage(
+        pageTheme: pw.PageTheme(
+          pageFormat: PdfPageFormat.a4.landscape,
+          margin: const pw.EdgeInsets.fromLTRB(34, 28, 34, 30),
+        ),
+        header: (_) => pw.Column(
+          children: [
+            pw.Text(
+              'UNIVERSIDADE FEDERAL DE UBERLÂNDIA',
+              style: pw.TextStyle(font: bold, fontSize: 12),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'CERTIDÃO DE ESTUDOS',
+              style: pw.TextStyle(font: bold, fontSize: 17),
+            ),
+            pw.SizedBox(height: 10),
+          ],
+        ),
+        build: (_) => [
+          pw.Text(
+            'Curso: ${curriculum?.course ?? '—'}',
+            style: const pw.TextStyle(fontSize: 10),
+          ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'Discente: ${item.student.isEmpty ? '—' : item.student}    Matrícula: ${item.studentId.isEmpty ? '—' : item.studentId}',
+            style: const pw.TextStyle(fontSize: 10),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Table(
+            border: pw.TableBorder.all(color: PdfColors.grey600, width: .5),
+            columnWidths: const {
+              0: pw.FlexColumnWidth(4),
+              1: pw.FlexColumnWidth(.7),
+              2: pw.FlexColumnWidth(4),
+              3: pw.FlexColumnWidth(.7),
+            },
+            children: [
+              pw.TableRow(
+                repeat: true,
+                decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                children: [
+                  _pdfCell('Disciplinas dispensadas', bold: true),
+                  _pdfCell('CH', bold: true, centered: true),
+                  _pdfCell(
+                    'Disciplinas realizadas na IES de origem',
+                    bold: true,
+                  ),
+                  _pdfCell('CH', bold: true, centered: true),
+                ],
+              ),
+              ...rows,
+              pw.TableRow(
+                decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+                children: [
+                  _pdfCell('Total', bold: true),
+                  _pdfCell('$totalCurrent h', bold: true, centered: true),
+                  _pdfCell('Total', bold: true),
+                  _pdfCell('$totalPrior h', bold: true, centered: true),
+                ],
+              ),
+            ],
+          ),
+          if (item.notes.trim().isNotEmpty) ...[
+            pw.SizedBox(height: 12),
+            pw.Text(
+              'Observações: ${item.notes.trim()}',
+              style: const pw.TextStyle(fontSize: 9),
+            ),
+          ],
+          pw.SizedBox(height: 22),
+          pw.Center(
+            child: pw.Text(
+              'Documento gerado para conferência',
+              style: const pw.TextStyle(fontSize: 9),
+            ),
+          ),
+        ],
+      ),
+    );
+    return document.save();
+  }
+
+  pw.Widget _pdfCell(String text, {bool bold = false, bool centered = false}) =>
+      pw.Padding(
+        padding: const pw.EdgeInsets.all(5),
+        child: pw.Text(
+          text,
+          textAlign: centered ? pw.TextAlign.center : pw.TextAlign.left,
+          style: pw.TextStyle(
+            fontSize: 8.5,
+            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          ),
+        ),
+      );
+
+  String _safeFileName(String value) => value
+      .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
+      .trim()
+      .replaceAll(RegExp(r'\s+'), '-');
 
   Future<void> _newCase({_Case? seed}) async {
     final draft =
@@ -565,6 +750,12 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
           spacing: 4,
           children: [
             Chip(label: Text(item.status)),
+            if (item.status.trim().toLowerCase() == 'deferida')
+              IconButton(
+                tooltip: 'Imprimir certidão de estudos em PDF',
+                onPressed: () => _printCertificate(item),
+                icon: const Icon(Icons.print_outlined),
+              ),
             IconButton(
               tooltip: 'Abrir blocos',
               onPressed: () => _newCase(seed: item),
