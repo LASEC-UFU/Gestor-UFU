@@ -1076,12 +1076,16 @@ class _CaseDialogState extends State<_CaseDialog> {
   }
 
   Future<void> _manageCatalog() async {
+    final curriculumSubjects =
+        widget.curricula.where((c) => c.id == _current).firstOrNull?.subjects ??
+        const <_Subject>[];
     final result =
         await showDialog<({List<_Subject> current, List<_Subject> prior})>(
           context: context,
           builder: (_) => _SubjectCatalogDialog(
             current: _currentCatalog,
             prior: _priorCatalog,
+            availableCurrent: curriculumSubjects,
           ),
         );
     if (result == null) return;
@@ -1585,8 +1589,13 @@ void _addSubjects(List<_Subject> catalog, Iterable<_Subject> subjects) {
 }
 
 class _SubjectCatalogDialog extends StatefulWidget {
-  const _SubjectCatalogDialog({required this.current, required this.prior});
+  const _SubjectCatalogDialog({
+    required this.current,
+    required this.prior,
+    this.availableCurrent = const [],
+  });
   final List<_Subject> current, prior;
+  final List<_Subject> availableCurrent;
 
   @override
   State<_SubjectCatalogDialog> createState() => _SubjectCatalogDialogState();
@@ -1616,7 +1625,39 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
     });
   }
 
-  Widget _side(String title, List<_Subject> list) => Expanded(
+  Future<void> _selectFromCurriculum() async {
+    if (widget.availableCurrent.isEmpty) return;
+    final availableKeys = widget.availableCurrent
+        .map(_subjectCatalogKey)
+        .toSet();
+    final selectedFromCurriculum = await showDialog<List<_Subject>>(
+      context: context,
+      builder: (_) => _SubjectPickerDialog(
+        catalog: widget.availableCurrent,
+        selected: _current
+            .where((s) => availableKeys.contains(_subjectCatalogKey(s)))
+            .toList(),
+        title: 'Selecionar disciplinas do currículo',
+        applyLabel: 'Adicionar selecionadas',
+        emptyMessage: 'O currículo selecionado não tem disciplinas importadas.',
+      ),
+    );
+    if (selectedFromCurriculum == null) return;
+    final manual = _current
+        .where((s) => !availableKeys.contains(_subjectCatalogKey(s)))
+        .toList();
+    setState(() {
+      _current
+        ..clear()
+        ..addAll(_mergeSubjects([...manual, ...selectedFromCurriculum]));
+    });
+  }
+
+  Widget _side(
+    String title,
+    List<_Subject> list, {
+    bool destination = false,
+  }) => Expanded(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1626,7 +1667,7 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
               child: Text(title, style: Theme.of(context).textTheme.titleSmall),
             ),
             IconButton(
-              tooltip: 'Cadastrar disciplina',
+              tooltip: 'Cadastrar disciplina manualmente',
               onPressed: () => _edit(list),
               icon: const Icon(Icons.add_circle_outline),
             ),
@@ -1662,10 +1703,20 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
                   },
                 ),
         ),
+        if (destination && widget.availableCurrent.isNotEmpty) ...[
+          OutlinedButton.icon(
+            onPressed: _selectFromCurriculum,
+            icon: const Icon(Icons.playlist_add_check),
+            label: Text(
+              'Selecionar do currículo (${widget.availableCurrent.length})',
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
         OutlinedButton.icon(
           onPressed: () => _edit(list),
           icon: const Icon(Icons.add),
-          label: const Text('Adicionar disciplina'),
+          label: const Text('Cadastrar manualmente'),
         ),
       ],
     ),
@@ -1679,7 +1730,7 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
       height: 500,
       child: Row(
         children: [
-          _side('Curso de destino', _current),
+          _side('Curso de destino', _current, destination: true),
           const VerticalDivider(width: 28),
           _side('Curso cursado (origem)', _prior),
         ],
@@ -1700,8 +1751,15 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
 }
 
 class _SubjectPickerDialog extends StatefulWidget {
-  const _SubjectPickerDialog({required this.catalog, required this.selected});
+  const _SubjectPickerDialog({
+    required this.catalog,
+    required this.selected,
+    this.title = 'Alocar disciplinas ao bloco',
+    this.applyLabel = 'Aplicar ao bloco',
+    this.emptyMessage = 'Nenhuma disciplina disponível no catálogo.',
+  });
   final List<_Subject> catalog, selected;
+  final String title, applyLabel, emptyMessage;
 
   @override
   State<_SubjectPickerDialog> createState() => _SubjectPickerDialogState();
@@ -1714,14 +1772,12 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Alocar disciplinas ao bloco'),
+    title: Text(widget.title),
     content: SizedBox(
       width: 620,
       height: 480,
       child: widget.catalog.isEmpty
-          ? const Center(
-              child: Text('Cadastre disciplinas no catálogo desta análise.'),
-            )
+          ? Center(child: Text(widget.emptyMessage))
           : ListView.builder(
               itemCount: widget.catalog.length,
               itemBuilder: (_, i) {
@@ -1756,11 +1812,14 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
           context,
           widget.catalog.where((s) => _selected.contains(_key(s))).toList(),
         ),
-        child: const Text('Aplicar ao bloco'),
+        child: Text(widget.applyLabel),
       ),
     ],
   );
 }
+
+String _subjectCatalogKey(_Subject subject) =>
+    '${subject.code.trim().toLowerCase()}|${subject.name.trim().toLowerCase()}';
 
 class _SubjectDialog extends StatefulWidget {
   const _SubjectDialog({this.value});
