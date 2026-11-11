@@ -90,6 +90,16 @@ class _DashboardPageState extends State<DashboardPage> {
       category: 'VIDA ACADÊMICA',
     ),
     _ModuleInfo(
+      title: 'Progressão / Promoção',
+      description:
+          'Lance atividades do Anexo 1 (Res. 03/2017 CONDIR) e gere requerimento e relatório em PDF.',
+      icon: Icons.trending_up_rounded,
+      accent: Color(0xFF9D97FF),
+      enabled: true,
+      route: '/progressao',
+      category: 'CARREIRA DOCENTE',
+    ),
+    _ModuleInfo(
       title: 'Inserir Documentos no SEI',
       description:
           'Insira fichas de componentes curriculares no processo do SEI.',

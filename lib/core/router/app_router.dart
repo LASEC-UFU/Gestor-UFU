@@ -10,6 +10,7 @@ import 'package:gestor_ufu/presentation/pages/planos_ensino_page.dart';
 import 'package:gestor_ufu/presentation/pages/planos_trabalho_page.dart';
 import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
 import 'package:gestor_ufu/presentation/pages/equivalencia_alunos_page.dart';
+import 'package:gestor_ufu/presentation/pages/progressao_page.dart';
 
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -39,6 +40,10 @@ class AppRouter {
       GoRoute(
         path: '/equivalencia-alunos',
         builder: (context, state) => const EquivalenciaAlunosPage(),
+      ),
+      GoRoute(
+        path: '/progressao',
+        builder: (context, state) => const ProgressaoPage(),
       ),
       GoRoute(
         path: '/editor/:id',
