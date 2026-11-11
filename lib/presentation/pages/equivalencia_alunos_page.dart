@@ -1005,6 +1005,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
   late final List<_Curriculum> _items = [...widget.initial];
   final _course = TextEditingController(), _name = TextEditingController();
   List<_Subject> _subjects = [];
+  String? _editingId;
   @override
   void dispose() {
     _course.dispose();
@@ -1015,17 +1016,31 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
   void _add() {
     if (_course.text.trim().isEmpty || _name.text.trim().isEmpty) return;
     setState(() {
-      _items.add(
-        _Curriculum(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          course: _course.text.trim(),
-          name: _name.text.trim(),
-          subjects: List.of(_subjects),
-        ),
+      final curriculum = _Curriculum(
+        id: _editingId ?? DateTime.now().microsecondsSinceEpoch.toString(),
+        course: _course.text.trim(),
+        name: _name.text.trim(),
+        subjects: List.of(_subjects),
       );
+      final index = _items.indexWhere((item) => item.id == curriculum.id);
+      if (index < 0) {
+        _items.add(curriculum);
+      } else {
+        _items[index] = curriculum;
+      }
       _course.clear();
       _name.clear();
       _subjects = [];
+      _editingId = null;
+    });
+  }
+
+  void _edit(_Curriculum curriculum) {
+    setState(() {
+      _editingId = curriculum.id;
+      _course.text = curriculum.course;
+      _name.text = curriculum.name;
+      _subjects = List.of(curriculum.subjects);
     });
   }
 
@@ -1126,6 +1141,17 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
             'natureza',
             'categoria',
             'classificacao',
+            'tipodisciplina',
+          ]);
+          final structureKey = column([
+            'estruturacurricular',
+            'estrutura',
+            'grupocurricular',
+          ]);
+          final totalHoursKey = column([
+            'chtotal',
+            'cargahorariatotal',
+            'horastotais',
           ]);
           Map<String, String> rowByKey(int rowIndex) => {
             for (final entry in columnsByKey.entries)
@@ -1147,20 +1173,38 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                       '';
             final subjectName = field(nameKey);
             if (subjectName.isEmpty) continue;
-            final details = '$subjectName ${field(typeKey)}'.toLowerCase();
-            if (RegExp(
-              r'equival|est[aá]gio|atividade complementar|optativa',
-            ).hasMatch(details))
+            final type = norm(field(typeKey));
+            final structure = norm(field(structureKey));
+            final details = norm(
+              '$subjectName ${field(typeKey)} ${field(structureKey)}',
+            );
+            final isInternship =
+                type.contains('estagio') ||
+                structure.contains('estagio') ||
+                norm(subjectName).contains('estagio');
+            final isComplementaryActivity =
+                (details.contains('atividad') &&
+                    details.contains('complement')) ||
+                (structure.contains('deoutros') &&
+                    structure.contains('curriculo'));
+            if (type.contains('optativa') ||
+                isInternship ||
+                isComplementaryActivity ||
+                details.contains('equivalencia')) {
               continue;
+            }
             final code = field(codeKey);
             if (code.isEmpty && subjectName.toLowerCase().contains('total'))
               continue;
+            final theoretical = int.tryParse(number(field(theorKey))) ?? 0;
+            final practical = int.tryParse(number(field(pracKey))) ?? 0;
+            final total = int.tryParse(number(field(totalHoursKey))) ?? 0;
             result.add(
               _Subject(
                 code: code,
                 name: subjectName,
-                theoretical: int.tryParse(number(field(theorKey))) ?? 0,
-                practical: int.tryParse(number(field(pracKey))) ?? 0,
+                theoretical: theoretical + practical == 0 ? total : theoretical,
+                practical: theoretical + practical == 0 ? 0 : practical,
               ),
             );
           }
@@ -1175,7 +1219,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
         throw const FormatException(
           'Não encontrei colunas de disciplina e nome. Confira se a planilha contém o código/nome das disciplinas.',
         );
-      setState(() => _subjects = _mergeSubjects(parsed!));
+      setState(() => _subjects = _mergeSubjects([..._subjects, ...parsed!]));
       _notice(
         '${_subjects.length} disciplinas importadas. Equivalências automáticas, estágio, atividades complementares e optativas foram ignoradas.',
       );
@@ -1225,8 +1269,12 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _add,
-              icon: const Icon(Icons.add),
-              label: const Text('Adicionar currículo'),
+              icon: Icon(_editingId == null ? Icons.add : Icons.save_outlined),
+              label: Text(
+                _editingId == null
+                    ? 'Adicionar currículo'
+                    : 'Salvar alterações',
+              ),
             ),
           ),
           Flexible(
@@ -1239,9 +1287,19 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
                       subtitle: Text(
                         '${c.name}${c.subjects.isEmpty ? '' : ' · ${c.subjects.length} disciplinas'}',
                       ),
-                      trailing: IconButton(
-                        onPressed: () => setState(() => _items.remove(c)),
-                        icon: const Icon(Icons.delete_outline),
+                      trailing: Wrap(
+                        spacing: 2,
+                        children: [
+                          IconButton(
+                            tooltip: 'Editar e importar disciplinas',
+                            onPressed: () => _edit(c),
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
+                          IconButton(
+                            onPressed: () => setState(() => _items.remove(c)),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
                       ),
                     ),
                   )
