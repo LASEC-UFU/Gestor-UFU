@@ -2124,8 +2124,17 @@ class _SubjectPickerDialog extends StatefulWidget {
 class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
   late final Set<String> _selected = widget.selected.map(_key).toSet();
   late final List<_Subject> _catalog = [...widget.catalog];
+  final _search = TextEditingController();
+  final _scrollController = ScrollController();
   String _key(_Subject s) =>
       '${s.code.trim().toLowerCase()}|${s.name.trim().toLowerCase()}';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   Future<void> _removeFromCurriculum(_Subject subject) async {
     final confirmed = await showDialog<bool>(
@@ -2163,38 +2172,74 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
     content: SizedBox(
       width: 620,
       height: 480,
-      child: _catalog.isEmpty
-          ? Center(child: Text(widget.emptyMessage))
-          : ListView.builder(
-              itemCount: _catalog.length,
-              itemBuilder: (_, i) {
-                final subject = _catalog[i];
-                final key = _key(subject);
-                return CheckboxListTile(
-                  value: _selected.contains(key),
-                  title: Text(
-                    '${subject.code.isEmpty ? 'Sem código' : subject.code} - ${subject.name}',
-                  ),
-                  subtitle: Text(
-                    '${subject.theoretical} h teóricas + ${subject.practical} h práticas = ${subject.hours} h',
-                  ),
-                  secondary: widget.onRemoveFromCurriculum == null
-                      ? null
-                      : IconButton(
-                          tooltip: 'Remover disciplina do currículo',
-                          onPressed: () => _removeFromCurriculum(subject),
-                          icon: const Icon(Icons.delete_outline),
-                        ),
-                  onChanged: (checked) => setState(() {
-                    if (checked == true) {
-                      _selected.add(key);
-                    } else {
-                      _selected.remove(key);
-                    }
-                  }),
-                );
-              },
+      child: Column(
+        children: [
+          TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Buscar disciplina ou código',
+              isDense: true,
             ),
+          ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              '${_catalog.length} disciplinas no currículo · ${_visibleSubjects.length} exibidas',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: _catalog.isEmpty
+                ? Center(child: Text(widget.emptyMessage))
+                : _visibleSubjects.isEmpty
+                ? const Center(child: Text('Nenhuma disciplina encontrada.'))
+                : Scrollbar(
+                    controller: _scrollController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    child: ListView.builder(
+                      controller: _scrollController,
+                      itemCount: _visibleSubjects.length,
+                      itemBuilder: (_, i) {
+                        final subject = _visibleSubjects[i];
+                        final key = _key(subject);
+                        return ListTile(
+                          dense: true,
+                          leading: Checkbox(
+                            value: _selected.contains(key),
+                            onChanged: (checked) => setState(() {
+                              if (checked == true) {
+                                _selected.add(key);
+                              } else {
+                                _selected.remove(key);
+                              }
+                            }),
+                          ),
+                          title: Text(
+                            '${subject.code.isEmpty ? 'Sem código' : subject.code} - ${subject.name}',
+                          ),
+                          subtitle: Text(
+                            '${subject.theoretical} h teóricas + ${subject.practical} h práticas = ${subject.hours} h',
+                          ),
+                          trailing: widget.onRemoveFromCurriculum == null
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Remover disciplina do currículo',
+                                  onPressed: () =>
+                                      _removeFromCurriculum(subject),
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
+      ),
     ),
     actions: [
       TextButton(
@@ -2210,6 +2255,17 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
       ),
     ],
   );
+
+  List<_Subject> get _visibleSubjects {
+    final query = _search.text.trim().toLowerCase();
+    if (query.isEmpty) return _catalog;
+    return _catalog
+        .where(
+          (subject) =>
+              '${subject.code} ${subject.name}'.toLowerCase().contains(query),
+        )
+        .toList();
+  }
 }
 
 String _subjectCatalogKey(_Subject subject) =>
