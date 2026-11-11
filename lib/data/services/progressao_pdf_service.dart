@@ -721,12 +721,12 @@ class _Builder {
         ),
       );
     }
-    if (l.comprovante.trim().isNotEmpty) {
+    if (l.rotuloComprovante.isNotEmpty) {
       spans
         ..add(const pw.TextSpan(text: ' ('))
         ..add(
           pw.TextSpan(
-            text: l.comprovante.trim(),
+            text: l.rotuloComprovante,
             style: const pw.TextStyle(color: ProgressaoPdfService._vermelho),
           ),
         )

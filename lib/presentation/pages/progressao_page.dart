@@ -7,12 +7,60 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/services/plano_trabalho_automation_service.dart';
+import 'package:gestor_ufu/data/services/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/data/services/progressao_pdf_service.dart';
 import 'package:gestor_ufu/data/services/progressao_store.dart';
 import 'package:gestor_ufu/domain/entities/progressao.dart';
+import 'package:gestor_ufu/domain/progressao/comprovantes.dart';
 import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
 
 const _uuid = Uuid();
+const _comprovantes = ProgressaoComprovantesService();
+
+Future<String?> _escolherPasta(String titulo, {String? inicial}) =>
+    FilePicker.platform.getDirectoryPath(
+      dialogTitle: titulo,
+      initialDirectory: inicial == null || inicial.isEmpty ? null : inicial,
+    );
+
+Future<void> _abrirNoSistema(String caminho) async {
+  if (Platform.isWindows) {
+    await Process.run('explorer', [caminho]);
+  }
+}
+
+void _avisar(BuildContext context, String texto) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
+}
+
+/// Estado do envio ao SEI, mantido pela página para sobreviver à troca de
+/// abas (o Edge controlado e o log continuam disponíveis).
+class _EnvioSei extends ChangeNotifier {
+  final automation = PlanoTrabalhoAutomationService();
+  final logs = <String>[];
+  String url = 'https://sei.ufu.br';
+  bool enviando = false;
+  bool cancelar = false;
+
+  void log(String mensagem) {
+    final t = TimeOfDay.now();
+    final hora =
+        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    logs.insert(0, '$hora  $mensagem');
+    if (logs.length > 300) logs.removeLast();
+    notifyListeners();
+  }
+
+  void atualizar() => notifyListeners();
+
+  @override
+  void dispose() {
+    automation.close();
+    super.dispose();
+  }
+}
 
 String _fmtData(DateTime? d) => d == null ? '' : ProgressaoPdfService.data(d);
 
@@ -34,6 +82,7 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
   String? _abertoId;
   bool _busy = true;
   Timer? _saveTimer;
+  final _envio = _EnvioSei();
 
   @override
   void initState() {
@@ -47,6 +96,7 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
       _saveTimer!.cancel();
       _store.saveAll(_items);
     }
+    _envio.dispose();
     super.dispose();
   }
 
@@ -76,8 +126,21 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
     );
   }
 
-  void _novo() {
-    final p = ProgressaoDocente(id: _uuid.v4(), dataDocumento: DateTime.now());
+  Future<void> _novo() async {
+    final pasta = await _escolherPasta(
+      'Escolha a pasta onde os comprovantes deste processo serão salvos',
+    );
+    if (pasta == null) {
+      _message(
+        'Processo não criado: escolha a pasta onde os comprovantes serão salvos.',
+      );
+      return;
+    }
+    final p = ProgressaoDocente(
+      id: _uuid.v4(),
+      dataDocumento: DateTime.now(),
+      pastaComprovantes: pasta,
+    );
     _update(p);
     setState(() => _abertoId = p.id);
   }
@@ -164,6 +227,7 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
         onChanged: _update,
         onClose: () => setState(() => _abertoId = null),
         onPdf: () => _gerarPdf(aberto),
+        envio: _envio,
       );
     }
     return Scaffold(
@@ -331,12 +395,14 @@ class _Editor extends StatelessWidget {
     required this.onChanged,
     required this.onClose,
     required this.onPdf,
+    required this.envio,
   });
 
   final ProgressaoDocente processo;
   final ValueChanged<ProgressaoDocente> onChanged;
   final VoidCallback onClose;
   final VoidCallback onPdf;
+  final _EnvioSei envio;
 
   static const _abas = {
     TabelaAnexo1.ensino: 'A1.1 Ensino',
@@ -358,7 +424,7 @@ class _Editor extends StatelessWidget {
         ? AppTheme.green
         : AppTheme.danger;
     return DefaultTabController(
-      length: 3 + _abas.length,
+      length: 4 + _abas.length,
       child: Scaffold(
         body: Container(
           decoration: BoxDecoration(gradient: AppTheme.bgGradient),
@@ -432,6 +498,10 @@ class _Editor extends StatelessWidget {
                         text:
                             '${entry.value} (${ProgressaoPdfService.pontos(p.totalTabela(entry.key))})',
                       ),
+                    Tab(
+                      text:
+                          'Comprovantes / SEI (${lancamentosComComprovante(p).length})',
+                    ),
                     const Tab(text: 'Resumo'),
                   ],
                 ),
@@ -446,6 +516,11 @@ class _Editor extends StatelessWidget {
                           tabela: t,
                           onChanged: onChanged,
                         ),
+                      _ComprovantesTab(
+                        processo: p,
+                        onChanged: onChanged,
+                        envio: envio,
+                      ),
                       _ResumoTab(processo: p),
                     ],
                   ),
@@ -954,6 +1029,86 @@ class _TabelaTab extends StatelessWidget {
     _setLancamentos(lista);
   }
 
+  ProgressaoDocente _comLancamento(
+    ProgressaoDocente p,
+    LancamentoProgressao l,
+  ) => p.copyWith(
+    lancamentos: [for (final e in p.lancamentos) e.id == l.id ? l : e],
+  );
+
+  /// Abre o seletor de arquivo e copia o comprovante para a pasta do
+  /// processo, já renomeado e na subpasta da tabela.
+  Future<void> _selecionarComprovante(
+    BuildContext context,
+    LancamentoProgressao linha,
+  ) async {
+    var p = processo;
+    if (p.pastaComprovantes.isEmpty) {
+      final pasta = await _escolherPasta(
+        'Escolha a pasta onde os comprovantes deste processo serão salvos',
+      );
+      if (pasta == null) return;
+      p = p.copyWith(pastaComprovantes: pasta);
+      onChanged(p);
+    }
+    final resultado = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Selecionar comprovante — item ${linha.item}',
+      type: FileType.custom,
+      allowedExtensions: extensoesComprovante,
+    );
+    final origem = resultado?.files.single.path;
+    if (origem == null) return;
+    final atual = p.lancamentos.firstWhere(
+      (e) => e.id == linha.id,
+      orElse: () => linha,
+    );
+    try {
+      final novo = await _comprovantes.importar(
+        processo: p,
+        lancamento: atual,
+        origem: origem,
+      );
+      onChanged(_comLancamento(p, novo));
+      if (context.mounted) {
+        _avisar(context, 'Comprovante salvo como ${novo.comprovante}');
+      }
+    } on Object catch (error) {
+      if (context.mounted) {
+        _avisar(context, 'Não foi possível copiar o comprovante: $error');
+      }
+    }
+  }
+
+  Future<void> _removerComprovante(
+    BuildContext context,
+    LancamentoProgressao l,
+  ) async {
+    try {
+      onChanged(
+        _comLancamento(processo, await _comprovantes.remover(processo, l)),
+      );
+    } on Object catch (error) {
+      if (context.mounted) {
+        _avisar(context, 'Não foi possível remover o comprovante: $error');
+      }
+    }
+  }
+
+  Future<void> _removerLinha(
+    BuildContext context,
+    LancamentoProgressao l,
+  ) async {
+    try {
+      final caminho = _comprovantes.caminhoAbsoluto(processo, l);
+      if (caminho != null) await _comprovantes.descartar(processo, caminho);
+    } on Object catch (error) {
+      if (context.mounted) {
+        _avisar(context, 'Comprovante não movido para descartados: $error');
+      }
+    }
+    _setLancamentos(processo.lancamentos.where((e) => e.id != l.id).toList());
+  }
+
   Future<void> _escolherItem(BuildContext context) async {
     final itens = anexo1.where((i) => i.tabela == tabela).toList();
     final escolhido = await showDialog<int>(
@@ -1011,9 +1166,9 @@ class _TabelaTab extends StatelessWidget {
             onAlterar: (l) => _setLancamentos([
               for (final e in processo.lancamentos) e.id == l.id ? l : e,
             ]),
-            onRemover: (l) => _setLancamentos(
-              processo.lancamentos.where((e) => e.id != l.id).toList(),
-            ),
+            onRemover: (l) => _removerLinha(context, l),
+            onSelecionarComprovante: (l) => _selecionarComprovante(context, l),
+            onRemoverComprovante: (l) => _removerComprovante(context, l),
           ),
           const SizedBox(height: 12),
         ],
@@ -1106,6 +1261,8 @@ class _ItemCard extends StatelessWidget {
     required this.onAdicionar,
     required this.onAlterar,
     required this.onRemover,
+    required this.onSelecionarComprovante,
+    required this.onRemoverComprovante,
   });
 
   final ProgressaoDocente processo;
@@ -1113,6 +1270,8 @@ class _ItemCard extends StatelessWidget {
   final VoidCallback onAdicionar;
   final ValueChanged<LancamentoProgressao> onAlterar;
   final ValueChanged<LancamentoProgressao> onRemover;
+  final ValueChanged<LancamentoProgressao> onSelecionarComprovante;
+  final ValueChanged<LancamentoProgressao> onRemoverComprovante;
 
   @override
   Widget build(BuildContext context) {
@@ -1230,8 +1389,11 @@ class _ItemCard extends StatelessWidget {
               lancamento: l,
               item: item,
               pontos: processo.pontosLancamento(l),
+              arquivoComprovante: _comprovantes.caminhoAbsoluto(processo, l),
               onChanged: onAlterar,
               onRemove: () => onRemover(l),
+              onSelecionarComprovante: () => onSelecionarComprovante(l),
+              onRemoverComprovante: () => onRemoverComprovante(l),
             ),
           Align(
             alignment: Alignment.centerLeft,
@@ -1255,6 +1417,9 @@ class _LinhaLancamento extends StatelessWidget {
     required this.pontos,
     required this.onChanged,
     required this.onRemove,
+    required this.arquivoComprovante,
+    required this.onSelecionarComprovante,
+    required this.onRemoverComprovante,
   });
 
   final LancamentoProgressao lancamento;
@@ -1262,6 +1427,11 @@ class _LinhaLancamento extends StatelessWidget {
   final double pontos;
   final ValueChanged<LancamentoProgressao> onChanged;
   final VoidCallback onRemove;
+
+  /// Caminho absoluto do comprovante copiado, quando houver.
+  final String? arquivoComprovante;
+  final VoidCallback onSelecionarComprovante;
+  final VoidCallback onRemoverComprovante;
 
   Future<void> _datas(BuildContext context) async {
     final l = lancamento;
@@ -1337,12 +1507,11 @@ class _LinhaLancamento extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             flex: 2,
-            child: _Campo(
-              label: '',
-              hint: 'arquivo.pdf',
-              value: l.comprovante,
-              width: null,
-              onChanged: (v) => onChanged(l.copyWith(comprovante: v)),
+            child: _AreaComprovante(
+              lancamento: l,
+              arquivo: arquivoComprovante,
+              onSelecionar: onSelecionarComprovante,
+              onRemover: onRemoverComprovante,
             ),
           ),
           const SizedBox(width: 8),
@@ -1384,6 +1553,546 @@ class _LinhaLancamento extends StatelessWidget {
   }
 }
 
+/// Área clicável que abre o seletor de arquivo do comprovante da linha.
+class _AreaComprovante extends StatelessWidget {
+  const _AreaComprovante({
+    required this.lancamento,
+    required this.arquivo,
+    required this.onSelecionar,
+    required this.onRemover,
+  });
+
+  final LancamentoProgressao lancamento;
+  final String? arquivo;
+  final VoidCallback onSelecionar;
+  final VoidCallback onRemover;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = lancamento;
+    final vazio = l.comprovante.trim().isEmpty;
+    final existe = arquivo != null && File(arquivo!).existsSync();
+    final cor = vazio
+        ? AppTheme.textSecondary
+        : existe
+        ? AppTheme.accent
+        : AppTheme.warning;
+    final String texto;
+    final String dica;
+    if (vazio) {
+      texto = 'Selecionar arquivo…';
+      dica = 'Clique para escolher o comprovante (PDF, JPG ou PNG)';
+    } else if (existe) {
+      texto = l.rotuloComprovante;
+      dica = '$arquivo\nClique para substituir';
+    } else if (l.comprovanteArquivado) {
+      texto = l.rotuloComprovante;
+      dica =
+          'Arquivo não encontrado na pasta do processo. Clique para selecionar novamente.';
+    } else {
+      texto = l.rotuloComprovante;
+      dica = 'Referência sem arquivo. Clique para selecionar o comprovante.';
+    }
+    return Tooltip(
+      message: dica,
+      child: Material(
+        color: cor.withAlpha(vazio ? 10 : 22),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: onSelecionar,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 44),
+            padding: const EdgeInsets.only(left: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: cor.withAlpha(vazio ? 90 : 160)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  vazio
+                      ? Icons.upload_file_outlined
+                      : existe
+                      ? Icons.description_outlined
+                      : Icons.report_problem_outlined,
+                  size: 18,
+                  color: cor,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    texto,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: vazio ? AppTheme.textSecondary : null,
+                    ),
+                  ),
+                ),
+                if (existe)
+                  IconButton(
+                    tooltip: 'Abrir comprovante',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => _abrirNoSistema(arquivo!),
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                  ),
+                if (!vazio)
+                  IconButton(
+                    tooltip: 'Remover comprovante',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onRemover,
+                    icon: const Icon(Icons.close, size: 16),
+                  ),
+                if (vazio) const SizedBox(width: 10),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ------------------------------------------------------ Comprovantes / SEI
+class _ComprovantesTab extends StatefulWidget {
+  const _ComprovantesTab({
+    required this.processo,
+    required this.onChanged,
+    required this.envio,
+  });
+
+  final ProgressaoDocente processo;
+  final ValueChanged<ProgressaoDocente> onChanged;
+  final _EnvioSei envio;
+
+  @override
+  State<_ComprovantesTab> createState() => _ComprovantesTabState();
+}
+
+class _ComprovantesTabState extends State<_ComprovantesTab> {
+  late final _url = TextEditingController(text: widget.envio.url);
+  bool _ocupado = false;
+
+  ProgressaoDocente get p => widget.processo;
+  _EnvioSei get envio => widget.envio;
+
+  @override
+  void dispose() {
+    _url.dispose();
+    super.dispose();
+  }
+
+  Future<void> _trocarPasta() async {
+    final nova = await _escolherPasta(
+      'Escolha a pasta onde os comprovantes deste processo serão salvos',
+      inicial: p.pastaComprovantes,
+    );
+    if (nova == null || nova == p.pastaComprovantes) return;
+    setState(() => _ocupado = true);
+    try {
+      final copiados = await _comprovantes.copiarParaPasta(p, nova);
+      widget.onChanged(p.copyWith(pastaComprovantes: nova));
+      if (mounted) {
+        _avisar(
+          context,
+          copiados == 0
+              ? 'Pasta dos comprovantes: $nova'
+              : '$copiados comprovante(s) copiado(s) para $nova',
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) _avisar(context, 'Não foi possível trocar a pasta: $error');
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
+  Future<void> _reorganizar() async {
+    setState(() => _ocupado = true);
+    try {
+      final (novo, renomeados) = await _comprovantes.reorganizar(p);
+      widget.onChanged(novo);
+      if (mounted) {
+        _avisar(
+          context,
+          renomeados == 0
+              ? 'Os nomes já estão atualizados.'
+              : '$renomeados comprovante(s) renomeado(s).',
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) _avisar(context, 'Não foi possível reorganizar: $error');
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
+  Future<void> _abrirEdge() async {
+    final uri = Uri.tryParse(_url.text.trim());
+    if (uri == null || !uri.hasScheme) {
+      _avisar(context, 'Informe um endereço válido do SEI.');
+      return;
+    }
+    envio.url = uri.toString();
+    try {
+      final aberto = await envio.automation.openBrowser(uri.toString());
+      envio.log('Edge pronto em $aberto. Entre no SEI e abra o processo.');
+    } on Object catch (error) {
+      envio.log('Falha ao abrir o Edge: $error');
+    }
+  }
+
+  Future<void> _enviar() async {
+    final lista = lancamentosComComprovante(p);
+    final ausentes = [
+      for (final l in lista)
+        if (!_comprovantes.existe(p, l)) l.rotuloComprovante,
+    ];
+    if (ausentes.isNotEmpty) {
+      _avisar(
+        context,
+        'Arquivos não encontrados na pasta: ${ausentes.join(', ')}',
+      );
+      return;
+    }
+    if (lista.isEmpty) {
+      _avisar(context, 'Nenhum comprovante anexado aos lançamentos.');
+      return;
+    }
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enviar comprovantes ao SEI'),
+        content: Text(
+          'Serão incluídos ${lista.length} comprovante(s) como documento '
+          'externo do tipo "${p.tipoDocumentoSei}" no processo aberto no Edge, '
+          'na ordem do relatório. Os que já estiverem na árvore (mesmo Nome na '
+          'Árvore) serão mantidos.\n\nConfira se o processo correto está aberto.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    envio
+      ..enviando = true
+      ..cancelar = false
+      ..atualizar();
+    try {
+      final r = await envio.automation.insertExternalBatch(
+        documentos: [
+          for (final l in lista)
+            SeiDocumentoExterno(
+              caminho: _comprovantes.caminhoAbsoluto(p, l)!,
+              nomeArvore: l.rotuloComprovante,
+            ),
+        ],
+        serie: p.tipoDocumentoSei.trim().isEmpty
+            ? ProgressaoDocente.tipoDocumentoSeiPadrao
+            : p.tipoDocumentoSei.trim(),
+        log: envio.log,
+        cancelado: () => envio.cancelar,
+      );
+      for (final e in r.erros) {
+        envio.log('ERRO: $e');
+      }
+      envio.log(
+        'Concluído: ${r.criados.length} incluído(s), '
+        '${r.existentes.length} já existente(s), ${r.erros.length} erro(s).',
+      );
+    } on Object catch (error) {
+      envio.log('Falha no envio: $error');
+    } finally {
+      envio
+        ..enviando = false
+        ..atualizar();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lista = lancamentosComComprovante(p);
+    final ausentes = lista.where((l) => !_comprovantes.existe(p, l)).length;
+    final semComprovante = p.lancamentos
+        .where((l) => l.comprovante.trim().isEmpty)
+        .length;
+    final semArquivo = p.lancamentos
+        .where(
+          (l) => l.comprovante.trim().isNotEmpty && !l.comprovanteArquivado,
+        )
+        .length;
+    return ListView(
+      padding: const EdgeInsets.all(24),
+      children: [
+        _cartao(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Pasta dos comprovantes',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Cada arquivo selecionado nas tabelas é copiado para esta pasta, '
+                'na subpasta da sua tabela (A1.1_Ensino, A1.2_Orientacao...), com '
+                'o nome usado no relatório e no SEI. O original não é alterado; '
+                'cópias substituídas vão para "${ProgressaoComprovantesService.subpastaDescartados}".',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                p.pastaComprovantes.isEmpty
+                    ? 'Nenhuma pasta escolhida'
+                    : p.pastaComprovantes,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _ocupado ? null : _trocarPasta,
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: Text(
+                      p.pastaComprovantes.isEmpty
+                          ? 'Escolher pasta'
+                          : 'Alterar pasta',
+                    ),
+                  ),
+                  if (p.pastaComprovantes.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: () => _abrirNoSistema(p.pastaComprovantes),
+                      icon: const Icon(Icons.launch, size: 18),
+                      label: const Text('Abrir pasta'),
+                    ),
+                  if (lista.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: _ocupado ? null : _reorganizar,
+                      icon: const Icon(
+                        Icons.drive_file_rename_outline,
+                        size: 18,
+                      ),
+                      label: const Text('Atualizar nomes dos arquivos'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '${lista.length} comprovante(s) arquivado(s)'
+                '${ausentes > 0 ? ' · $ausentes não encontrado(s) na pasta' : ''}'
+                ' · $semComprovante lançamento(s) sem comprovante'
+                '${semArquivo > 0 ? ' · $semArquivo com referência antiga sem arquivo' : ''}',
+                style: TextStyle(
+                  color: ausentes > 0
+                      ? AppTheme.warning
+                      : AppTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _cartao(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Comprovantes na ordem de envio',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              if (lista.isEmpty)
+                Text(
+                  'Nenhum comprovante anexado. Use a coluna "Comprovante" nas abas do Anexo 1.',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                ),
+              for (final (i, l) in lista.indexed) _linhaLista(i + 1, l),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _envioSei(lista.length, ausentes),
+      ],
+    );
+  }
+
+  Widget _linhaLista(int ordem, LancamentoProgressao l) {
+    final caminho = _comprovantes.caminhoAbsoluto(p, l);
+    final existe = caminho != null && File(caminho).existsSync();
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      leading: SizedBox(
+        width: 34,
+        child: Text(
+          '$ordem.',
+          textAlign: TextAlign.right,
+          style: TextStyle(color: AppTheme.textSecondary),
+        ),
+      ),
+      title: Text(l.rotuloComprovante),
+      subtitle: Text(
+        '${l.comprovante} · item ${l.item}'
+        '${l.descricao.trim().isEmpty ? '' : ' · ${l.descricao.trim()}'}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: existe
+          ? IconButton(
+              tooltip: 'Abrir comprovante',
+              onPressed: () => _abrirNoSistema(caminho),
+              icon: const Icon(Icons.open_in_new, size: 18),
+            )
+          : Tooltip(
+              message: 'Arquivo não encontrado na pasta',
+              child: Icon(
+                Icons.report_problem_outlined,
+                color: AppTheme.warning,
+              ),
+            ),
+    );
+  }
+
+  Widget _envioSei(int total, int ausentes) => ListenableBuilder(
+    listenable: envio,
+    builder: (context, _) {
+      final conectado = envio.automation.isConnected;
+      return _cartao(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Enviar ao SEI',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+                Chip(
+                  label: Text(conectado ? 'EDGE ABERTO' : 'DESCONECTADO'),
+                  backgroundColor:
+                      (conectado ? AppTheme.green : AppTheme.danger).withAlpha(
+                        30,
+                      ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '1) Abra o Edge, entre no SEI e abra o processo de progressão. '
+              '2) Clique em "Enviar comprovantes": cada arquivo é incluído como '
+              'documento externo (nato-digital, público), com o Nome na Árvore '
+              'igual ao nome citado no relatório. Documentos que já estão na '
+              'árvore são mantidos; o envio para no primeiro erro e, ao final, '
+              'confere se todos estão no processo.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 320,
+                  child: TextField(
+                    controller: _url,
+                    decoration: const InputDecoration(
+                      labelText: 'Endereço do SEI',
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: envio.enviando ? null : _abrirEdge,
+                  icon: const Icon(Icons.public, size: 18),
+                  label: Text(conectado ? 'Ir para o endereço' : 'Abrir Edge'),
+                ),
+                _Campo(
+                  label: 'Tipo do documento externo no SEI',
+                  value: p.tipoDocumentoSei,
+                  width: 260,
+                  onChanged: (v) =>
+                      widget.onChanged(p.copyWith(tipoDocumentoSei: v)),
+                ),
+                if (envio.enviando)
+                  OutlinedButton.icon(
+                    onPressed: envio.cancelar
+                        ? null
+                        : () {
+                            envio
+                              ..cancelar = true
+                              ..atualizar();
+                            envio.log(
+                              'Interrupção solicitada; o documento em andamento será concluído.',
+                            );
+                          },
+                    icon: const Icon(Icons.stop_circle_outlined, size: 18),
+                    label: const Text('Parar'),
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: conectado && total > 0 && ausentes == 0
+                        ? _enviar
+                        : null,
+                    icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                    label: Text('Enviar $total comprovante(s)'),
+                  ),
+                if (envio.enviando)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              height: 220,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.black.withAlpha(25),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppTheme.divider),
+              ),
+              child: envio.logs.isEmpty
+                  ? Center(
+                      child: Text(
+                        'O andamento do envio aparece aqui.',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: envio.logs.length,
+                      itemBuilder: (_, i) => SelectableText(
+                        envio.logs[i],
+                        style: const TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 // ------------------------------------------------------------------ Resumo
 class _ResumoTab extends StatelessWidget {
   const _ResumoTab({required this.processo});
@@ -1413,6 +2122,12 @@ class _ResumoTab extends StatelessWidget {
         'Nenhuma avaliação didática discente listada (exigida pelo § 3º do art. 9º).',
       if (p.referencia != null && !p.atingeReferencia)
         'A pontuação ainda não atinge a referência (${p.referencia} pontos).',
+      if (p.pastaComprovantes.isEmpty)
+        'Escolha a pasta dos comprovantes (aba Comprovantes / SEI).',
+      if (p.lancamentos.any((l) => l.comprovante.trim().isEmpty))
+        '${p.lancamentos.where((l) => l.comprovante.trim().isEmpty).length} lançamento(s) sem comprovante.',
+      if (lancamentosComComprovante(p).any((l) => !_comprovantes.existe(p, l)))
+        'Há comprovantes que não estão mais na pasta do processo.',
     ];
     return ListView(
       padding: const EdgeInsets.all(24),

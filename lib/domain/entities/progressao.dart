@@ -21,8 +21,23 @@ class LancamentoProgressao {
   final String periodo;
   final String descricao;
 
-  /// Nome do arquivo/documento comprobatório anexado ao SEI.
+  /// Comprovante da atividade. Quando o arquivo foi copiado para a pasta do
+  /// processo, guarda o caminho relativo a ela (`A1.1_Ensino/arquivo.pdf`);
+  /// processos antigos podem trazer apenas um texto livre.
   final String comprovante;
+
+  /// O comprovante é um arquivo copiado para a pasta do processo.
+  bool get comprovanteArquivado =>
+      comprovante.contains('/') || comprovante.contains(r'\');
+
+  /// Nome exibido no relatório e usado como "Nome na Árvore" no SEI.
+  String get rotuloComprovante {
+    final texto = comprovante.trim();
+    if (!comprovanteArquivado) return texto;
+    final nome = texto.split(RegExp(r'[/\\]')).last;
+    final ponto = nome.lastIndexOf('.');
+    return ponto > 0 ? nome.substring(0, ponto) : nome;
+  }
 
   /// Horas, meses, alunos, trabalhos, dias... conforme a unidade do item.
   final double quantidade;
@@ -97,9 +112,14 @@ class ProgressaoDocente {
     this.avaliacoesDidaticas = const [],
     this.textoAvaliacaoConclusao = textoAvaliacaoConclusaoPadrao,
     this.logoPath = '',
+    this.pastaComprovantes = '',
+    this.tipoDocumentoSei = tipoDocumentoSeiPadrao,
     this.lancamentos = const [],
     this.atualizadoEm,
   });
+
+  /// Tipo do documento externo no SEI usado para os comprovantes.
+  static const tipoDocumentoSeiPadrao = 'Comprovante';
 
   static const textoAssiduidadePadrao =
       'Neste sentido, tenho a informar que sou assíduo, pontual e sempre cumpri com '
@@ -147,6 +167,13 @@ class ProgressaoDocente {
 
   /// Imagem opcional (PNG/JPG) exibida no cabeçalho das páginas do PDF.
   final String logoPath;
+
+  /// Pasta escolhida ao criar o processo; os comprovantes são copiados para
+  /// subpastas dela, já renomeados.
+  final String pastaComprovantes;
+
+  /// Tipo do documento externo do SEI para os comprovantes.
+  final String tipoDocumentoSei;
   final List<LancamentoProgressao> lancamentos;
   final DateTime? atualizadoEm;
 
@@ -223,6 +250,8 @@ class ProgressaoDocente {
     List<String>? avaliacoesDidaticas,
     String? textoAvaliacaoConclusao,
     String? logoPath,
+    String? pastaComprovantes,
+    String? tipoDocumentoSei,
     List<LancamentoProgressao>? lancamentos,
     DateTime? atualizadoEm,
   }) => ProgressaoDocente(
@@ -249,6 +278,8 @@ class ProgressaoDocente {
     textoAvaliacaoConclusao:
         textoAvaliacaoConclusao ?? this.textoAvaliacaoConclusao,
     logoPath: logoPath ?? this.logoPath,
+    pastaComprovantes: pastaComprovantes ?? this.pastaComprovantes,
+    tipoDocumentoSei: tipoDocumentoSei ?? this.tipoDocumentoSei,
     lancamentos: lancamentos ?? this.lancamentos,
     atualizadoEm: atualizadoEm ?? this.atualizadoEm,
   );
@@ -275,6 +306,8 @@ class ProgressaoDocente {
     'avaliacoesDidaticas': avaliacoesDidaticas,
     'textoAvaliacaoConclusao': textoAvaliacaoConclusao,
     'logoPath': logoPath,
+    'pastaComprovantes': pastaComprovantes,
+    'tipoDocumentoSei': tipoDocumentoSei,
     'lancamentos': lancamentos.map((l) => l.toJson()).toList(),
     'atualizadoEm': atualizadoEm?.toIso8601String(),
   };
@@ -320,6 +353,9 @@ class ProgressaoDocente {
           json['textoAvaliacaoConclusao'] as String? ??
           textoAvaliacaoConclusaoPadrao,
       logoPath: json['logoPath'] as String? ?? '',
+      pastaComprovantes: json['pastaComprovantes'] as String? ?? '',
+      tipoDocumentoSei:
+          json['tipoDocumentoSei'] as String? ?? tipoDocumentoSeiPadrao,
       lancamentos: (json['lancamentos'] as List? ?? const [])
           .whereType<Map>()
           .map(
