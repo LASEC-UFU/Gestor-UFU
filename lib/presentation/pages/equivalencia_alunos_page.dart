@@ -1677,6 +1677,12 @@ class _CaseDialogState extends State<_CaseDialog> {
                   '${b.currentHours} h destino  ≤  ${b.priorHours} h cursado',
                   style: TextStyle(color: color, fontWeight: FontWeight.w600),
                 ),
+                if (_blocks.length > 1)
+                  IconButton(
+                    tooltip: 'Agrupar com outro bloco',
+                    onPressed: () => _mergeBlocks(b),
+                    icon: const Icon(Icons.merge_type),
+                  ),
                 IconButton(
                   onPressed: () => _block(b),
                   icon: const Icon(Icons.edit_outlined),
@@ -1714,6 +1720,87 @@ class _CaseDialogState extends State<_CaseDialog> {
         ),
       ),
     );
+  }
+
+  Future<void> _mergeBlocks(_Block primary) async {
+    final candidates = _blocks
+        .where((block) => block.id != primary.id)
+        .toList();
+    if (candidates.isEmpty) return;
+    String? selectedId;
+    final otherId = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Agrupar blocos'),
+          content: SizedBox(
+            width: 520,
+            height: 300,
+            child: Column(
+              children: [
+                Text(
+                  'Escolha o bloco que será unido ao Bloco ${_blocks.indexOf(primary) + 1}.',
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: candidates.length,
+                    itemBuilder: (_, i) {
+                      final candidate = candidates[i];
+                      final blockIndex = _blocks.indexOf(candidate);
+                      return RadioListTile<String>(
+                        value: candidate.id,
+                        groupValue: selectedId,
+                        onChanged: (value) =>
+                            setDialogState(() => selectedId = value),
+                        title: Text(
+                          'Bloco ${blockIndex + 1}${candidate.period.trim().isEmpty ? '' : ' · Período ${candidate.period}'}',
+                        ),
+                        subtitle: Text(
+                          '${candidate.currentHours} h destino · ${candidate.priorHours} h cursado',
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: selectedId == null
+                  ? null
+                  : () => Navigator.pop(dialogContext, selectedId),
+              icon: const Icon(Icons.merge_type),
+              label: const Text('Agrupar em um bloco'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (otherId == null || !mounted) return;
+    final primaryIndex = _blocks.indexWhere((block) => block.id == primary.id);
+    final otherIndex = _blocks.indexWhere((block) => block.id == otherId);
+    if (primaryIndex < 0 || otherIndex < 0) return;
+    final other = _blocks[otherIndex];
+    final periods = [
+      primary.period.trim(),
+      other.period.trim(),
+    ].where((period) => period.isNotEmpty).toSet();
+    final merged = _Block(
+      id: primary.id,
+      period: periods.join(' + '),
+      current: _mergeSubjects([...primary.current, ...other.current]),
+      prior: _mergeSubjects([...primary.prior, ...other.prior]),
+    );
+    setState(() {
+      _blocks[primaryIndex] = merged;
+      _blocks.removeAt(otherIndex);
+    });
   }
 
   Widget _subjectColumn(String label, List<_Subject> subjects) => Column(
