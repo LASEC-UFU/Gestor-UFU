@@ -222,39 +222,6 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
       0,
       (sum, block) => sum + block.priorHours,
     );
-    final rows = <pw.TableRow>[];
-    for (final block in blocks) {
-      final count = block.current.length > block.prior.length
-          ? block.current.length
-          : block.prior.length;
-      for (var index = 0; index < count; index++) {
-        final current = index < block.current.length
-            ? block.current[index]
-            : null;
-        final prior = index < block.prior.length ? block.prior[index] : null;
-        rows.add(
-          pw.TableRow(
-            children: [
-              _pdfCell(
-                current == null
-                    ? ''
-                    : '${current.code.isEmpty ? '' : '${current.code} – '}${current.name}',
-              ),
-              _pdfCell(
-                current == null ? '' : '${current.hours} h',
-                centered: true,
-              ),
-              _pdfCell(
-                prior == null
-                    ? ''
-                    : '${prior.code.isEmpty ? '' : '${prior.code} – '}${prior.name}',
-              ),
-              _pdfCell(prior == null ? '' : '${prior.hours} h', centered: true),
-            ],
-          ),
-        );
-      }
-    }
     document.addPage(
       pw.MultiPage(
         pageTheme: pw.PageTheme(
@@ -286,6 +253,10 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
             style: const pw.TextStyle(fontSize: 10),
           ),
           pw.SizedBox(height: 12),
+          for (var index = 0; index < blocks.length; index++) ...[
+            _certificateBlock(blocks[index], index),
+            pw.SizedBox(height: 9),
+          ],
           pw.Table(
             border: pw.TableBorder.all(color: PdfColors.grey600, width: .5),
             columnWidths: const {
@@ -296,25 +267,11 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
             },
             children: [
               pw.TableRow(
-                repeat: true,
-                decoration: const pw.BoxDecoration(color: PdfColors.grey300),
-                children: [
-                  _pdfCell('Disciplinas dispensadas', bold: true),
-                  _pdfCell('CH', bold: true, centered: true),
-                  _pdfCell(
-                    'Disciplinas realizadas na IES de origem',
-                    bold: true,
-                  ),
-                  _pdfCell('CH', bold: true, centered: true),
-                ],
-              ),
-              ...rows,
-              pw.TableRow(
                 decoration: const pw.BoxDecoration(color: PdfColors.grey200),
                 children: [
-                  _pdfCell('Total', bold: true),
+                  _pdfCell('Total geral dispensado', bold: true),
                   _pdfCell('$totalCurrent h', bold: true, centered: true),
-                  _pdfCell('Total', bold: true),
+                  _pdfCell('Total geral cursado na origem', bold: true),
                   _pdfCell('$totalPrior h', bold: true, centered: true),
                 ],
               ),
@@ -339,6 +296,109 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
     );
     return document.save();
   }
+
+  pw.Widget _certificateBlock(_Block block, int index) {
+    final blockName = block.period.trim().isEmpty
+        ? 'Bloco ${index + 1}'
+        : block.period;
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey600, width: .6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Container(
+            color: PdfColors.grey300,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: pw.Text(
+              blockName,
+              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+            ),
+          ),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: _certificateSide(
+                  title: 'Disciplinas dispensadas',
+                  subjects: block.current,
+                  total: block.currentHours,
+                ),
+              ),
+              pw.Container(width: .6, color: PdfColors.grey500),
+              pw.Expanded(
+                child: _certificateSide(
+                  title: 'Disciplinas realizadas na IES de origem',
+                  subjects: block.prior,
+                  total: block.priorHours,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _certificateSide({
+    required String title,
+    required List<_Subject> subjects,
+    required int total,
+  }) => pw.Padding(
+    padding: const pw.EdgeInsets.all(5),
+    child: pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Row(
+          children: [
+            pw.Expanded(
+              child: pw.Text(
+                title,
+                style: pw.TextStyle(
+                  fontSize: 8,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ),
+            pw.Text(
+              'Subtotal: $total h',
+              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+            ),
+          ],
+        ),
+        pw.SizedBox(height: 3),
+        if (subjects.isEmpty)
+          _pdfCell('Nenhuma disciplina neste lado', centered: true)
+        else
+          for (final subject in subjects)
+            pw.Container(
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(
+                  top: pw.BorderSide(color: PdfColors.grey300, width: .35),
+                ),
+              ),
+              padding: const pw.EdgeInsets.symmetric(vertical: 3),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Expanded(
+                    child: pw.Text(
+                      '${subject.code.isEmpty ? '' : '${subject.code} - '}${subject.name}',
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ),
+                  pw.SizedBox(width: 5),
+                  pw.Text(
+                    '${subject.hours} h',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ],
+              ),
+            ),
+      ],
+    ),
+  );
 
   pw.Widget _pdfCell(String text, {bool bold = false, bool centered = false}) =>
       pw.Padding(
