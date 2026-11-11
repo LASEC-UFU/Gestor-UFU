@@ -16,6 +16,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
   static const metadataPrefix = '__gestor_ufu_cloud_sync_';
   static const _pathKey = '${metadataPrefix}file_path';
   static const _baselineKey = '${metadataPrefix}baseline_hash';
+  static const _baselineSnapshotKey = '${metadataPrefix}baseline_snapshot';
   static const _passwordKey = '${metadataPrefix}encryption_key';
   static const _format = 'gestor_ufu_encrypted_shared_database';
   static const _version = 1;
@@ -104,11 +105,13 @@ class SharedPreferencesSyncService extends ChangeNotifier
     if (useSharedFile) {
       final remote = await _readRemote(filePath, password);
       await prefs.setString(_baselineKey, await _hash(remote.plainText));
+      await prefs.setString(_baselineSnapshotKey, remote.plainText);
       _setStatus(SharedPreferencesSyncStatus.connected);
     } else {
       final plainText = await _localSnapshot();
       await _writeRemote(filePath, password, plainText);
       await prefs.setString(_baselineKey, await _hash(plainText));
+      await prefs.setString(_baselineSnapshotKey, plainText);
       _setStatus(SharedPreferencesSyncStatus.connected);
     }
     _error = null;
@@ -129,6 +132,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pathKey);
     await prefs.remove(_baselineKey);
+    await prefs.remove(_baselineSnapshotKey);
     await _secureStorage.delete(key: _passwordKey);
     _setStatus(SharedPreferencesSyncStatus.disconnected);
   }
@@ -145,11 +149,13 @@ class SharedPreferencesSyncService extends ChangeNotifier
         await _applyPreferences(remote.preferences);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_baselineKey, await _hash(remote.plainText));
+        await prefs.setString(_baselineSnapshotKey, remote.plainText);
       } else {
         final plainText = await _localSnapshot();
         await _writeRemote(_filePath!, _password!, plainText);
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_baselineKey, await _hash(plainText));
+        await prefs.setString(_baselineSnapshotKey, plainText);
       }
       _error = null;
       _setStatus(SharedPreferencesSyncStatus.connected);
@@ -200,6 +206,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
       if (baseline == null) {
         await _applyPreferences(remote.preferences);
         await prefs.setString(_baselineKey, remoteHash);
+        await prefs.setString(_baselineSnapshotKey, remote.plainText);
         _setStatus(SharedPreferencesSyncStatus.connected);
         return;
       }
@@ -207,7 +214,25 @@ class SharedPreferencesSyncService extends ChangeNotifier
       final localChanged = localHash != baseline;
       final remoteChanged = remoteHash != baseline;
       if (localChanged && remoteChanged && localHash != remoteHash) {
-        _setStatus(SharedPreferencesSyncStatus.conflict);
+        final baselineText = prefs.getString(_baselineSnapshotKey);
+        final mergedText = baselineText == null
+            ? null
+            : _mergeSnapshots(
+                baselineText: baselineText,
+                localText: localText,
+                remoteText: remote.plainText,
+              );
+        if (mergedText == null) {
+          _setStatus(SharedPreferencesSyncStatus.conflict);
+          return;
+        }
+        await _writeRemote(_filePath!, _password!, mergedText);
+        final mergedHash = await _hash(mergedText);
+        await prefs.setString(_baselineKey, mergedHash);
+        await prefs.setString(_baselineSnapshotKey, mergedText);
+        await _applyPreferences(_decodeSnapshot(mergedText));
+        _error = null;
+        _setStatus(SharedPreferencesSyncStatus.connected);
         return;
       }
       if (remoteChanged && !localChanged) {
@@ -221,11 +246,17 @@ class SharedPreferencesSyncService extends ChangeNotifier
         }
         await _applyPreferences(remote.preferences);
         await prefs.setString(_baselineKey, remoteHash);
+        await prefs.setString(_baselineSnapshotKey, remote.plainText);
       } else if (localChanged && !remoteChanged) {
         await _writeRemote(_filePath!, _password!, localText);
         await prefs.setString(_baselineKey, localHash);
+        await prefs.setString(_baselineSnapshotKey, localText);
       } else if (localChanged && remoteChanged && localHash == remoteHash) {
         await prefs.setString(_baselineKey, localHash);
+        await prefs.setString(_baselineSnapshotKey, localText);
+      } else {
+        // Seed the merge base when this installation predates snapshots.
+        await prefs.setString(_baselineSnapshotKey, remote.plainText);
       }
       _error = null;
       _setStatus(SharedPreferencesSyncStatus.connected);
@@ -253,6 +284,73 @@ class SharedPreferencesSyncService extends ChangeNotifier
       'preferences': sorted,
     });
   }
+
+  Map<String, dynamic> _decodeSnapshot(String plainText) {
+    final decoded = jsonDecode(plainText);
+    if (decoded is! Map<String, dynamic> ||
+        decoded['format'] != _format ||
+        decoded['version'] != _version ||
+        decoded['preferences'] is! Map) {
+      throw const FormatException(
+        'Snapshot local de sincroniza\u00e7\u00e3o inv\u00e1lido.',
+      );
+    }
+    return Map<String, dynamic>.from(decoded['preferences'] as Map);
+  }
+
+  /// Merge preferences changed independently on the two computers. If both
+  /// sides changed one preference to different values, retain the existing
+  /// conflict flow instead of silently discarding either edit.
+  String? _mergeSnapshots({
+    required String baselineText,
+    required String localText,
+    required String remoteText,
+  }) {
+    final baseline = _decodeSnapshot(baselineText);
+    final local = _decodeSnapshot(localText);
+    final remote = _decodeSnapshot(remoteText);
+    final keys = <String>{...baseline.keys, ...local.keys, ...remote.keys};
+    final merged = <String, Object?>{};
+
+    for (final key in keys) {
+      final hadBaseline = baseline.containsKey(key);
+      final hasLocal = local.containsKey(key);
+      final hasRemote = remote.containsKey(key);
+      final baselineValue = baseline[key];
+      final localValue = local[key];
+      final remoteValue = remote[key];
+      final changedLocally =
+          hasLocal != hadBaseline ||
+          (hasLocal && !_sameSnapshotValue(localValue, baselineValue));
+      final changedRemotely =
+          hasRemote != hadBaseline ||
+          (hasRemote && !_sameSnapshotValue(remoteValue, baselineValue));
+
+      if (changedLocally && changedRemotely) {
+        if (hasLocal != hasRemote ||
+            (hasLocal && !_sameSnapshotValue(localValue, remoteValue))) {
+          return null;
+        }
+        if (hasLocal) merged[key] = localValue;
+      } else if (changedLocally) {
+        if (hasLocal) merged[key] = localValue;
+      } else if (hasRemote) {
+        merged[key] = remoteValue;
+      }
+    }
+
+    final sorted = Map<String, Object?>.fromEntries(
+      merged.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
+    );
+    return jsonEncode({
+      'format': _format,
+      'version': _version,
+      'preferences': sorted,
+    });
+  }
+
+  bool _sameSnapshotValue(Object? a, Object? b) =>
+      jsonEncode(a) == jsonEncode(b);
 
   Future<void> _applyPreferences(Map<String, dynamic> values) async {
     final prefs = await SharedPreferences.getInstance();
