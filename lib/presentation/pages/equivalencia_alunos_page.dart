@@ -418,6 +418,26 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
       .trim()
       .replaceAll(RegExp(r'\s+'), '-');
 
+  Future<void> _removeCurriculumSubject(
+    String curriculumId,
+    _Subject subject,
+  ) async {
+    final index = _curricula.indexWhere((item) => item.id == curriculumId);
+    if (index < 0) return;
+    final curriculum = _curricula[index];
+    final key = _subjectCatalogKey(subject);
+    final updated = _Curriculum(
+      id: curriculum.id,
+      course: curriculum.course,
+      name: curriculum.name,
+      subjects: curriculum.subjects
+          .where((item) => _subjectCatalogKey(item) != key)
+          .toList(),
+    );
+    setState(() => _curricula[index] = updated);
+    await _persist();
+  }
+
   Future<void> _newCase({_Case? seed}) async {
     final draft =
         seed ??
@@ -434,7 +454,11 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
     final result = await showDialog<_Case>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _CaseDialog(value: draft, curricula: _curricula),
+      builder: (_) => _CaseDialog(
+        value: draft,
+        curricula: _curricula,
+        removeCurriculumSubject: _removeCurriculumSubject,
+      ),
     );
     if (result == null || !mounted) return;
     setState(() {
@@ -1323,9 +1347,15 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
 }
 
 class _CaseDialog extends StatefulWidget {
-  const _CaseDialog({required this.value, required this.curricula});
+  const _CaseDialog({
+    required this.value,
+    required this.curricula,
+    required this.removeCurriculumSubject,
+  });
   final _Case value;
   final List<_Curriculum> curricula;
+  final Future<void> Function(String curriculumId, _Subject subject)
+  removeCurriculumSubject;
   @override
   State<_CaseDialog> createState() => _CaseDialogState();
 }
@@ -1370,6 +1400,13 @@ class _CaseDialogState extends State<_CaseDialog> {
               ?.subjects,
         ]),
         priorCatalog: _priorCatalog,
+        removeCurrentSubject: (subject) async {
+          final key = _subjectCatalogKey(subject);
+          _currentCatalog.removeWhere(
+            (item) => _subjectCatalogKey(item) == key,
+          );
+          await widget.removeCurriculumSubject(_current, subject);
+        },
       ),
     );
     if (value != null)
@@ -1703,9 +1740,11 @@ class _BlockDialog extends StatefulWidget {
     this.value,
     required this.currentCatalog,
     required this.priorCatalog,
+    required this.removeCurrentSubject,
   });
   final _Block? value;
   final List<_Subject> currentCatalog, priorCatalog;
+  final Future<void> Function(_Subject subject) removeCurrentSubject;
   @override
   State<_BlockDialog> createState() => _BlockDialogState();
 }
@@ -1742,7 +1781,13 @@ class _BlockDialogState extends State<_BlockDialog> {
     final catalog = currentSide ? widget.currentCatalog : widget.priorCatalog;
     final selected = await showDialog<List<_Subject>>(
       context: context,
-      builder: (_) => _SubjectPickerDialog(catalog: catalog, selected: list),
+      builder: (_) => _SubjectPickerDialog(
+        catalog: catalog,
+        selected: list,
+        onRemoveFromCurriculum: currentSide
+            ? widget.removeCurrentSubject
+            : null,
+      ),
     );
     if (selected != null)
       setState(
@@ -2063,11 +2108,13 @@ class _SubjectPickerDialog extends StatefulWidget {
   const _SubjectPickerDialog({
     required this.catalog,
     required this.selected,
+    this.onRemoveFromCurriculum,
     this.title = 'Alocar disciplinas ao bloco',
     this.applyLabel = 'Aplicar ao bloco',
     this.emptyMessage = 'Nenhuma disciplina disponível no catálogo.',
   });
   final List<_Subject> catalog, selected;
+  final Future<void> Function(_Subject subject)? onRemoveFromCurriculum;
   final String title, applyLabel, emptyMessage;
 
   @override
@@ -2076,8 +2123,39 @@ class _SubjectPickerDialog extends StatefulWidget {
 
 class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
   late final Set<String> _selected = widget.selected.map(_key).toSet();
+  late final List<_Subject> _catalog = [...widget.catalog];
   String _key(_Subject s) =>
       '${s.code.trim().toLowerCase()}|${s.name.trim().toLowerCase()}';
+
+  Future<void> _removeFromCurriculum(_Subject subject) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remover disciplina do currículo?'),
+        content: Text(
+          '“${subject.name}” será removida do currículo e não aparecerá mais no catálogo de destino.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remover'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await widget.onRemoveFromCurriculum?.call(subject);
+    if (!mounted) return;
+    setState(() {
+      final key = _key(subject);
+      _catalog.removeWhere((item) => _key(item) == key);
+      _selected.remove(key);
+    });
+  }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -2085,12 +2163,12 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
     content: SizedBox(
       width: 620,
       height: 480,
-      child: widget.catalog.isEmpty
+      child: _catalog.isEmpty
           ? Center(child: Text(widget.emptyMessage))
           : ListView.builder(
-              itemCount: widget.catalog.length,
+              itemCount: _catalog.length,
               itemBuilder: (_, i) {
-                final subject = widget.catalog[i];
+                final subject = _catalog[i];
                 final key = _key(subject);
                 return CheckboxListTile(
                   value: _selected.contains(key),
@@ -2100,6 +2178,13 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
                   subtitle: Text(
                     '${subject.theoretical} h teóricas + ${subject.practical} h práticas = ${subject.hours} h',
                   ),
+                  secondary: widget.onRemoveFromCurriculum == null
+                      ? null
+                      : IconButton(
+                          tooltip: 'Remover disciplina do currículo',
+                          onPressed: () => _removeFromCurriculum(subject),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
                   onChanged: (checked) => setState(() {
                     if (checked == true) {
                       _selected.add(key);
@@ -2119,7 +2204,7 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
       FilledButton(
         onPressed: () => Navigator.pop(
           context,
-          widget.catalog.where((s) => _selected.contains(_key(s))).toList(),
+          _catalog.where((s) => _selected.contains(_key(s))).toList(),
         ),
         child: Text(widget.applyLabel),
       ),
