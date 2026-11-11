@@ -53,15 +53,19 @@ class AjustaHorariosPdfService {
         0,
         (sum, entries) => sum + entries.map((entry) => entry.id).toSet().length,
       );
-      final legendKeys = <String>{
-        for (final entries in schedule.values)
-          for (final entry in entries) _scheduleColorKey(entry),
-        for (final entry in legendEntries) _scheduleColorKey(entry),
-      };
-      final legendRows = (legendKeys.length + 1) ~/ 2;
-      // Legend table rows can grow when course or teacher names wrap.
-      // Reserve enough space so its bordered container is moved as a whole.
-      final legendSpaceRequired = 48 + legendRows * 32.0;
+      final activePeriods = <int>{};
+      for (final entry in schedule.entries) {
+        if (entry.value.isEmpty) continue;
+        final slot = int.tryParse(entry.key.split(':').last);
+        final period = _periodForSlot(slot ?? 0);
+        if (period != null) activePeriods.add(period);
+      }
+      final visibleSlots = activePeriods.isNotEmpty && activePeriods.length <= 2
+          ? [
+              for (var slot = 1; slot <= horarioFaixas.length; slot++)
+                if (activePeriods.contains(_periodForSlot(slot))) slot,
+            ]
+          : [for (var slot = 1; slot <= horarioFaixas.length; slot++) slot];
       document.addPage(
         pw.MultiPage(
           pageTheme: pw.PageTheme(
@@ -109,9 +113,9 @@ class AjustaHorariosPdfService {
                     for (final day in horarioDias) _headerCell(day, textColor),
                   ],
                 ),
-                for (var slot = 1; slot <= horarioFaixas.length; slot++) ...[
+                for (var index = 0; index < visibleSlots.length; index++) ...[
                   _scheduleRow(
-                    slot: slot,
+                    slot: visibleSlots[index],
                     schedule: schedule,
                     disciplineColors: disciplineColors,
                     cellColorStops: cellColorStops,
@@ -120,26 +124,29 @@ class AjustaHorariosPdfService {
                     paletteOpacity: paletteOpacity,
                     textColor: textColor,
                   ),
-                  if (slot == 6 || slot == 12)
+                  if (index + 1 < visibleSlots.length &&
+                      _periodForSlot(visibleSlots[index]) !=
+                          _periodForSlot(visibleSlots[index + 1]))
                     _scheduleGapRow(
-                      afterSlot: slot,
+                      afterSlot: visibleSlots[index],
                       panelBackground: panelBackground,
                       alternateRow: alternateRow,
                     ),
                 ],
               ],
             ),
-            pw.NewPage(freeSpace: legendSpaceRequired),
             pw.SizedBox(height: 8),
-            _disciplineLegend(
-              schedule,
-              legendEntries,
-              panelBackground,
-              gridColor,
-              textColor,
-              secondaryColor,
-              headerBackground,
-              teacherLegend,
+            pw.Inseparable(
+              child: _disciplineLegend(
+                schedule,
+                legendEntries,
+                panelBackground,
+                gridColor,
+                textColor,
+                secondaryColor,
+                headerBackground,
+                teacherLegend,
+              ),
             ),
             pw.SizedBox(height: 6),
             pw.Row(
@@ -549,6 +556,13 @@ class AjustaHorariosPdfService {
         for (var column = 0; column < 6; column++) pw.Container(height: 8),
       ],
     );
+  }
+
+  int? _periodForSlot(int slot) {
+    if (slot >= 1 && slot <= 6) return 0;
+    if (slot >= 7 && slot <= 12) return 1;
+    if (slot >= 13 && slot <= 16) return 2;
+    return null;
   }
 
   String _scheduleColorKey(HorarioDisciplina entry) =>
