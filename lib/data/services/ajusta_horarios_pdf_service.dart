@@ -53,8 +53,17 @@ class AjustaHorariosPdfService {
         0,
         (sum, entries) => sum + entries.map((entry) => entry.id).toSet().length,
       );
+      final legendKeys = <String>{
+        for (final entries in schedule.values)
+          for (final entry in entries) _scheduleColorKey(entry),
+        for (final entry in legendEntries) _scheduleColorKey(entry),
+      };
+      final legendRows = (legendKeys.length + 1) ~/ 2;
+      // Legend table rows can grow when course or teacher names wrap.
+      // Reserve enough space so its bordered container is moved as a whole.
+      final legendSpaceRequired = 48 + legendRows * 32.0;
       document.addPage(
-        pw.Page(
+        pw.MultiPage(
           pageTheme: pw.PageTheme(
             pageFormat: PdfPageFormat.a4.landscape,
             orientation: pw.PageOrientation.landscape,
@@ -64,104 +73,94 @@ class AjustaHorariosPdfService {
               child: pw.Container(color: pageBackground),
             ),
           ),
-          build: (context) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          header: (context) => pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      title,
-                      style: pw.TextStyle(
-                        color: textColor,
-                        fontSize: 15,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  pw.Text(
-                    term,
-                    style: pw.TextStyle(color: secondaryColor, fontSize: 8.5),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 8),
               pw.Expanded(
-                child: pw.Table(
-                  border: pw.TableBorder.all(color: gridColor, width: 0.55),
-                  columnWidths: {
-                    0: const pw.FixedColumnWidth(102),
-                    for (var day = 1; day <= 5; day++)
-                      day: const pw.FlexColumnWidth(1),
-                  },
-                  children: [
-                    pw.TableRow(
-                      repeat: true,
-                      decoration: pw.BoxDecoration(color: headerBackground),
-                      children: [
-                        _headerCell('Faixa horária', textColor),
-                        for (final day in horarioDias)
-                          _headerCell(day, textColor),
-                      ],
-                    ),
-                    for (
-                      var slot = 1;
-                      slot <= horarioFaixas.length;
-                      slot++
-                    ) ...[
-                      _scheduleRow(
-                        slot: slot,
-                        schedule: schedule,
-                        disciplineColors: disciplineColors,
-                        cellColorStops: cellColorStops,
-                        panelBackground: panelBackground,
-                        alternateRow: alternateRow,
-                        paletteOpacity: paletteOpacity,
-                        textColor: textColor,
-                      ),
-                      if (slot == 6 || slot == 12)
-                        _scheduleGapRow(
-                          afterSlot: slot,
-                          panelBackground: panelBackground,
-                          alternateRow: alternateRow,
-                        ),
-                    ],
-                  ],
+                child: pw.Text(
+                  title,
+                  style: pw.TextStyle(
+                    color: textColor,
+                    fontSize: 15,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ),
-              pw.SizedBox(height: 8),
-              _disciplineLegend(
-                schedule,
-                legendEntries,
-                panelBackground,
-                gridColor,
-                textColor,
-                secondaryColor,
-                headerBackground,
-                teacherLegend,
-              ),
-              pw.SizedBox(height: 6),
-              pw.Row(
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      'Cada cor identifica uma disciplina e sua turma. Turmas simultâneas aparecem separadas por vírgula.',
-                      style: pw.TextStyle(color: secondaryColor, fontSize: 7.2),
-                    ),
-                  ),
-                  pw.Text(
-                    '$weeklyLessonCount aulas por semana',
-                    style: pw.TextStyle(
-                      color: textColor,
-                      fontSize: 7.5,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                ],
+              pw.Text(
+                term,
+                style: pw.TextStyle(color: secondaryColor, fontSize: 8.5),
               ),
             ],
           ),
+          build: (context) => [
+            pw.Table(
+              border: pw.TableBorder.all(color: gridColor, width: 0.55),
+              columnWidths: {
+                0: const pw.FixedColumnWidth(102),
+                for (var day = 1; day <= 5; day++)
+                  day: const pw.FlexColumnWidth(1),
+              },
+              children: [
+                pw.TableRow(
+                  repeat: true,
+                  decoration: pw.BoxDecoration(color: headerBackground),
+                  children: [
+                    _headerCell('Faixa hor\u00e1ria', textColor),
+                    for (final day in horarioDias) _headerCell(day, textColor),
+                  ],
+                ),
+                for (var slot = 1; slot <= horarioFaixas.length; slot++) ...[
+                  _scheduleRow(
+                    slot: slot,
+                    schedule: schedule,
+                    disciplineColors: disciplineColors,
+                    cellColorStops: cellColorStops,
+                    panelBackground: panelBackground,
+                    alternateRow: alternateRow,
+                    paletteOpacity: paletteOpacity,
+                    textColor: textColor,
+                  ),
+                  if (slot == 6 || slot == 12)
+                    _scheduleGapRow(
+                      afterSlot: slot,
+                      panelBackground: panelBackground,
+                      alternateRow: alternateRow,
+                    ),
+                ],
+              ],
+            ),
+            pw.NewPage(freeSpace: legendSpaceRequired),
+            pw.SizedBox(height: 8),
+            _disciplineLegend(
+              schedule,
+              legendEntries,
+              panelBackground,
+              gridColor,
+              textColor,
+              secondaryColor,
+              headerBackground,
+              teacherLegend,
+            ),
+            pw.SizedBox(height: 6),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pw.Text(
+                    'Cada cor identifica uma disciplina e sua turma. Turmas simult\u00e2neas aparecem separadas por v\u00edrgula.',
+                    style: pw.TextStyle(color: secondaryColor, fontSize: 7.2),
+                  ),
+                ),
+                pw.Text(
+                  '$weeklyLessonCount aulas por semana',
+                  style: pw.TextStyle(
+                    color: textColor,
+                    fontSize: 7.5,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       );
     }
@@ -169,7 +168,7 @@ class AjustaHorariosPdfService {
   }
 
   pw.Widget _headerCell(String value, PdfColor textColor) => pw.Container(
-    height: 25,
+    height: 21,
     alignment: pw.Alignment.center,
     padding: const pw.EdgeInsets.symmetric(horizontal: 4),
     child: pw.Text(
@@ -240,7 +239,7 @@ class AjustaHorariosPdfService {
         textAlign: pw.TextAlign.center,
         style: pw.TextStyle(
           color: textColor,
-          fontSize: 9.75,
+          fontSize: 8.5,
           fontWeight: pw.FontWeight.bold,
         ),
       ),
@@ -299,8 +298,8 @@ class AjustaHorariosPdfService {
     Map<String, List<HorarioDisciplina>> schedule,
   ) {
     final cellWidth = (PdfPageFormat.a4.landscape.width - 40 - 102) / 5;
-    final charsPerLine = (cellWidth / (9.75 * 0.52)).floor().clamp(15, 80);
-    var height = 24.0;
+    final charsPerLine = (cellWidth / (8.5 * 0.52)).floor().clamp(15, 80);
+    var height = 19.0;
     for (var weekday = 1; weekday <= 5; weekday++) {
       final entries = <String, HorarioDisciplina>{
         for (final entry in schedule['$weekday:$slot'] ?? const [])
@@ -308,7 +307,7 @@ class AjustaHorariosPdfService {
       }.values.toList();
       final label = entries.map((entry) => entry.timetableLabel).join(', ');
       final lines = (label.length / charsPerLine).ceil().clamp(1, 3);
-      final neededHeight = (lines * 11.5 + 5).clamp(24.0, 40.0);
+      final neededHeight = (lines * 10.25 + 3).clamp(19.0, 34.0);
       if (neededHeight > height) height = neededHeight;
     }
     return height;
@@ -547,7 +546,7 @@ class AjustaHorariosPdfService {
     return pw.TableRow(
       decoration: pw.BoxDecoration(color: background),
       children: [
-        for (var column = 0; column < 6; column++) pw.Container(height: 14),
+        for (var column = 0; column < 6; column++) pw.Container(height: 8),
       ],
     );
   }
