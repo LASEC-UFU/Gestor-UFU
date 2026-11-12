@@ -37,6 +37,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local source documents and temporary PDF previews
+/Associado 3 para 4/
+/tmp/
+
 # Symbolication related
 app.*.symbols
 
