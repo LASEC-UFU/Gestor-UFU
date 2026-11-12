@@ -1,11 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/utils/date_calculator.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/repositories/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
+  static const _termKey = 'ajusta_horarios_periodo_letivo';
+  static const _termsKey = 'ajusta_horarios_periodos_letivos';
   final IConfigRepository _repo;
   final _uuid = const Uuid();
 
@@ -15,6 +19,8 @@ class ConfigController extends ChangeNotifier {
   CourseConfig? _current;
   bool _loading = false;
   String? _error;
+  String _activeTerm = AjustaHorariosStore.defaultTerm;
+  List<String> _terms = [AjustaHorariosStore.defaultTerm];
   final Set<String> _selectedActivityIds = {};
 
   List<CourseConfig> get configs => _configs;
@@ -23,18 +29,79 @@ class ConfigController extends ChangeNotifier {
   String? get error => _error;
   Set<String> get selectedActivityIds => _selectedActivityIds;
   bool get hasSelection => _selectedActivityIds.isNotEmpty;
+  String get activeTerm => _activeTerm;
+  List<String> get terms => List.unmodifiable(_terms);
 
   Future<void> loadAll() async {
     _loading = true;
     notifyListeners();
     try {
-      _configs = await _repo.getAll();
+      final prefs = await SharedPreferences.getInstance();
+      _terms = (prefs.getStringList(_termsKey) ?? const <String>[])
+          .map((term) => term.trim())
+          .where((term) => term.isNotEmpty)
+          .toSet()
+          .toList();
+      if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
+      final storedTerm = prefs.getString(_termKey)?.trim();
+      _activeTerm = storedTerm != null && _terms.contains(storedTerm)
+          ? storedTerm
+          : _terms.first;
+      await prefs.setStringList(_termsKey, _terms);
+      await prefs.setString(_termKey, _activeTerm);
+
+      final allConfigs = await _repo.getAll();
+      final normalized = <CourseConfig>[];
+      for (final config in allConfigs) {
+        if (config.academicTerm == null ||
+            config.academicTerm!.trim().isEmpty) {
+          final migrated = config.copyWith(academicTerm: _activeTerm);
+          await _repo.save(migrated);
+          normalized.add(migrated);
+        } else {
+          normalized.add(config);
+        }
+      }
+      _configs =
+          normalized
+              .where((config) => config.academicTerm == _activeTerm)
+              .toList()
+            ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       _error = null;
     } catch (e) {
       _error = e.toString();
     }
     _loading = false;
     notifyListeners();
+  }
+
+  Future<void> setActiveTerm(String term) async {
+    if (!_terms.contains(term) || term == _activeTerm) return;
+    final prefs = await SharedPreferences.getInstance();
+    _activeTerm = term;
+    await prefs.setString(_termKey, term);
+    notifyListeners();
+    await loadAll();
+  }
+
+  Future<void> createTerm(String name) async {
+    final term = name.trim();
+    if (term.isEmpty) return;
+    final existing = _terms.cast<String?>().firstWhere(
+      (item) => item?.toLowerCase() == term.toLowerCase(),
+      orElse: () => null,
+    );
+    if (existing != null) {
+      await setActiveTerm(existing);
+      return;
+    }
+    _terms = [..._terms, term];
+    _activeTerm = term;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_termsKey, _terms);
+    await prefs.setString(_termKey, term);
+    notifyListeners();
+    await loadAll();
   }
 
   Future<void> loadById(String id) async {
@@ -55,6 +122,7 @@ class ConfigController extends ChangeNotifier {
     final config = CourseConfig(
       id: _uuid.v4(),
       name: name,
+      academicTerm: _activeTerm,
       semesterStartDate: now,
       createdAt: now,
       updatedAt: now,
@@ -65,7 +133,11 @@ class ConfigController extends ChangeNotifier {
   }
 
   Future<void> saveNewConfig(CourseConfig config) async {
-    await _repo.save(config);
+    await _repo.save(
+      config.academicTerm == null || config.academicTerm!.trim().isEmpty
+          ? config.copyWith(academicTerm: _activeTerm)
+          : config,
+    );
     await loadAll();
   }
 

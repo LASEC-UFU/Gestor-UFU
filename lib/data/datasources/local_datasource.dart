@@ -196,7 +196,9 @@ class LocalDatasource {
   }
 
   String _configurationFingerprint(CourseConfig config) {
-    final jsonMap = config.toJson()..remove('updatedAt');
+    final jsonMap = config.toJson()
+      ..remove('updatedAt')
+      ..remove('academicTerm');
     return json.encode(jsonMap);
   }
 }

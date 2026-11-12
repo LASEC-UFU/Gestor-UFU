@@ -3,6 +3,7 @@ const _sentinel = Object();
 class CourseConfig {
   final String id;
   final String name;
+  final String? academicTerm;
   final int? moodleCourseId;
   final String? moodleCourseName;
   final DateTime semesterStartDate;
@@ -18,6 +19,7 @@ class CourseConfig {
   CourseConfig({
     required this.id,
     required this.name,
+    this.academicTerm,
     this.moodleCourseId,
     this.moodleCourseName,
     required this.semesterStartDate,
@@ -30,6 +32,7 @@ class CourseConfig {
 
   CourseConfig copyWith({
     String? name,
+    String? academicTerm,
     Object? moodleCourseId = _sentinel,
     Object? moodleCourseName = _sentinel,
     DateTime? semesterStartDate,
@@ -41,6 +44,7 @@ class CourseConfig {
     return CourseConfig(
       id: id,
       name: name ?? this.name,
+      academicTerm: academicTerm ?? this.academicTerm,
       moodleCourseId: moodleCourseId == _sentinel
           ? this.moodleCourseId
           : moodleCourseId as int?,
@@ -59,6 +63,7 @@ class CourseConfig {
   Map<String, dynamic> toJson() => {
     'id': id,
     'name': name,
+    'academicTerm': academicTerm,
     'moodleCourseId': moodleCourseId,
     'moodleCourseName': moodleCourseName,
     'semesterStartDate': semesterStartDate.toIso8601String(),
@@ -74,6 +79,7 @@ class CourseConfig {
   factory CourseConfig.fromJson(Map<String, dynamic> json) => CourseConfig(
     id: json['id'] as String,
     name: json['name'] as String,
+    academicTerm: json['academicTerm'] as String?,
     moodleCourseId: json['moodleCourseId'] as int?,
     moodleCourseName: json['moodleCourseName'] as String?,
     semesterStartDate: DateTime.parse(json['semesterStartDate'] as String),

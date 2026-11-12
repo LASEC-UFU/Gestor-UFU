@@ -66,6 +66,7 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             children: [
               _buildAppBar(context, authCtrl),
+              _buildAcademicTerm(configCtrl),
               if (_importStatus != null) _buildImportStatusBanner(),
               Expanded(
                 child: configCtrl.loading
@@ -172,6 +173,88 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
+  }
+
+  Widget _buildAcademicTerm(ConfigController controller) => Padding(
+    padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
+    child: Row(
+      children: [
+        Text(
+          'Período letivo',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 330,
+          child: DropdownButtonFormField<String>(
+            key: ValueKey('config-moodle-period-${controller.activeTerm}'),
+            initialValue: controller.terms.contains(controller.activeTerm)
+                ? controller.activeTerm
+                : null,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              isDense: true,
+              prefixIcon: Icon(Icons.date_range_rounded),
+            ),
+            items: controller.terms
+                .map(
+                  (term) => DropdownMenuItem(
+                    value: term,
+                    child: Text(term, overflow: TextOverflow.ellipsis),
+                  ),
+                )
+                .toList(),
+            onChanged: (term) {
+              if (term != null) controller.setActiveTerm(term);
+            },
+          ),
+        ),
+        const SizedBox(width: 6),
+        IconButton.filledTonal(
+          tooltip: 'Criar período letivo',
+          onPressed: () => _showCreateTermDialog(controller),
+          icon: const Icon(Icons.add_rounded),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          'As configurações e novas disciplinas ficam neste período.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _showCreateTermDialog(ConfigController controller) async {
+    final nameController = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Criar período letivo'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nome do período letivo',
+            hintText: 'Ex.: 1º semestre de 2027',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, nameController.text),
+            child: const Text('Criar e usar'),
+          ),
+        ],
+      ),
+    );
+    nameController.dispose();
+    if (name?.trim().isNotEmpty == true) {
+      await controller.createTerm(name!.trim());
+    }
   }
 
   Widget _buildImportStatusBanner() {

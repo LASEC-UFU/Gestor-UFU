@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
@@ -10,6 +11,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/core/utils/text_encoding.dart';
@@ -17,6 +19,7 @@ import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/data/services/diary_automation_service.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
@@ -24,6 +27,10 @@ import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
+const _diaryPeriodsKey = 'ajusta_horarios_periodos_letivos';
+const _activeDiaryPeriodKey = 'ajusta_horarios_periodo_letivo';
+const _diaryPeriodDataPrefix = 'preenche_diarios_period_data_v1_';
+const _diaryDataMigrationKey = 'preenche_diarios_period_data_migrated_v1';
 const _portalCredentialsKey = 'portal_docente_credentials_v1';
 const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
 const _portalAddressKey = 'portal_docente_url';
@@ -40,6 +47,11 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   final Map<String, String> _entries = {};
   final List<String> _logs = [];
   final _automation = DiaryAutomationService();
+  final _uuid = const Uuid();
+  List<String> _terms = [AjustaHorariosStore.defaultTerm];
+  String _term = AjustaHorariosStore.defaultTerm;
+  List<_SavedDiary> _savedDiaries = [];
+  String? _selectedDiaryId;
   String? _selectedSnapshotId;
   List<MoodleConfigSnapshot> _moodleSnapshots = [];
   String? _sourceLabel;
@@ -94,24 +106,30 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   Future<void> _loadSavedEntries() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_entriesStorageKey);
-      if (raw != null) {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          final parsed = _validateMap(decoded);
-          _entries
-            ..clear()
-            ..addAll(_sortMap(parsed.valid));
-          if (parsed.errors.isNotEmpty) {
-            _log(
-              '${parsed.errors.length} registro(s) inválido(s) no armazenamento foram ignorados.',
-            );
-          }
-          _sourceLabel = 'Dados locais salvos';
-        }
+      _terms = (prefs.getStringList(_diaryPeriodsKey) ?? const <String>[])
+          .map((term) => term.trim())
+          .where((term) => term.isNotEmpty)
+          .toSet()
+          .toList();
+      if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
+      final savedTerm = prefs.getString(_activeDiaryPeriodKey)?.trim();
+      _term = savedTerm != null && _terms.contains(savedTerm)
+          ? savedTerm
+          : _terms.first;
+      if (savedTerm == null || !_terms.contains(savedTerm)) {
+        await prefs.setString(_activeDiaryPeriodKey, _term);
       }
+      await prefs.setStringList(_diaryPeriodsKey, _terms);
+      final migrateLegacy = prefs.getBool(_diaryDataMigrationKey) != true;
+      await _loadPeriodWorkspace(
+        _term,
+        prefs: prefs,
+        allowLegacy: migrateLegacy,
+      );
+      await prefs.setBool(_diaryDataMigrationKey, true);
+      if (migrateLegacy) await _persist();
     } catch (error) {
-      _log('Não foi possível carregar os dados locais: $error');
+      _log('Failed loading saved diary data: $error');
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -247,9 +265,398 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     password.dispose();
   }
 
+  String _periodDataKey(String term) {
+    final token = base64Url
+        .encode(utf8.encode(term.trim()))
+        .replaceAll('=', '');
+    return '$_diaryPeriodDataPrefix$token';
+  }
+
+  Future<void> _loadPeriodWorkspace(
+    String term, {
+    required SharedPreferences prefs,
+    bool allowLegacy = false,
+  }) async {
+    Map<String, dynamic>? data;
+    final raw = prefs.getString(_periodDataKey(term));
+    if (raw != null) {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) data = Map<String, dynamic>.from(decoded);
+    }
+    if (data == null && allowLegacy) {
+      final legacy = prefs.getString(_entriesStorageKey);
+      if (legacy != null) {
+        final decoded = jsonDecode(legacy);
+        if (decoded is Map) {
+          data = {
+            'draftEntries': decoded,
+            'sourceLabel': 'Dados locais salvos',
+          };
+        }
+      }
+    }
+
+    final diaries = <_SavedDiary>[];
+    final rawDiaries = data?['savedDiaries'];
+    if (rawDiaries is List) {
+      for (final item in rawDiaries.whereType<Map>()) {
+        try {
+          diaries.add(_SavedDiary.fromJson(Map<String, dynamic>.from(item)));
+        } catch (_) {
+          // Keep usable diaries when one stored record is malformed.
+        }
+      }
+    }
+    final rawEntries = data?['draftEntries'];
+    final validated = rawEntries is Map
+        ? _validateMap(rawEntries)
+        : _validateMap(const <String, String>{});
+    final selectedId = data?['selectedDiaryId'] as String?;
+    if (!mounted) return;
+    setState(() {
+      _entries
+        ..clear()
+        ..addAll(_sortMap(validated.valid));
+      _sourceLabel = data?['sourceLabel'] as String?;
+      _savedDiaries = diaries;
+      _selectedDiaryId = diaries.any((diary) => diary.id == selectedId)
+          ? selectedId
+          : null;
+    });
+  }
+
   Future<void> _persist() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_entriesStorageKey, jsonEncode(_entries));
+    if (_selectedDiaryId != null) {
+      final index = _savedDiaries.indexWhere(
+        (diary) => diary.id == _selectedDiaryId,
+      );
+      if (index >= 0) {
+        _savedDiaries[index] = _savedDiaries[index].copyWith(
+          entries: _entries,
+          sourceLabel: _sourceLabel,
+        );
+      }
+    }
+    await prefs.setString(
+      _periodDataKey(_term),
+      jsonEncode({
+        'draftEntries': _entries,
+        'sourceLabel': _sourceLabel,
+        'selectedDiaryId': _selectedDiaryId,
+        'savedDiaries': _savedDiaries.map((diary) => diary.toJson()).toList(),
+      }),
+    );
+  }
+
+  Future<void> _changeTerm(String? term) async {
+    if (term == null || term == _term) return;
+    await _persist();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeDiaryPeriodKey, term);
+    setState(() => _term = term);
+    await _loadPeriodWorkspace(term, prefs: prefs);
+    _log('Periodo letivo alterado para $term.');
+  }
+
+  Future<void> _createTerm() async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Criar periodo letivo'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Nome do periodo letivo',
+            hintText: 'Ex.: 1o semestre de 2027',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Criar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final name = value?.trim() ?? '';
+    if (name.isEmpty) return;
+    final existing = _terms.cast<String?>().firstWhere(
+      (term) => term?.toLowerCase() == name.toLowerCase(),
+      orElse: () => null,
+    );
+    if (existing != null) {
+      await _changeTerm(existing);
+      return;
+    }
+    await _persist();
+    final prefs = await SharedPreferences.getInstance();
+    final updated = [..._terms, name];
+    await prefs.setStringList(_diaryPeriodsKey, updated);
+    await prefs.setString(_activeDiaryPeriodKey, name);
+    setState(() {
+      _terms = updated;
+      _term = name;
+      _entries.clear();
+      _sourceLabel = null;
+      _selectedDiaryId = null;
+      _savedDiaries = [];
+    });
+    await _persist();
+  }
+
+  Future<void> _manageTerms() async {
+    const createNew = '__create_new_academic_term__';
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Períodos letivos'),
+        content: SizedBox(
+          width: 440,
+          height: 360,
+          child: ListView.separated(
+            itemCount: _terms.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final item = _terms[index];
+              final active = item == _term;
+              return ListTile(
+                leading: Icon(
+                  active ? Icons.radio_button_checked : Icons.radio_button_off,
+                  color: active ? AppTheme.primary : AppTheme.textSecondary,
+                ),
+                title: Text(item),
+                subtitle: active ? const Text('Em uso') : null,
+                onTap: () => Navigator.pop(dialogContext, item),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, createNew),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Novo período letivo'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Fechar'),
+          ),
+        ],
+      ),
+    );
+    if (selected == null) return;
+    if (selected == createNew) {
+      await _createTerm();
+    } else {
+      await _changeTerm(selected);
+    }
+  }
+
+  Future<void> _selectSavedDiary(String? id) async {
+    if (id == null || id == _selectedDiaryId) return;
+    await _persist();
+    final diary = _savedDiaries.firstWhere((item) => item.id == id);
+    setState(() {
+      _selectedDiaryId = diary.id;
+      _entries
+        ..clear()
+        ..addAll(_sortMap(diary.entries));
+      _sourceLabel = diary.sourceLabel ?? '$_term - ${diary.name}';
+    });
+    await _persist();
+  }
+
+  Future<void> _saveDiary({bool createNew = false}) async {
+    if (_entries.isEmpty) return;
+    if (!createNew && _selectedDiaryId != null) {
+      await _persist();
+      final name = _savedDiaries
+          .firstWhere((diary) => diary.id == _selectedDiaryId)
+          .name;
+      _log('Diario salvo: $name.');
+      return;
+    }
+    final controller = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(createNew ? 'Salvar outro diario' : 'Salvar diario'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Disciplina / nome do diario',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final trimmedName = name?.trim() ?? '';
+    if (trimmedName.isEmpty) return;
+    final diary = _SavedDiary(
+      id: _uuid.v4(),
+      name: trimmedName,
+      entries: Map<String, String>.from(_entries),
+      sourceLabel: _sourceLabel,
+    );
+    setState(() {
+      _savedDiaries = [..._savedDiaries, diary];
+      _selectedDiaryId = diary.id;
+    });
+    await _persist();
+    _log('Diario "$trimmedName" salvo no periodo $_term.');
+  }
+
+  Future<List<_SavedDiary>> _loadDiariesForTerm(String term) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_periodDataKey(term));
+    if (raw == null) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map || decoded['savedDiaries'] is! List) return [];
+      return (decoded['savedDiaries'] as List)
+          .whereType<Map>()
+          .map((item) => _SavedDiary.fromJson(Map<String, dynamic>.from(item)))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _copyDiary() async {
+    await _persist();
+    final sourceTerm = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Copiar diário de qual período?'),
+        content: SizedBox(
+          width: 440,
+          height: 360,
+          child: ListView.separated(
+            itemCount: _terms.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final term = _terms[index];
+              return ListTile(
+                leading: const Icon(Icons.date_range_rounded),
+                title: Text(term),
+                subtitle: term == _term ? const Text('Período atual') : null,
+                onTap: () => Navigator.pop(dialogContext, term),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (sourceTerm == null) return;
+    final sourceDiaries = await _loadDiariesForTerm(sourceTerm);
+    if (!mounted) return;
+    if (sourceDiaries.isEmpty) {
+      await _showMessage(
+        'Nenhum diário salvo',
+        'Não há diários salvos no período $sourceTerm para copiar.',
+      );
+      return;
+    }
+    final sourceDiary = await showDialog<_SavedDiary>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Copiar de $sourceTerm'),
+        content: SizedBox(
+          width: 500,
+          height: 400,
+          child: ListView.separated(
+            itemCount: sourceDiaries.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final diary = sourceDiaries[index];
+              return ListTile(
+                leading: const Icon(Icons.menu_book_rounded),
+                title: Text(diary.name),
+                subtitle: Text('${diary.entries.length} aula(s)'),
+                onTap: () => Navigator.pop(dialogContext, diary),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (sourceDiary == null || !mounted) return;
+
+    final nameController = TextEditingController(text: sourceDiary.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Salvar cópia no período atual'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Disciplina / nome do novo diário',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, nameController.text),
+            child: const Text('Copiar'),
+          ),
+        ],
+      ),
+    );
+    nameController.dispose();
+    final targetName = name?.trim() ?? '';
+    if (targetName.isEmpty) return;
+
+    final copy = _SavedDiary(
+      id: _uuid.v4(),
+      name: targetName,
+      entries: Map<String, String>.from(sourceDiary.entries),
+      sourceLabel: 'Cópia de $sourceTerm · ${sourceDiary.name}',
+    );
+    setState(() {
+      _savedDiaries = [..._savedDiaries, copy];
+      _selectedDiaryId = copy.id;
+      _entries
+        ..clear()
+        ..addAll(_sortMap(copy.entries));
+      _sourceLabel = copy.sourceLabel;
+    });
+    await _persist();
+    _log('Diário copiado para "$targetName" no período $_term.');
   }
 
   void _log(String message) {
@@ -1214,127 +1621,207 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     if (_entries.isEmpty) return;
     final amountController = TextEditingController(text: '1');
     var unit = 'Dias';
-    var filter = 'Todas';
-    final params = await showDialog<(String, int, String)>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Ajustar datas'),
-          content: SizedBox(
-            width: 430,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: unit,
-                  decoration: const InputDecoration(labelText: 'Unidade'),
-                  items: const ['Dias', 'Meses', 'Anos']
-                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDialogState(() => unit = v);
-                  },
-                ),
-                TextField(
-                  controller: amountController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    signed: true,
-                  ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^-?\d*')),
+    var filter = 'all';
+    DateTime? startDate;
+    final selectedKeys = <String>{};
+    final params =
+        await showDialog<(String, int, String, DateTime?, Set<String>)>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('Ajustar datas'),
+              content: SizedBox(
+                width: 430,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: unit,
+                      decoration: const InputDecoration(labelText: 'Unidade'),
+                      items: const ['Dias', 'Meses', 'Anos']
+                          .map(
+                            (v) => DropdownMenuItem(value: v, child: Text(v)),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v != null) setDialogState(() => unit = v);
+                      },
+                    ),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        signed: true,
+                      ),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'^-?\d*')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Quantidade (pode ser negativa)',
+                      ),
+                    ),
+                    DropdownButtonFormField<String>(
+                      value: filter,
+                      decoration: const InputDecoration(
+                        labelText: 'Aplicar em',
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 'all', child: Text('Todas')),
+                        DropdownMenuItem(
+                          value: 'theoretical',
+                          child: Text('S\u00f3 T (Te\u00f3ricas)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'practical',
+                          child: Text('S\u00f3 P (Pr\u00e1ticas)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'selected',
+                          child: Text('Selecionadas'),
+                        ),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setDialogState(() => filter = v);
+                      },
+                    ),
+                    if (filter == 'selected') ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${selectedKeys.length} selecionada(s)',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setDialogState(
+                              () => selectedKeys.addAll(_entries.keys),
+                            ),
+                            child: const Text('Todas'),
+                          ),
+                          TextButton(
+                            onPressed: () => setDialogState(selectedKeys.clear),
+                            child: const Text('Limpar'),
+                          ),
+                        ],
+                      ),
+                      SizedBox(
+                        height: 190,
+                        child: ListView(
+                          children: _sortMap(_entries).entries.map((entry) {
+                            final isPractical = entry.key
+                                .toUpperCase()
+                                .contains('-P');
+                            return CheckboxListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              value: selectedKeys.contains(entry.key),
+                              title: Text(entry.key),
+                              subtitle: Text(
+                                entry.value,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              secondary: Text(isPractical ? 'P' : 'T'),
+                              onChanged: (checked) => setDialogState(() {
+                                if (checked == true) {
+                                  selectedKeys.add(entry.key);
+                                } else {
+                                  selectedKeys.remove(entry.key);
+                                }
+                              }),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            startDate == null
+                                ? 'A partir do início'
+                                : 'A partir de: ${_formatDate(startDate!)}',
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final dates = _entries.keys
+                                .map(_dateFromKey)
+                                .whereType<DateTime>()
+                                .toList();
+                            final selected = await showDatePicker(
+                              context: context,
+                              initialDate:
+                                  startDate ??
+                                  (dates.isEmpty
+                                      ? DateTime.now()
+                                      : dates.reduce(
+                                          (a, b) => a.isBefore(b) ? a : b,
+                                        )),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (selected != null) {
+                              setDialogState(() => startDate = selected);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_month_rounded),
+                          label: const Text('Escolher'),
+                        ),
+                        if (startDate != null)
+                          IconButton(
+                            tooltip: 'Remover data inicial',
+                            onPressed: () =>
+                                setDialogState(() => startDate = null),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                      ],
+                    ),
                   ],
-                  decoration: const InputDecoration(
-                    labelText: 'Quantidade (pode ser negativa)',
-                  ),
                 ),
-                DropdownButtonFormField<String>(
-                  value: filter,
-                  decoration: const InputDecoration(labelText: 'Aplicar em'),
-                  items: const ['Todas', 'Só T (Teóricas)', 'Só P (Práticas)']
-                      .map((v) => DropdownMenuItem(value: v, child: Text(v)))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDialogState(() => filter = v);
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final amount = int.tryParse(amountController.text);
+                    if (amount != null)
+                      Navigator.pop(context, (
+                        unit,
+                        amount,
+                        filter,
+                        startDate,
+                        selectedKeys,
+                      ));
                   },
+                  child: const Text('Aplicar'),
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final amount = int.tryParse(amountController.text);
-                if (amount != null)
-                  Navigator.pop(context, (unit, amount, filter));
-              },
-              child: const Text('Pré-visualizar'),
-            ),
-          ],
-        ),
-      ),
-    );
+        );
     amountController.dispose();
     if (params == null) return;
-    final preview = _shiftMap(_entries, params.$1, params.$2, params.$3);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Prévia do ajuste'),
-        content: SizedBox(
-          width: 540,
-          height: 420,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '${preview.changed} alterada(s) · ${preview.filtered} fora do filtro · ${preview.overwritten} chave(s) combinada(s)',
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: preview.entries.length,
-                  itemBuilder: (context, i) {
-                    final entry = preview.entries.entries.elementAt(i);
-                    return ListTile(
-                      dense: true,
-                      title: Text(entry.key),
-                      subtitle: Text(
-                        entry.value,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Aplicar ajuste'),
-          ),
-        ],
-      ),
+    final result = _shiftMap(
+      _entries,
+      params.$1,
+      params.$2,
+      params.$3,
+      params.$4,
+      params.$5,
     );
-    if (confirmed != true) return;
     setState(() {
       _entries
         ..clear()
-        ..addAll(preview.entries);
+        ..addAll(result.entries);
     });
     await _persist();
     _log(
-      'Datas ajustadas: ${preview.changed} alterada(s), ${preview.filtered} filtrada(s), ${preview.overwritten} mesclada(s).',
+      'Datas ajustadas: ${result.changed} alterada(s), ${result.filtered} filtrada(s), ${result.overwritten} mesclada(s).',
     );
   }
 
@@ -1343,6 +1830,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     String unit,
     int amount,
     String filter,
+    DateTime? startDate,
+    Set<String> selectedKeys,
   ) {
     final output = <String, String>{};
     var changed = 0;
@@ -1357,8 +1846,15 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       }
       final suffix = suffixMatch.group(1)!.trim();
       final first = suffix.isEmpty ? '' : suffix[0].toUpperCase();
-      if ((filter.startsWith('Só T') && first != 'T') ||
-          (filter.startsWith('Só P') && first != 'P')) {
+      final beforeStartDate =
+          startDate != null &&
+          DateUtils.dateOnly(date).isBefore(DateUtils.dateOnly(startDate));
+      final excludedBySelection =
+          filter == 'selected' && !selectedKeys.contains(entry.key);
+      if (beforeStartDate ||
+          excludedBySelection ||
+          (filter == 'theoretical' && first != 'T') ||
+          (filter == 'practical' && first != 'P')) {
         output[entry.key] = entry.value;
         filtered++;
         continue;
@@ -1518,8 +2014,16 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                           final left = _WorkspacePanel(
                             entryCount: _entries.length,
                             browserReady: _browserReady,
+                            term: _term,
+                            onManageTerms: _manageTerms,
+                            savedDiaries: _savedDiaries,
+                            selectedDiaryId: _selectedDiaryId,
+                            onSelectDiary: _selectSavedDiary,
+                            onSaveDiary: _saveDiary,
+                            onCreateDiary: () => _saveDiary(createNew: true),
+                            onCopyDiary: _copyDiary,
                             sourceLabel: _sourceLabel,
-                            entries: _entries,
+                            entries: _sortMap(_entries),
                             snapshots: _moodleSnapshots,
                             selectedSnapshotId: _selectedSnapshotId,
                             onSelectSnapshot: (id) => setState(() {
@@ -1688,6 +2192,14 @@ class _WorkspacePanel extends StatelessWidget {
   const _WorkspacePanel({
     required this.entryCount,
     required this.browserReady,
+    required this.term,
+    required this.onManageTerms,
+    required this.savedDiaries,
+    required this.selectedDiaryId,
+    required this.onSelectDiary,
+    required this.onSaveDiary,
+    required this.onCreateDiary,
+    required this.onCopyDiary,
     required this.sourceLabel,
     required this.entries,
     required this.snapshots,
@@ -1712,6 +2224,13 @@ class _WorkspacePanel extends StatelessWidget {
   });
   final int entryCount;
   final bool browserReady;
+  final String term;
+  final VoidCallback onManageTerms;
+  final List<_SavedDiary> savedDiaries;
+  final String? selectedDiaryId;
+  final ValueChanged<String?> onSelectDiary;
+  final VoidCallback onSaveDiary, onCreateDiary;
+  final VoidCallback onCopyDiary;
   final String? sourceLabel;
   final Map<String, String> entries;
   final List<MoodleConfigSnapshot> snapshots;
@@ -1779,6 +2298,91 @@ class _WorkspacePanel extends StatelessWidget {
                     ),
                   ),
                 ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: InkWell(
+                  onTap: onManageTerms,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    decoration: AppTheme.glassDecoration(opacity: .06),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_month_rounded,
+                          size: 17,
+                          color: AppTheme.textSecondary,
+                        ),
+                        const SizedBox(width: 9),
+                        Text(
+                          term,
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      initialValue:
+                          savedDiaries.any(
+                            (diary) => diary.id == selectedDiaryId,
+                          )
+                          ? selectedDiaryId
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Diário / disciplina',
+                        prefixIcon: Icon(Icons.menu_book_rounded),
+                      ),
+                      hint: const Text('Rascunho atual'),
+                      items: savedDiaries
+                          .map(
+                            (diary) => DropdownMenuItem(
+                              value: diary.id,
+                              child: Text(
+                                diary.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: onSelectDiary,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton.filledTonal(
+                    onPressed: onCopyDiary,
+                    tooltip:
+                        'Copiar di\u00e1rio de outro per\u00edodo ou disciplina',
+                    icon: const Icon(Icons.content_copy_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    onPressed: entryCount == 0 ? null : onSaveDiary,
+                    tooltip: 'Salvar diário atual',
+                    icon: const Icon(Icons.save_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
+                    onPressed: entryCount == 0 ? null : onCreateDiary,
+                    tooltip: 'Salvar como outro diário',
+                    icon: const Icon(Icons.add_rounded),
+                  ),
+                ],
+              ),
               const SizedBox(height: 15),
               Row(
                 children: [
@@ -1844,26 +2448,38 @@ class _WorkspacePanel extends StatelessWidget {
                     icon: const Icon(Icons.table_view_rounded, size: 17),
                     label: const Text('Importar Excel'),
                   ),
-                  OutlinedButton.icon(
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  IconButton.filledTonal(
                     onPressed: entryCount == 0 ? null : onExportJson,
-                    icon: const Icon(Icons.save_alt_rounded, size: 17),
-                    label: const Text('Salvar JSON'),
+                    tooltip: 'Salvar JSON',
+                    icon: const Icon(Icons.save_alt_rounded),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: onShift,
-                    icon: const Icon(Icons.event_repeat_rounded, size: 17),
-                    label: const Text('Ajustar datas'),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    onPressed: entryCount == 0 ? null : onShift,
+                    tooltip: 'Ajustar datas',
+                    icon: const Icon(Icons.event_repeat_rounded),
                   ),
+                  const SizedBox(width: 8),
                   IconButton.filledTonal(
                     onPressed: onAdd,
                     tooltip: 'Adicionar aula manualmente',
                     icon: const Icon(Icons.add_rounded),
                   ),
+                  const SizedBox(width: 8),
                   IconButton.filledTonal(
                     onPressed: searchingPortalDates || !browserReady
                         ? null
                         : onFindPortalDates,
-                    tooltip: 'Buscar datas ausentes no diário aberto',
+                    tooltip: searchingPortalDates
+                        ? 'Buscando datas no diario aberto...'
+                        : browserReady
+                        ? 'Buscar datas ausentes no diario aberto'
+                        : 'Abra o Edge pelo painel Portal e entre no diario para habilitar a busca',
                     icon: searchingPortalDates
                         ? const SizedBox(
                             width: 18,
@@ -1872,15 +2488,18 @@ class _WorkspacePanel extends StatelessWidget {
                           )
                         : const Icon(Icons.manage_search_rounded),
                   ),
-                  if (missingPortalDates.isNotEmpty)
+                  if (missingPortalDates.isNotEmpty) ...[
+                    const SizedBox(width: 8),
                     IconButton.filledTonal(
                       onPressed: onCopyMissingPortalDates,
                       tooltip: 'Copiar datas ausentes',
                       icon: const Icon(Icons.copy_rounded),
                     ),
+                  ],
+                  const SizedBox(width: 8),
                   IconButton.filledTonal(
                     onPressed: entryCount == 0 ? null : onClear,
-                    tooltip: 'Limpar todos os lançamentos',
+                    tooltip: 'Limpar todos os lancamentos',
                     style: IconButton.styleFrom(
                       foregroundColor: AppTheme.danger,
                     ),
@@ -1985,7 +2604,7 @@ class _EntryTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 58,
+            width: 76,
             padding: const EdgeInsets.symmetric(vertical: 7),
             decoration: BoxDecoration(
               color: (practical ? AppTheme.accent : AppTheme.primaryLight)
@@ -1996,6 +2615,9 @@ class _EntryTile extends StatelessWidget {
               children: [
                 Text(
                   entry.key.substring(0, 10),
+                  maxLines: 1,
+                  softWrap: false,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 10,
@@ -2399,6 +3021,49 @@ class _ShiftResult {
   );
   final Map<String, String> entries;
   final int changed, filtered, overwritten;
+}
+
+class _SavedDiary {
+  const _SavedDiary({
+    required this.id,
+    required this.name,
+    required this.entries,
+    this.sourceLabel,
+  });
+
+  final String id;
+  final String name;
+  final Map<String, String> entries;
+  final String? sourceLabel;
+
+  factory _SavedDiary.fromJson(Map<String, dynamic> json) {
+    final rawEntries = json['entries'];
+    if (rawEntries is! Map)
+      throw const FormatException('Invalid diary entries');
+    return _SavedDiary(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      entries: rawEntries.map<String, String>(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      ),
+      sourceLabel: json['sourceLabel'] as String?,
+    );
+  }
+
+  _SavedDiary copyWith({Map<String, String>? entries, String? sourceLabel}) =>
+      _SavedDiary(
+        id: id,
+        name: name,
+        entries: entries ?? this.entries,
+        sourceLabel: sourceLabel ?? this.sourceLabel,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'entries': entries,
+    'sourceLabel': sourceLabel,
+  };
 }
 
 class _MoodleDiaryCourseDialog extends StatelessWidget {
