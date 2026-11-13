@@ -67,7 +67,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   bool _openingBrowser = false;
   bool _browserReady = false;
   bool _filling = false;
+  bool _importingPortalDiary = false;
   bool _extractingDiaries = false;
+  bool _scanningDiaries = false;
   bool _loadingMoodleCourses = false;
   bool _requireEmpty = false;
   bool _highlight = true;
@@ -323,22 +325,71 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
         }
       }
     }
+    final selectedId = data?['selectedDiaryId'] as String?;
+    var removedDuplicateNames = false;
+    final uniqueDiaries = <_SavedDiary>[];
+    for (final diary in diaries) {
+      final normalizedName = _normalizeDiaryName(diary.name);
+      final duplicateIndex = uniqueDiaries.indexWhere(
+        (saved) => _normalizeDiaryName(saved.name) == normalizedName,
+      );
+      if (normalizedName.isEmpty || duplicateIndex < 0) {
+        uniqueDiaries.add(diary);
+        continue;
+      }
+
+      removedDuplicateNames = true;
+      final existing = uniqueDiaries[duplicateIndex];
+      final keepCurrent = diary.id == selectedId;
+      final keeper = keepCurrent ? diary : existing;
+      final other = keepCurrent ? existing : diary;
+      uniqueDiaries[duplicateIndex] = _SavedDiary(
+        id: keeper.id,
+        name: keeper.name,
+        entries: {...other.entries, ...keeper.entries},
+        sourceLabel: keeper.sourceLabel ?? other.sourceLabel,
+      );
+    }
+
     final rawEntries = data?['draftEntries'];
     final validated = rawEntries is Map
         ? _validateMap(rawEntries)
         : _validateMap(const <String, String>{});
-    final selectedId = data?['selectedDiaryId'] as String?;
+    final workspaceEntries = <String, String>{...validated.valid};
+    if (removedDuplicateNames && selectedId != null) {
+      final selectedDiary = uniqueDiaries.where(
+        (diary) => diary.id == selectedId,
+      );
+      if (selectedDiary.isNotEmpty) {
+        workspaceEntries
+          ..clear()
+          ..addAll(selectedDiary.first.entries)
+          ..addAll(validated.valid);
+      }
+    }
     if (!mounted) return;
     setState(() {
       _entries
         ..clear()
-        ..addAll(_sortMap(validated.valid));
+        ..addAll(_sortMap(workspaceEntries));
       _sourceLabel = data?['sourceLabel'] as String?;
-      _savedDiaries = diaries;
-      _selectedDiaryId = diaries.any((diary) => diary.id == selectedId)
+      _savedDiaries = uniqueDiaries;
+      _selectedDiaryId = uniqueDiaries.any((diary) => diary.id == selectedId)
           ? selectedId
           : null;
     });
+    if (removedDuplicateNames) await _persist();
+  }
+
+  String _normalizeDiaryName(String name) =>
+      _stripAccents(name).trim().replaceAll(RegExp(r'\s+'), ' ');
+
+  bool _diaryNameExists(String name) {
+    final normalized = _normalizeDiaryName(name);
+    return normalized.isNotEmpty &&
+        _savedDiaries.any(
+          (diary) => _normalizeDiaryName(diary.name) == normalized,
+        );
   }
 
   Future<void> _persist() async {
@@ -469,6 +520,59 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     await _persist();
   }
 
+  Future<void> _deleteSelectedDiary() async {
+    final selectedId = _selectedDiaryId;
+    if (selectedId == null) return;
+    final index = _savedDiaries.indexWhere((diary) => diary.id == selectedId);
+    if (index < 0) return;
+    final diary = _savedDiaries[index];
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Remover disciplina?'),
+            content: Text(
+              'O diário "${diary.name}" e seus lançamentos serão removidos deste período.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Remover'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) return;
+
+    final remainingDiaries = [..._savedDiaries]..removeAt(index);
+    final nextDiary = remainingDiaries.isEmpty
+        ? null
+        : remainingDiaries[index < remainingDiaries.length ? index : 0];
+    setState(() {
+      _savedDiaries = remainingDiaries;
+      _selectedDiaryId = nextDiary?.id;
+      _entries
+        ..clear()
+        ..addAll(
+          nextDiary == null ? const <String, String>{} : nextDiary.entries,
+        );
+      _sourceLabel = nextDiary == null
+          ? null
+          : nextDiary.sourceLabel ??
+                '${AcademicTerm.displayName(_term)} - ${nextDiary.name}';
+    });
+    await _persist();
+    _log(
+      'Disciplina "${diary.name}" removida do período ${AcademicTerm.displayName(_term)}.',
+    );
+  }
+
   Future<void> _saveDiary({bool createNew = false}) async {
     if (_entries.isEmpty) return;
     if (!createNew && _selectedDiaryId != null) {
@@ -506,6 +610,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     controller.dispose();
     final trimmedName = name?.trim() ?? '';
     if (trimmedName.isEmpty) return;
+    if (!mounted) return;
+    if (_diaryNameExists(trimmedName)) {
+      await _showMessage(
+        'Disciplina j\u00e1 cadastrada',
+        'J\u00e1 existe um di\u00e1rio chamado "$trimmedName" no per\u00edodo ${AcademicTerm.displayName(_term)}. Remova o existente ou escolha outro nome.',
+      );
+      return;
+    }
     final diary = _SavedDiary(
       id: _uuid.v4(),
       name: trimmedName,
@@ -637,6 +749,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     nameController.dispose();
     final targetName = name?.trim() ?? '';
     if (targetName.isEmpty) return;
+    if (!mounted) return;
+    if (_diaryNameExists(targetName)) {
+      await _showMessage(
+        'Disciplina j\u00e1 cadastrada',
+        'J\u00e1 existe um di\u00e1rio chamado "$targetName" no per\u00edodo ${AcademicTerm.displayName(_term)}. Remova o existente ou escolha outro nome.',
+      );
+      return;
+    }
 
     final copy = _SavedDiary(
       id: _uuid.v4(),
@@ -664,6 +784,17 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _logs.add('${DateFormat('HH:mm:ss').format(DateTime.now())}  $message');
       if (_logs.length > 300) _logs.removeRange(0, _logs.length - 300);
     });
+  }
+
+  Future<void> _copyOperationLog() async {
+    if (_logs.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _logs.join('\n')));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Log copiado para a área de transferência.'),
+      ),
+    );
   }
 
   Future<void> _selectExcel() async {
@@ -720,6 +851,62 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     } catch (error) {
       _showMessage('Falha na importação Excel', '$error');
       _log('Falha ao importar Excel: $error');
+    }
+  }
+
+  Future<void> _importFromPortal() async {
+    if (_importingPortalDiary) return;
+    if (!_automation.isConnected) {
+      await _showMessage(
+        'Portal Docente desconectado',
+        'Abra o formulário do diário no Edge antes de importar.',
+      );
+      return;
+    }
+    setState(() => _importingPortalDiary = true);
+    try {
+      final portalDiary = await _automation.readCurrentDiaryContents();
+      final imported = _validateMap(portalDiary.entries);
+      if (imported.valid.isEmpty) {
+        throw const FormatException(
+          'Não encontrei lançamentos válidos no diário aberto.',
+        );
+      }
+      final overwritten = imported.valid.keys
+          .where(_entries.containsKey)
+          .length;
+      final merged = _sortMap({..._entries, ...imported.valid});
+      setState(() {
+        _entries
+          ..clear()
+          ..addAll(merged);
+        _sourceLabel = portalDiary.disciplineName == null
+            ? 'Portal Docente · Diário aberto'
+            : 'Portal Docente · ${portalDiary.disciplineName}';
+      });
+      await _persist();
+      _log(
+        'Diário importado do Portal Docente: ${imported.valid.length} lançamento(s), $overwritten sobrescrito(s), ${imported.errors.length} inválido(s).',
+      );
+      if (imported.errors.isNotEmpty) {
+        _log('Chaves inválidas descartadas: ${imported.errors.length}.');
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${imported.valid.length} lançamento(s) importado(s) do Portal Docente.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      _log('Falha ao importar do Portal Docente: $error');
+      if (mounted) {
+        await _showMessage('Falha ao importar do Portal Docente', '$error');
+      }
+    } finally {
+      if (mounted) setState(() => _importingPortalDiary = false);
     }
   }
 
@@ -2267,13 +2454,13 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
         log: _log,
       );
       _log(
-        'Extração concluída: ${result.downloaded} arquivo(s) salvo(s), ${result.failed} falha(s). Pasta: $directoryPath',
+        'Extração concluída: ${result.downloaded} arquivo(s) salvo(s), ${result.failed} falha(s). Pasta: ${result.directoryPath}',
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${result.downloaded} diário(s) salvo(s) em $directoryPath.',
+              '${result.downloaded} diário(s) salvo(s) em ${result.directoryPath}.',
             ),
           ),
         );
@@ -2284,6 +2471,194 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     } finally {
       if (mounted) setState(() => _extractingDiaries = false);
     }
+  }
+
+  Future<void> _scanPortalDiaries() async {
+    if (_scanningDiaries || _extractingDiaries || _filling) return;
+    setState(() {
+      _scanningDiaries = true;
+      _error = null;
+      _logs.clear();
+    });
+    try {
+      const archiveUrl = 'https://www.portaldocente.ufu.br/diarioEletronico';
+      _log(
+        'Abrindo a lista do Portal para verificar preenchimento dos diários.',
+      );
+      final openedUrl = await _automation.openBrowser(
+        archiveUrl,
+        username: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalUsername,
+        password: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalPassword,
+        log: _log,
+      );
+      if (!mounted) return;
+      setState(() => _browserReady = true);
+      final host = Uri.tryParse(openedUrl)?.host.toLowerCase() ?? '';
+      if (host != 'www.portaldocente.ufu.br' &&
+          host != 'portaldocente.ufu.br') {
+        _log(
+          'O Portal redirecionou para autenticação. Entre no Portal no Edge e inicie a verificação novamente.',
+        );
+        return;
+      }
+
+      final available = await _automation.findPortalDiaryDownloads();
+      final terms = AcademicTerm.newestFirst(
+        available
+            .map((diary) => diary.term)
+            .where((term) => AcademicTerm.parse(term) != null),
+      );
+      if (terms.isEmpty) {
+        throw StateError(
+          'A lista do Portal não contém períodos reconhecíveis.',
+        );
+      }
+      final selection = await _showDiaryScanRange(terms, available);
+      if (selection == null || !mounted) return;
+      final startOrder = _academicTermOrder(selection.$1);
+      final endTerm = selection.$2 ?? terms.first;
+      final endOrder = _academicTermOrder(endTerm);
+      final selectedDiaries = available.where((diary) {
+        final order = _academicTermOrder(diary.term);
+        return order >= startOrder && order <= endOrder;
+      }).toList();
+      if (selectedDiaries.isEmpty) {
+        throw StateError('Não há diários na faixa de períodos escolhida.');
+      }
+
+      _log(
+        'Iniciando verificação de ${selectedDiaries.length} diário(s), de ${selection.$1} a $endTerm. Qualquer campo em branco será marcado como sem preenchimento.',
+      );
+      final result = await _automation.scanPortalDiariesForEmptyContent(
+        selectedDiaries,
+        log: _log,
+      );
+      _log(
+        'Verificação concluída: ${result.checked} conferido(s), ${result.incomplete} com campo(s) sem preenchimento, ${result.failed} não verificado(s).',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${result.incomplete} diário(s) com campo(s) sem preenchimento; veja o log.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      _log('Falha ao verificar os diários do Portal: $error');
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _scanningDiaries = false);
+    }
+  }
+
+  Future<(String, String?)?> _showDiaryScanRange(
+    List<String> terms,
+    List<PortalDiaryDownload> diaries,
+  ) {
+    var startTerm = terms.last;
+    String? endTerm;
+    return showDialog<(String, String?)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final startOrder = _academicTermOrder(startTerm);
+          final endChoices = terms
+              .where((term) => _academicTermOrder(term) >= startOrder)
+              .toList();
+          final effectiveEnd = endTerm ?? terms.first;
+          final count = diaries.where((diary) {
+            final order = _academicTermOrder(diary.term);
+            return order >= startOrder &&
+                order <= _academicTermOrder(effectiveEnd);
+          }).length;
+          return AlertDialog(
+            title: const Text('Verificar diários sem preenchimento'),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: startTerm,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Período inicial',
+                    ),
+                    items: terms.reversed
+                        .map(
+                          (term) =>
+                              DropdownMenuItem(value: term, child: Text(term)),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() {
+                        startTerm = value;
+                        if (endTerm != null &&
+                            _academicTermOrder(endTerm!) <
+                                _academicTermOrder(startTerm)) {
+                          endTerm = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    initialValue: endTerm,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Período final',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Até o último período disponível'),
+                      ),
+                      ...endChoices.map(
+                        (term) => DropdownMenuItem<String?>(
+                          value: term,
+                          child: Text(term),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setDialogState(() => endTerm = value),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '$count diário(s) serão verificados. Basta um campo de conteúdo em branco para o diário aparecer no log como sem preenchimento.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: count == 0
+                    ? null
+                    : () => Navigator.pop(context, (startTerm, endTerm)),
+                child: const Text('Iniciar verificação'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<(String, String?)?> _showDiaryDownloadRange(
@@ -2444,6 +2819,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onSaveDiary: _saveDiary,
                             onCreateDiary: () => _saveDiary(createNew: true),
                             onCopyDiary: _copyDiary,
+                            onDeleteDiary: _deleteSelectedDiary,
                             sourceLabel: _sourceLabel,
                             entries: _sortMap(_entries),
                             snapshots: _moodleSnapshots,
@@ -2460,6 +2836,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                                         : 'Backup · ${selectedSnapshot.label}',
                                   ),
                             onImportExcel: _selectExcel,
+                            onImportPortal: _importFromPortal,
+                            importingPortalDiary: _importingPortalDiary,
                             onImportJson: _importJson,
                             onImportLiveMoodle: _importFromLiveMoodle,
                             onImportSavedConfig: _importFromSavedConfig,
@@ -2486,11 +2864,13 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                                 _portalPassword.isNotEmpty,
                             credentialsFromMoodle: _portalCredentialsFromMoodle,
                             logs: _logs,
+                            onCopyLog: _copyOperationLog,
                             entryCount: _entries.length,
                             opening: _openingBrowser,
                             browserReady: _browserReady,
                             filling: _filling,
                             extractingDiaries: _extractingDiaries,
+                            scanningDiaries: _scanningDiaries,
                             highlight: _highlight,
                             requireEmpty: _requireEmpty,
                             error: _error,
@@ -2499,6 +2879,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onFill: _fillPortal,
                             onClearPortalDiary: _clearPortalDiary,
                             onExtractDiaries: _extractPortalDiaries,
+                            onScanDiaries: _scanPortalDiaries,
                             onHighlight: (value) =>
                                 setState(() => _highlight = value),
                             onRequireEmpty: (value) =>
@@ -2664,6 +3045,7 @@ class _WorkspacePanel extends StatelessWidget {
     required this.onSaveDiary,
     required this.onCreateDiary,
     required this.onCopyDiary,
+    required this.onDeleteDiary,
     required this.sourceLabel,
     required this.entries,
     required this.snapshots,
@@ -2671,6 +3053,8 @@ class _WorkspacePanel extends StatelessWidget {
     required this.onSelectSnapshot,
     required this.onUseMoodle,
     required this.onImportExcel,
+    required this.onImportPortal,
+    required this.importingPortalDiary,
     required this.onImportJson,
     required this.onImportLiveMoodle,
     required this.onImportSavedConfig,
@@ -2694,6 +3078,7 @@ class _WorkspacePanel extends StatelessWidget {
   final ValueChanged<String?> onSelectDiary;
   final VoidCallback onSaveDiary, onCreateDiary;
   final VoidCallback onCopyDiary;
+  final VoidCallback onDeleteDiary;
   final String? sourceLabel;
   final Map<String, String> entries;
   final List<MoodleConfigSnapshot> snapshots;
@@ -2704,6 +3089,8 @@ class _WorkspacePanel extends StatelessWidget {
   final ValueChanged<String> onShiftFromEntry;
   final VoidCallback onImportLiveMoodle;
   final VoidCallback onImportSavedConfig;
+  final VoidCallback onImportPortal;
+  final bool importingPortalDiary;
   final VoidCallback onClear;
   final VoidCallback onFindPortalDates, onCopyMissingPortalDates;
   final bool searchingPortalDates;
@@ -2802,6 +3189,15 @@ class _WorkspacePanel extends StatelessWidget {
                   ),
                   const SizedBox(width: 4),
                   IconButton.filledTonal(
+                    onPressed: selectedDiaryId == null ? null : onDeleteDiary,
+                    tooltip: 'Remover disciplina selecionada',
+                    style: IconButton.styleFrom(
+                      foregroundColor: AppTheme.danger,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton.filledTonal(
                     onPressed: entryCount == 0 ? null : onSaveDiary,
                     tooltip: 'Salvar diário atual',
                     icon: const Icon(Icons.save_rounded),
@@ -2870,14 +3266,34 @@ class _WorkspacePanel extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              Row(
                 children: [
-                  OutlinedButton.icon(
-                    onPressed: onImportExcel,
-                    icon: const Icon(Icons.table_view_rounded, size: 17),
-                    label: const Text('Importar Excel'),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onImportExcel,
+                      icon: const Icon(Icons.table_view_rounded, size: 17),
+                      label: const Text('Importar Excel'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: browserReady && !importingPortalDiary
+                          ? onImportPortal
+                          : null,
+                      icon: importingPortalDiary
+                          ? const SizedBox(
+                              width: 17,
+                              height: 17,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_download_outlined, size: 17),
+                      label: const Text(
+                        'Importar do Portal Docente',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -3156,11 +3572,13 @@ class _BrowserPanel extends StatelessWidget {
     required this.credentialsSaved,
     required this.credentialsFromMoodle,
     required this.logs,
+    required this.onCopyLog,
     required this.entryCount,
     required this.opening,
     required this.browserReady,
     required this.filling,
     required this.extractingDiaries,
+    required this.scanningDiaries,
     required this.highlight,
     required this.requireEmpty,
     required this.error,
@@ -3169,6 +3587,7 @@ class _BrowserPanel extends StatelessWidget {
     required this.onFill,
     required this.onClearPortalDiary,
     required this.onExtractDiaries,
+    required this.onScanDiaries,
     required this.onHighlight,
     required this.onRequireEmpty,
   });
@@ -3177,17 +3596,20 @@ class _BrowserPanel extends StatelessWidget {
   final bool credentialsSaved;
   final bool credentialsFromMoodle;
   final List<String> logs;
+  final VoidCallback onCopyLog;
   final int entryCount;
   final bool opening,
       browserReady,
       filling,
       extractingDiaries,
+      scanningDiaries,
       highlight,
       requireEmpty;
   final String? error;
   final VoidCallback onOpen, onConfigureCredentials, onFill;
   final VoidCallback onClearPortalDiary;
   final VoidCallback onExtractDiaries;
+  final VoidCallback onScanDiaries;
   final ValueChanged<bool> onHighlight, onRequireEmpty;
 
   @override
@@ -3342,40 +3764,104 @@ class _BrowserPanel extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: browserReady && !filling
-                      ? onClearPortalDiary
-                      : null,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.danger,
-                    side: BorderSide(
-                      color: AppTheme.danger.withValues(alpha: 0.65),
+              Row(
+                children: [
+                  Expanded(
+                    child: Tooltip(
+                      message: 'Limpar o diário aberto no Portal Docente',
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            browserReady &&
+                                !filling &&
+                                !extractingDiaries &&
+                                !scanningDiaries
+                            ? onClearPortalDiary
+                            : null,
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                          foregroundColor: AppTheme.danger,
+                          side: BorderSide(
+                            color: AppTheme.danger.withValues(alpha: 0.65),
+                          ),
+                        ),
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                        label: const Text(
+                          'Limpar',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 11),
+                        ),
+                      ),
                     ),
                   ),
-                  icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('Limpar di\u00e1rio no Portal'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: extractingDiaries ? null : onExtractDiaries,
-                  icon: extractingDiaries
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.download_for_offline_outlined),
-                  label: Text(
-                    extractingDiaries
-                        ? 'Extraindo di\u00e1rios\u2026'
-                        : 'Extrair di\u00e1rios por per\u00edodo',
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Tooltip(
+                      message:
+                          'Verificar por período e listar diários com ao menos um campo de conteúdo vazio',
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            filling || scanningDiaries || extractingDiaries
+                            ? null
+                            : onScanDiaries,
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                        ),
+                        icon: scanningDiaries
+                            ? const SizedBox(
+                                width: 15,
+                                height: 15,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.fact_check_outlined, size: 16),
+                        label: Text(
+                          scanningDiaries ? 'Verificando' : 'Verificar',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Tooltip(
+                      message: 'Extrair os PDFs dos diários por período',
+                      child: OutlinedButton.icon(
+                        onPressed:
+                            filling || scanningDiaries || extractingDiaries
+                            ? null
+                            : onExtractDiaries,
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 7),
+                        ),
+                        icon: extractingDiaries
+                            ? const SizedBox(
+                                width: 15,
+                                height: 15,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.download_for_offline_outlined,
+                                size: 16,
+                              ),
+                        label: Text(
+                          extractingDiaries ? 'Extraindo' : 'Extrair',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               if (error != null)
                 Padding(
@@ -3416,6 +3902,13 @@ class _BrowserPanel extends StatelessWidget {
                 '${logs.length} mensagens',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 10),
               ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: 'Copiar log',
+                onPressed: logs.isEmpty ? null : onCopyLog,
+                icon: const Icon(Icons.copy_rounded, size: 17),
+                visualDensity: VisualDensity.compact,
+              ),
             ],
           ),
         ),
@@ -3430,24 +3923,26 @@ class _BrowserPanel extends StatelessWidget {
                     ),
                   ),
                 )
-              : ListView.builder(
-                  reverse: true,
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
-                  itemCount: logs.length,
-                  itemBuilder: (context, i) {
-                    final line = logs[logs.length - i - 1];
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 3),
-                      child: SelectableText(
-                        line,
-                        style: TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 10,
-                          height: 1.4,
+              : SelectionArea(
+                  child: ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+                    itemCount: logs.length,
+                    itemBuilder: (context, i) {
+                      final line = logs[logs.length - i - 1];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Text(
+                          line,
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 10,
+                            height: 1.4,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
       ],

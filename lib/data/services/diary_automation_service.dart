@@ -42,6 +42,8 @@ class PortalDiaryDownload {
     required this.diaryFieldId,
     required this.originFieldId,
     required this.typeFieldId,
+    required this.contentFieldId,
+    required this.contentTypeFieldId,
   });
 
   final String term;
@@ -51,15 +53,45 @@ class PortalDiaryDownload {
   final String diaryFieldId;
   final String originFieldId;
   final String typeFieldId;
+  final String contentFieldId;
+  final String contentTypeFieldId;
 }
 
 class PortalDiaryDownloadResult {
   const PortalDiaryDownloadResult({
     required this.downloaded,
     required this.failed,
+    required this.directoryPath,
   });
 
   final int downloaded;
+  final int failed;
+  final String directoryPath;
+}
+
+class PortalDiaryContents {
+  const PortalDiaryContents({
+    required this.entries,
+    required this.totalFields,
+    required this.emptyFields,
+    this.disciplineName,
+  });
+
+  final Map<String, String> entries;
+  final int totalFields;
+  final int emptyFields;
+  final String? disciplineName;
+}
+
+class PortalDiaryScanResult {
+  const PortalDiaryScanResult({
+    required this.checked,
+    required this.incomplete,
+    required this.failed,
+  });
+
+  final int checked;
+  final int incomplete;
   final int failed;
 }
 
@@ -265,6 +297,10 @@ class DiaryAutomationService {
                   diaries[index].diaryFieldId,
                   diaries[index].originFieldId,
                   diaries[index].typeFieldId,
+                ],
+                'contentArguments': [
+                  diaries[index].contentFieldId,
+                  diaries[index].contentTypeFieldId,
                 ],
               },
           ],
@@ -677,6 +713,49 @@ class DiaryAutomationService {
     )).whereType<String>().toSet().toList();
   }
 
+  Future<PortalDiaryContents> readCurrentDiaryContents() async {
+    final page = _page;
+    if (!isConnected || page == null) {
+      throw StateError(
+        'Abra o Edge e deixe aberto o formulário do diário no Portal Docente.',
+      );
+    }
+    final result = await page.evaluate<Map<String, dynamic>>(
+      _collectPortalDiaryContentsScript,
+    );
+    final rows = result['entries'];
+    if (rows is! List) {
+      throw StateError(
+        'Não encontrei os campos de data e conteúdo do diário aberto no Portal.',
+      );
+    }
+    final entries = <String, String>{};
+    var totalFields = 0;
+    var emptyFields = 0;
+    for (final row in rows.whereType<List<dynamic>>()) {
+      if (row.length < 3) continue;
+      totalFields++;
+      final date = row[0].toString();
+      final modality = row[1].toString().toUpperCase();
+      if (modality != 'T' && modality != 'P') continue;
+      final content = row[2].toString();
+      if (content.replaceAll('\u200B', '').trim().isEmpty) emptyFields++;
+      entries['$date -$modality'] = content;
+    }
+    if (entries.isEmpty) {
+      throw StateError(
+        'O diário do Portal está aberto, mas não encontrei linhas com data, modalidade e campo de conteúdo.',
+      );
+    }
+    final name = result['disciplineName']?.toString().trim();
+    return PortalDiaryContents(
+      entries: entries,
+      totalFields: totalFields,
+      emptyFields: emptyFields,
+      disciplineName: name == null || name.isEmpty ? null : name,
+    );
+  }
+
   Future<List<PortalDiaryDownload>> findPortalDiaryDownloads() async {
     final page = _page;
     if (!isConnected || page == null) {
@@ -709,6 +788,8 @@ class DiaryAutomationService {
             diaryFieldId: row[4].toString(),
             originFieldId: row[5].toString(),
             typeFieldId: row[6].toString(),
+            contentFieldId: row.length > 7 ? row[7].toString() : '',
+            contentTypeFieldId: row.length > 8 ? row[8].toString() : '',
           );
         })
         .toList();
@@ -731,8 +812,26 @@ class DiaryAutomationService {
         'Não consegui identificar a página da lista de diários.',
       );
     }
-    final outputDirectory = Directory(directoryPath);
+    var outputDirectory = Directory(directoryPath);
     await outputDirectory.create(recursive: true);
+    var hasExistingPdf = false;
+    await for (final entity in outputDirectory.list(followLinks: false)) {
+      if (entity is File && entity.path.toLowerCase().endsWith('.pdf')) {
+        hasExistingPdf = true;
+        break;
+      }
+    }
+    if (hasExistingPdf) {
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .replaceAll('.', '-');
+      outputDirectory = Directory(p.join(directoryPath, 'Diarios_$stamp'));
+      await outputDirectory.create(recursive: true);
+      log(
+        'Ja existem PDFs na pasta escolhida; esta extracao sera salva em ${outputDirectory.path}.',
+      );
+    }
     await _browser!.browser.setDownloadBehavior(
       'allow',
       downloadPath: outputDirectory.path,
@@ -756,7 +855,7 @@ class DiaryAutomationService {
             log('Não localizei a ação baixarDiario para $detail.');
             continue;
           }
-          log('Baixar acionado; aguardando o PDF direto do Portal.');
+          log('Seta Baixar acionada; aguardando o PDF.');
           final newFile = await _waitForDownloadedFile(
             outputDirectory,
             pdfFilesBefore,
@@ -773,20 +872,88 @@ class DiaryAutomationService {
           failed++;
           log('Falha ao baixar $detail: $error');
         } finally {
-          if (page.url != listUrl) {
-            try {
+          try {
+            if (!page.isClosed) {
               await page.goto(listUrl, wait: Until.domContentLoaded);
               await Future<void>.delayed(const Duration(milliseconds: 500));
-            } catch (error) {
-              log('Nao consegui voltar a lista para continuar: $error');
             }
+          } catch (error) {
+            log('Não consegui voltar à lista para continuar: $error');
           }
         }
       }
     } finally {
       await _browser!.browser.setDownloadBehavior('default');
     }
-    return PortalDiaryDownloadResult(downloaded: downloaded, failed: failed);
+    return PortalDiaryDownloadResult(
+      downloaded: downloaded,
+      failed: failed,
+      directoryPath: outputDirectory.path,
+    );
+  }
+
+  Future<PortalDiaryScanResult> scanPortalDiariesForEmptyContent(
+    List<PortalDiaryDownload> diaries, {
+    required DiaryAutomationLog log,
+  }) async {
+    final page = _page;
+    if (!isConnected || page == null) {
+      throw StateError('A sessão do Portal do Docente não está conectada.');
+    }
+    final listUrl = page.url;
+    if (listUrl == null || listUrl.isEmpty) {
+      throw StateError('Não consegui identificar a lista de diários.');
+    }
+
+    var checked = 0;
+    var incomplete = 0;
+    var failed = 0;
+    for (var index = 0; index < diaries.length; index++) {
+      final diary = diaries[index];
+      final detail =
+          '${diary.term} · ${diary.code} · ${diary.name} · turma ${diary.className}';
+      var openedDiary = false;
+      try {
+        final opened = await _openPortalDiaryPdf(page, diary);
+        if (!opened) {
+          failed++;
+          log('Nao consegui abrir o PDF do diario para $detail.');
+          continue;
+        }
+
+        openedDiary = true;
+        final contents = await readCurrentDiaryContents();
+        if (contents.totalFields == 0) {
+          failed++;
+          log('A página de $detail não apresentou campos de conteúdo.');
+        } else {
+          checked++;
+          if (contents.emptyFields > 0) {
+            incomplete++;
+            log(
+              'SEM PREENCHIMENTO: ${diary.term} · ${diary.code} · ${diary.name} · turma ${diary.className} — ${contents.emptyFields} de ${contents.totalFields} campo(s) vazio(s).',
+            );
+          }
+        }
+      } catch (error) {
+        failed++;
+        log('Falha ao verificar $detail: $error');
+      } finally {
+        try {
+          if (openedDiary || page.url != listUrl) {
+            await page.goto(listUrl, wait: Until.domContentLoaded);
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+          }
+        } catch (error) {
+          log('Não consegui voltar à lista após $detail: $error');
+        }
+      }
+    }
+    return PortalDiaryScanResult(
+      checked: checked,
+      incomplete: incomplete,
+      failed: failed,
+    );
   }
 
   Future<Map<String, DateTime>> _listDownloadedFiles(
@@ -828,6 +995,28 @@ class DiaryAutomationService {
     return false;
   }
 
+  Future<bool> _openPortalDiaryPdf(Page page, PortalDiaryDownload diary) async {
+    final position = await page.evaluate<List<dynamic>>(
+      _invokePortalDiaryPdfScript,
+      args: [diary.diaryFieldId, diary.originFieldId, diary.typeFieldId],
+    );
+    if (position.length < 2) return false;
+    final navigation = page.waitForNavigation(
+      timeout: const Duration(seconds: 20),
+      wait: Until.domContentLoaded,
+    );
+    await page.mouse.click(
+      Point((position[0] as num).toDouble(), (position[1] as num).toDouble()),
+    );
+    try {
+      await navigation;
+    } on TimeoutException {
+      // Alguns formulÃ¡rios atualizam o conteÃºdo sem trocar a URL.
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    return true;
+  }
+
   Future<File?> _waitForDownloadedFile(
     Directory directory,
     Map<String, DateTime> existingFiles,
@@ -838,6 +1027,7 @@ class DiaryAutomationService {
       final candidates = <File>[];
       await for (final entity in directory.list(followLinks: false)) {
         if (entity is! File ||
+            !entity.path.toLowerCase().endsWith('.pdf') ||
             entity.path.toLowerCase().endsWith('.crdownload') ||
             entity.path.toLowerCase().endsWith('.tmp')) {
           continue;
@@ -957,6 +1147,12 @@ const _collectPortalDiaryDownloadsScript = r'''() => {
     const match = onclick.match(/baixarDiario\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
     return match ? match.slice(1, 4) : null;
   };
+  const contentArgs = action => {
+    const handler = (action?.getAttribute('onclick') || '') + ' ' +
+      (action?.getAttribute('href') || '');
+    const match = handler.match(/lancarConteudo\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
+    return match ? match.slice(1, 3) : ['', ''];
+  };
   const actionsWithDiaryId = Array.from(document.querySelectorAll('a[onclick],button[onclick],[onclick]'))
     .filter(action => downloadArgs(action));
   const diagnostics = [];
@@ -974,6 +1170,7 @@ const _collectPortalDiaryDownloadsScript = r'''() => {
       .map(cell => norm(cell.innerText || cell.textContent));
     const termIndex = headers.findIndex(header => /ano\s*\/?\s*periodo/.test(header));
     const downloadIndex = headers.findIndex(header => /^baixar$/.test(header));
+    const contentIndex = headers.findIndex(header => header === 'conteudo');
     if (termIndex < 0 || downloadIndex < 0) {
       diagnostics.push(headers.join(' | ') || norm(headerRow.innerText));
       continue;
@@ -991,10 +1188,16 @@ const _collectPortalDiaryDownloadsScript = r'''() => {
       const action = downloadCell.querySelector('a[onclick],button[onclick],[onclick]');
       const args = downloadArgs(action);
       if (!args) continue;
+      const contentCell = contentIndex < 0 ? null : cells[contentIndex];
+      const contentAction = contentCell?.querySelector('a[href],button[onclick],[onclick]');
+      const contentIdentifiers = contentArgs(contentAction);
       const code = (cells[headers.findIndex(h => h === 'codigo')]?.innerText || '').trim();
       const name = (cells[headers.findIndex(h => h.includes('nome da disciplina'))]?.innerText || '').trim();
       const className = (cells[headers.findIndex(h => h === 'turma')]?.innerText || '').trim();
-      output.push([`${match[1]}_${match[2]}`, code, name, className, ...args]);
+      output.push([
+        `${match[1]}_${match[2]}`, code, name, className,
+        ...args, ...contentIdentifiers,
+      ]);
     }
     if (output.length) return output;
     diagnostics.push(`Tabela com cabeçalho identificado, mas sem botão Baixar reconhecido. Cabeçalhos: ${headers.join(' | ')}`);
@@ -1044,6 +1247,54 @@ const _invokePortalDiaryDownloadScript =
   return [];
 }''';
 
+const _invokePortalDiaryPdfScript =
+    r'''(diaryFieldId, originFieldId, typeFieldId) => {
+  const norm = value => (value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const wanted = [diaryFieldId, originFieldId, typeFieldId];
+  const tables = Array.from(document.querySelectorAll('table'));
+  for (const table of tables) {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    const cellsOf = row => Array.from(row.children)
+      .filter(cell => cell.tagName === 'TH' || cell.tagName === 'TD');
+    const header = rows.find(row => {
+      const labels = cellsOf(row).map(cell => norm(cell.innerText || cell.textContent));
+      return labels.some(label => /ano\s*\/?\s*periodo/.test(label)) &&
+        labels.some(label => label === 'diario') &&
+        labels.some(label => label === 'baixar');
+    });
+    if (!header) continue;
+    const labels = cellsOf(header).map(cell => norm(cell.innerText || cell.textContent));
+    const diaryIndex = labels.findIndex(label => label === 'diario');
+    const downloadIndex = labels.findIndex(label => label === 'baixar');
+    for (const row of rows) {
+      if (row === header) continue;
+      const cells = cellsOf(row);
+      const downloadCell = cells[downloadIndex];
+      if (!downloadCell || !cells[diaryIndex]) continue;
+      const downloadAction = Array.from(downloadCell.querySelectorAll('[onclick]'))
+        .find(element => {
+          const match = (element.getAttribute('onclick') || '').match(
+            /baixarDiario\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)/i);
+          return match && match.slice(1, 4).every((value, index) => value === wanted[index]);
+        });
+      if (!downloadAction) continue;
+      const diaryCell = cells[diaryIndex];
+      const pdfImage = Array.from(diaryCell.querySelectorAll('img')).find(image =>
+        /pdf|diario/i.test((image.getAttribute('src') || '') + ' ' +
+          (image.getAttribute('alt') || '') + ' ' + (image.getAttribute('title') || '')));
+      const action = pdfImage?.closest('a,button,[onclick]') ||
+        diaryCell.querySelector('a,button,[onclick]') || pdfImage;
+      if (!action) return [];
+      action.scrollIntoView({behavior: 'auto', block: 'center', inline: 'nearest'});
+      const rect = action.getBoundingClientRect();
+      if (!rect.width || !rect.height) return [];
+      return [rect.left + rect.width / 2, rect.top + rect.height / 2];
+    }
+  }
+  return [];
+}''';
+
 const _inspectPortalDiaryPageScript = r'''() => {
   const norm = value => (value || '').toLowerCase().normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
@@ -1061,6 +1312,7 @@ const _inspectPortalDiaryPageScript = r'''() => {
     const headers = cellsOf(header).map(cell => (cell.innerText || cell.textContent || '').trim());
     const labels = headers.map(norm);
     const downloadIndex = labels.findIndex(label => label === 'baixar');
+    const diaryIndex = labels.findIndex(label => label === 'diario');
     const rowsWithButtons = rows.filter(row => {
       if (row === header) return false;
       const cell = cellsOf(row)[downloadIndex];
@@ -1076,12 +1328,23 @@ const _inspectPortalDiaryPageScript = r'''() => {
         const cell = cells[downloadIndex];
         const action = cell?.querySelector('[onclick]');
         const image = action?.querySelector('img');
+        const diaryCell = cells[diaryIndex];
+        const diaryImage = diaryCell?.querySelector('img');
+        const diaryAction = diaryImage?.closest('a,button,[onclick]') ||
+          diaryCell?.querySelector('a,button,[onclick]') || diaryImage;
         return {
           row: (row.innerText || row.textContent || '').trim(),
           onclick: action?.getAttribute('onclick') || null,
           image: image?.getAttribute('src') || null,
           alt: image?.getAttribute('alt') || null,
           href: action?.getAttribute('href') || null,
+          diario: diaryAction ? {
+            onclick: diaryAction.getAttribute('onclick') || '',
+            href: diaryAction.getAttribute('href') || '',
+            image: diaryImage?.getAttribute('src') || '',
+            alt: diaryImage?.getAttribute('alt') || '',
+            title: diaryImage?.getAttribute('title') || '',
+          } : null,
           rect: action ? (() => {
             const rect = action.getBoundingClientRect();
             return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
@@ -1133,6 +1396,35 @@ const _collectPortalDiaryDatesScript = r'''() => {
     }
   }
   return Array.from(found);
+}''';
+
+const _collectPortalDiaryContentsScript = r'''() => {
+  const visible = element => !!element && !!element.offsetParent;
+  const normalize = value => (value || '').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(field => visible(field) && !field.disabled && !field.readOnly);
+  const entries = [];
+  for (const field of fields) {
+    const row = field.closest('tr') || field.closest('.form-group') ||
+      field.closest('.row') || field.parentElement?.parentElement || field.parentElement;
+    if (!row || !visible(row)) continue;
+    const label = row.innerText || row.textContent || '';
+    const match = label.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*[\u2013\u2014\u2212-]?\s*([TP])\b/i);
+    if (!match) continue;
+    const parts = match[1].split('/');
+    const date = `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+    const value = field.value === '\u200B' ? '' : (field.value || '').trim();
+    entries.push([date, match[2].toUpperCase(), value]);
+  }
+  let disciplineName = '';
+  for (const row of Array.from(document.querySelectorAll('tr')).filter(visible)) {
+    const cells = Array.from(row.querySelectorAll('th,td'));
+    if (cells.length < 2 || normalize(cells[0].innerText).replace(/:$/, '') !== 'disciplina') continue;
+    disciplineName = cells.slice(1).map(cell => (cell.innerText || '').trim()).filter(Boolean).join(' ');
+    break;
+  }
+  return {entries, disciplineName};
 }''';
 
 const _installPortalSaveMonitorScript = r'''() => {

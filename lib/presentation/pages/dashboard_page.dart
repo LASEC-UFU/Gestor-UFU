@@ -201,7 +201,9 @@ class _DashboardPageState extends State<DashboardPage> {
                     sliver: SliverLayoutBuilder(
                       builder: (context, sliverConstraints) {
                         final width = sliverConstraints.crossAxisExtent;
-                        final columns = width >= 1000
+                        final columns = width >= 1400
+                            ? 4
+                            : width >= 1000
                             ? 3
                             : width >= 620
                             ? 2
