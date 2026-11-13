@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -21,11 +22,19 @@ class DiaryFillResult {
   final String? saveConfirmation;
 }
 
+class DiaryClearResult {
+  const DiaryClearResult({required this.marked, required this.notFound});
+
+  final int marked;
+  final int notFound;
+}
+
 /// Automação local em Dart via Chrome DevTools Protocol (Puppeteer).
 /// O navegador abre visível e mantém um perfil separado para preservar a sessão.
 class DiaryAutomationService {
   Browser? _browser;
   Page? _page;
+  bool _saveMonitorActive = false;
 
   bool get isConnected =>
       _browser?.isConnected == true && _page != null && !_page!.isClosed;
@@ -173,29 +182,59 @@ class DiaryAutomationService {
     for (final entry in entries.entries) {
       log('Procurando o campo relacionado a ${entry.key}.');
       try {
-        final result = await page.evaluate<String>(
-          _fillRelatedTextareaScript,
-          args: [entry.key, entry.value, requireEmpty, highlight],
+        final target = await page.evaluate<List<dynamic>>(
+          _findPortalTextareaPositionScript,
+          args: [entry.key],
         );
-        switch (result) {
-          case 'filled':
-            filled++;
-            log('Campo ${entry.key} preenchido.');
-          case 'skipped':
-            skipped++;
-            log('Campo ${entry.key} preservado: já tinha conteúdo.');
-          default:
-            notFound++;
-            log(
-              'Não localizei um campo associado a ${entry.key}; nenhum campo global foi usado como alternativa.',
-            );
+        if (target.length < 3) {
+          notFound++;
+          log(
+            'N\u00e3o localizei um campo associado a ${entry.key}; nenhum campo global foi usado como alternativa.',
+          );
+          continue;
         }
+        final x = (target[0] as num).toDouble();
+        final y = (target[1] as num).toDouble();
+        final index = (target[2] as num).toInt();
+        final isEmpty = await page.evaluate<bool>(
+          _isPortalTextareaEmptyScript,
+          args: [index],
+        );
+        if (requireEmpty && !isEmpty) {
+          skipped++;
+          log('Campo ${entry.key} preservado: j\u00e1 tinha conte\u00fado.');
+          continue;
+        }
+
+        await page.mouse.click(Point(x, y), clickCount: 2);
+        await page.keyboard.down(Key.control);
+        await page.keyboard.press(Key.keyA);
+        await page.keyboard.up(Key.control);
+        await page.keyboard.press(Key.delete);
+        await page.keyboard.type(entry.value);
+        await page.keyboard.press(Key.tab);
+        final valueMatches = await page.evaluate<bool>(
+          _isPortalTextareaValueScript,
+          args: [index, entry.value],
+        );
+        if (!valueMatches) {
+          notFound++;
+          log('O campo ${entry.key} n\u00e3o manteve o texto digitado.');
+          continue;
+        }
+        filled++;
+        if (highlight) {
+          await page.evaluate<bool>(
+            _highlightPortalTextareaScript,
+            args: [index],
+          );
+        }
+        log('Campo ${entry.key} preenchido.');
       } catch (error) {
         notFound++;
         log('Falha ao preencher ${entry.key}: $error');
       }
     }
-
     var saveClicked = false;
     String? confirmation;
     try {
@@ -227,6 +266,108 @@ class DiaryAutomationService {
       saveButtonClicked: saveClicked,
       saveConfirmation: confirmation,
     );
+  }
+
+  Future<DiaryClearResult> clearDiaryFields({
+    required DiaryAutomationLog log,
+  }) async {
+    final page = _page;
+    if (!isConnected || page == null) {
+      throw StateError(
+        'Abra o navegador e entre na tela do di\u00e1rio antes de limpar.',
+      );
+    }
+
+    final dates = (await page.evaluate<List<dynamic>>(
+      _collectPortalDiaryDatesScript,
+    )).whereType<String>().toSet().toList();
+    if (dates.isEmpty) {
+      throw StateError(
+        'N\u00e3o encontrei datas associadas aos campos do di\u00e1rio aberto.',
+      );
+    }
+
+    var marked = 0;
+    var notFound = 0;
+    for (final date in dates) {
+      log('Localizando o campo da data $date no Portal.');
+      try {
+        final target = await page.evaluate<List<dynamic>>(
+          _findPortalTextareaPositionScript,
+          args: [date],
+        );
+        if (target.length < 3) {
+          notFound++;
+          log('N\u00e3o localizei o campo associado a $date.');
+          continue;
+        }
+        final x = (target[0] as num).toDouble();
+        final y = (target[1] as num).toDouble();
+        final index = (target[2] as num).toInt();
+        await page.mouse.click(Point(x, y), clickCount: 2);
+        await page.keyboard.down(Key.control);
+        await page.keyboard.press(Key.keyA);
+        await page.keyboard.up(Key.control);
+        await page.keyboard.press(Key.delete);
+        await page.keyboard.type('\u200B');
+        await page.keyboard.press(Key.tab);
+        final hasInvisibleMarker = await page.evaluate<bool>(
+          _isPortalTextareaMarkerScript,
+          args: [index],
+        );
+        if (hasInvisibleMarker) {
+          marked++;
+          log('Campo de $date limpo com marcador invis\u00edvel.');
+        } else {
+          notFound++;
+          log(
+            'N\u00e3o consegui inserir o marcador invis\u00edvel no campo de $date.',
+          );
+        }
+      } catch (error) {
+        notFound++;
+        log('Falha ao limpar o campo de $date: $error');
+      }
+    }
+    log(
+      '$marked campo(s) marcado(s) como visualmente vazio(s) de ${dates.length} data(s) varrida(s); $notFound n\u00e3o localizado(s). A p\u00e1gina ficou aberta sem refresh. Confira e clique em Salvar no Portal para gravar.',
+    );
+    final monitorInstalled = await page.evaluate<bool>(
+      _installPortalSaveMonitorScript,
+    );
+    if (monitorInstalled) unawaited(_monitorNextPortalSave(page, log));
+    return DiaryClearResult(marked: marked, notFound: notFound);
+  }
+
+  Future<void> _monitorNextPortalSave(Page page, DiaryAutomationLog log) async {
+    if (_saveMonitorActive) return;
+    _saveMonitorActive = true;
+    try {
+      await page.waitForNavigation(
+        timeout: const Duration(minutes: 3),
+        wait: Until.domContentLoaded,
+      );
+      final result = await page.evaluate<List<dynamic>>(
+        _readPortalSaveDiagnosticsScript,
+      );
+      if (result.length >= 8) {
+        log(
+          'Diagn\u00f3stico do Salvar: ${result[1]} marcador(es) invis\u00edvel(is), ${result[2]} espa\u00e7o(s) comum(ns) e ${result[3]} vazio(s) enviados de ${result[0]}; a resposta trouxe ${result[7]} marcador(es), ${result[4]} campo(s) vazio(s) e ${result[6]} preenchido(s) de ${result[5]}.',
+        );
+      } else {
+        log(
+          'O Portal recarregou, mas o diagn\u00f3stico do envio n\u00e3o estava dispon\u00edvel.',
+        );
+      }
+    } on TimeoutException {
+      // The user may decide not to save; do not show a misleading error.
+    } catch (error) {
+      log(
+        'N\u00e3o consegui verificar o resultado do Salvar no Portal: $error',
+      );
+    } finally {
+      _saveMonitorActive = false;
+    }
   }
 
   Future<List<String>> findPortalDiaryDates() async {
@@ -327,79 +468,111 @@ const _collectPortalDiaryDatesScript = r'''() => {
   return Array.from(found);
 }''';
 
-const _fillRelatedTextareaScript = r'''(key, text, requireEmpty, highlight) => {
+const _installPortalSaveMonitorScript = r'''() => {
+  const form = document.querySelector('form#salvarConteudoDiario');
+  if (!form) return false;
+  const key = '__gestorUfuDiaryClearSubmission';
+  const marker = '\u200B';
+  sessionStorage.removeItem(key);
+  form.addEventListener('submit', () => {
+    const values = Array.from(form.querySelectorAll('textarea'))
+      .map(field => field.value || '');
+    const markers = values.filter(value => value === marker).length;
+    const spaces = values.filter(value => value === ' ').length;
+    const empty = values.filter(value => value === '').length;
+    sessionStorage.setItem(key, JSON.stringify({total: values.length, markers, spaces, empty}));
+  }, {capture: true, once: true});
+  return true;
+}''';
+
+const _readPortalSaveDiagnosticsScript = r'''() => {
+  const key = '__gestorUfuDiaryClearSubmission';
+  const raw = sessionStorage.getItem(key);
+  if (!raw) return [];
+  const before = JSON.parse(raw);
+  const marker = '\u200B';
+  const form = document.querySelector('form#salvarConteudoDiario');
+  const values = Array.from(form?.querySelectorAll('textarea') || [])
+    .map(field => field.value || '');
+  const markers = values.filter(value => value === marker).length;
+  const spaces = values.filter(value => value === ' ').length;
+  const empty = values.filter(value => value === '').length;
+  const populated = values.filter(value => value.trim().length > 0).length;
+  return [before.total, before.markers, before.spaces, before.empty, empty, values.length, populated, markers];
+}''';
+const _findPortalTextareaPositionScript = r'''(key) => {
   const norm = value => (value || '').toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[\u2013\u2014\u2212]/g, '-')
     .replace(/\s+/g, ' ').trim();
-  const wanted = norm(key);
   const visible = element => !!element && !!element.offsetParent;
-  const rows = ['tr', '.row', '.linha', '.form-group', 'li', '.item']
-    .flatMap(selector => Array.from(document.querySelectorAll(selector)))
-    .filter(element => visible(element) && norm(element.textContent).includes(wanted));
-
-  let textarea = null;
-  for (const row of rows) {
-    const inside = row.querySelector('textarea');
-    if (inside) { textarea = inside; break; }
-    if (row.tagName === 'TR') {
-      const cells = Array.from(row.children);
-      const labelIndex = cells.findIndex(cell => norm(cell.textContent).includes(wanted));
-      if (labelIndex >= 0) {
-        for (let index = labelIndex + 1; index < cells.length; index++) {
-          const next = cells[index].querySelector('textarea');
-          if (next) { textarea = next; break; }
-        }
-        if (textarea) break;
-      }
-    }
-  }
-
-  if (!textarea) {
-    const labels = Array.from(document.querySelectorAll('body *'))
-      .filter(element => visible(element) && norm(element.textContent).includes(wanted));
-    for (const label of labels) {
-      let sibling = label.nextElementSibling;
-      for (let step = 0; step < 5 && sibling; step++, sibling = sibling.nextElementSibling) {
-        if (sibling.tagName === 'TEXTAREA') { textarea = sibling; break; }
-        const nearby = sibling.querySelector?.('textarea');
-        if (nearby) { textarea = nearby; break; }
-      }
-      if (!textarea) textarea = label.querySelector?.('textarea') || null;
-      if (textarea) break;
-    }
-  }
-
-  if (!textarea) return 'notFound';
-  if (requireEmpty && (textarea.value || '').trim()) return 'skipped';
-  textarea.scrollIntoView({behavior: 'auto', block: 'center', inline: 'nearest'});
-  textarea.focus();
-  textarea.value = text || '';
-  textarea.dispatchEvent(new Event('input', {bubbles: true}));
-  textarea.dispatchEvent(new Event('change', {bubbles: true}));
-  if (highlight) {
-    const oldOutline = textarea.style.outline;
-    textarea.style.outline = '3px solid orange';
-    setTimeout(() => { textarea.style.outline = oldOutline; }, 1200);
-  }
-  return 'filled';
+  const wanted = norm(key);
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(element => visible(element) && !element.disabled && !element.readOnly);
+  const rowFor = field => field.closest('tr') || field.closest('.form-group') ||
+    field.closest('.row') || field.parentElement?.parentElement || field.parentElement;
+  const index = fields.findIndex(field => {
+    const row = rowFor(field);
+    return row && visible(row) && norm(row.textContent).includes(wanted);
+  });
+  if (index < 0) return [];
+  const field = fields[index];
+  field.scrollIntoView({behavior: 'auto', block: 'center', inline: 'nearest'});
+  const rect = field.getBoundingClientRect();
+  return [rect.left + rect.width / 2, rect.top + rect.height / 2, index];
 }''';
 
+const _isPortalTextareaEmptyScript = r'''(index) => {
+  const visible = element => !!element && !!element.offsetParent;
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(element => visible(element) && !element.disabled && !element.readOnly);
+  const value = fields[index]?.value || '';
+  return !!fields[index] && (!(value.trim()) || value === '\u200B');
+}''';
+
+const _isPortalTextareaValueScript = r'''(index, value) => {
+  const visible = element => !!element && !!element.offsetParent;
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(element => visible(element) && !element.disabled && !element.readOnly);
+  return !!fields[index] && fields[index].value === value;
+}''';
+
+const _isPortalTextareaMarkerScript = r'''(index) => {
+  const visible = element => !!element && !!element.offsetParent;
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(element => visible(element) && !element.disabled && !element.readOnly);
+  return !!fields[index] && fields[index].value === '\u200B';
+}''';
+
+const _highlightPortalTextareaScript = r'''(index) => {
+  const visible = element => !!element && !!element.offsetParent;
+  const fields = Array.from(document.querySelectorAll('textarea'))
+    .filter(element => visible(element) && !element.disabled && !element.readOnly);
+  const field = fields[index];
+  if (!field) return false;
+  const oldOutline = field.style.outline;
+  field.style.outline = '3px solid orange';
+  setTimeout(() => { field.style.outline = oldOutline; }, 1200);
+  return true;
+}''';
 const _clickSaveButtonScript = r'''() => {
   const norm = value => (value || '').normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-  const controls = Array.from(document.querySelectorAll(
-    'button, input[type="submit"], input[type="button"], a[role="button"]'));
-  const target = controls.find(element => {
-    if (!element.offsetParent || element.disabled) return false;
-    const label = norm(element.innerText || element.value || element.getAttribute('aria-label'));
-    return /^(salvar|gravar|salvar alteracoes|gravar alteracoes)$/.test(label);
-  });
+  const visible = element => !!element && !!element.offsetParent;
+  const fields = Array.from(document.querySelectorAll('textarea')).filter(visible);
+  const diaryForm = fields[0]?.form || fields[0]?.closest('form') || null;
+  const findSave = root => Array.from(root.querySelectorAll(
+    'button, input[type="submit"], input[type="button"], a[role="button"]'))
+    .find(element => {
+      if (!visible(element) || element.disabled) return false;
+      const label = norm(element.innerText || element.value || element.getAttribute('aria-label'));
+      return /^(salvar|gravar|salvar alteracoes|gravar alteracoes)$/.test(label);
+    });
+  const target = (diaryForm && findSave(diaryForm)) || findSave(document);
   if (!target) return false;
   target.click();
   return true;
 }''';
-
 const _saveConfirmationScript = r'''() => {
   const norm = value => (value || '').normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();

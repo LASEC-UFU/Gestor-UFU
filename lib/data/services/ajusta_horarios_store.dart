@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:gestor_ufu/core/utils/text_encoding.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 
 class AjustaHorariosStore {
@@ -78,8 +79,13 @@ class AjustaHorariosStore {
       if (!prefs.containsKey('ajusta_horarios_periodo_letivo')) {
         await prefs.setString('ajusta_horarios_periodo_letivo', defaultTerm);
       }
-      final terms = prefs.getStringList(_termsKey) ?? const <String>[];
-      if (terms.isEmpty) await prefs.setStringList(_termsKey, [defaultTerm]);
+      final terms = AcademicTerm.newestFirst(
+        prefs.getStringList(_termsKey) ?? const <String>[],
+      );
+      await prefs.setStringList(
+        _termsKey,
+        terms.isEmpty ? [defaultTerm] : terms,
+      );
       await prefs.setBool(_initialResetKey, true);
     }
 
@@ -93,10 +99,14 @@ class AjustaHorariosStore {
         await prefs.setString(_keyForTerm(active), previous);
       }
       await prefs.remove(_storageKey);
-      final terms = prefs.getStringList(_termsKey) ?? const <String>[];
+      final terms = AcademicTerm.newestFirst(
+        prefs.getStringList(_termsKey) ?? const <String>[],
+      );
       if (terms.isEmpty) {
         await prefs.setStringList(_termsKey, [active]);
         await prefs.setString('ajusta_horarios_periodo_letivo', active);
+      } else {
+        await prefs.setStringList(_termsKey, terms);
       }
       await prefs.setBool(_termStorageMigrationKey, true);
     }
@@ -320,7 +330,7 @@ class AjustaHorariosStore {
 
     final terms = prefs.getStringList(_termsKey);
     if (terms != null) {
-      final repaired = terms.map(repairMojibake).toList();
+      final repaired = AcademicTerm.newestFirst(terms.map(repairMojibake));
       if (!_sameStrings(terms, repaired)) {
         await prefs.setStringList(_termsKey, repaired);
       }

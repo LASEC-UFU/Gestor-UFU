@@ -15,6 +15,8 @@ import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_pdf_service.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/domain/entities/academic_term.dart';
+import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class AjustaHorariosPage extends StatefulWidget {
@@ -189,11 +191,11 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final savedTerm = rawSavedTerm == null
           ? null
           : _normalizeTermLabel(rawSavedTerm);
-      final terms = (prefs.getStringList(_termsKey) ?? const <String>[])
-          .map(_normalizeTermLabel)
-          .where((term) => term.isNotEmpty)
-          .toSet()
-          .toList();
+      final terms = AcademicTerm.newestFirst(
+        (prefs.getStringList(_termsKey) ?? const <String>[])
+            .map(_normalizeTermLabel)
+            .where((term) => term.isNotEmpty),
+      );
       if (savedTerm?.isNotEmpty == true && !terms.contains(savedTerm)) {
         terms.add(savedTerm!);
       }
@@ -201,7 +203,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       final activeTerm = savedTerm != null && terms.contains(savedTerm)
           ? savedTerm
           : terms.first;
-      await prefs.setStringList(_termsKey, terms);
+      final orderedTerms = AcademicTerm.newestFirst(terms);
+      await prefs.setStringList(_termsKey, orderedTerms);
       await prefs.setString(_termKey, activeTerm);
       final rows = List<HorarioDisciplina>.of(
         await _store.load(term: activeTerm),
@@ -707,7 +710,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           _entries = rows;
           _teacherRoster = teacherRoster;
           _roomRoster = roomRoster;
-          _terms = terms;
+          _terms = orderedTerms;
           _term = activeTerm;
           _programs = usablePrograms;
           _distributionRecords = distribution;
@@ -1120,7 +1123,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   Widget _termSelector() => InkWell(
     onTap: _manageTerms,
     borderRadius: BorderRadius.circular(14),
-    child: _infoPill(Icons.date_range_rounded, _term),
+    child: _infoPill(Icons.date_range_rounded, AcademicTerm.displayName(_term)),
   );
 
   Future<void> _manageTerms() async {
@@ -1143,7 +1146,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                   active ? Icons.radio_button_checked : Icons.radio_button_off,
                   color: active ? AppTheme.primary : AppTheme.textSecondary,
                 ),
-                title: Text(term),
+                title: Text(AcademicTerm.displayName(term)),
                 subtitle: active ? const Text('Em uso') : null,
                 onTap: () => Navigator.pop(dialogContext, term),
               );
@@ -1170,45 +1173,16 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     }
     if (!mounted) return;
 
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Criar per\u00edodo letivo'),
-        content: SizedBox(
-          width: 420,
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Nome do per\u00edodo letivo',
-              hintText: 'Ex.: 1\u00ba semestre de 2027',
-            ),
-            onSubmitted: (text) => Navigator.pop(dialogContext, text.trim()),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
-            child: const Text('Criar e usar'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final value = await AcademicTermDialog.show(context);
     final newTerm = value?.trim() ?? '';
     if (newTerm.isEmpty || !mounted) return;
 
-    final existing = _terms.cast<String?>().firstWhere(
-      (term) => term?.toLowerCase() == newTerm.toLowerCase(),
-      orElse: () => null,
-    );
+    final existing =
+        AcademicTerm.findEquivalent(_terms, newTerm) ??
+        _terms.cast<String?>().firstWhere(
+          (term) => term?.toLowerCase() == newTerm.toLowerCase(),
+          orElse: () => null,
+        );
     final term = existing ?? newTerm;
     if (existing == null) {
       final copyChoice = await showDialog<_TermCopyChoice>(
@@ -1233,7 +1207,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 for (final sourceTerm in _terms)
                   ListTile(
                     leading: const Icon(Icons.content_copy_rounded),
-                    title: Text('Copiar de $sourceTerm'),
+                    title: Text(
+                      'Copiar de ${AcademicTerm.displayName(sourceTerm)}',
+                    ),
                     subtitle: const Text(
                       'Usar a grade atual como ponto de partida.',
                     ),
@@ -1259,7 +1235,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       } else {
         await _clearTermData(term);
       }
-      final updatedTerms = [..._terms, term];
+      final updatedTerms = AcademicTerm.newestFirst([..._terms, term]);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_termsKey, updatedTerms);
       if (mounted) setState(() => _terms = updatedTerms);
@@ -4369,7 +4345,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         );
         if (path == null) return;
         final bytes = await _pdfService.generate(
-          term: _term,
+          term: AcademicTerm.displayName(_term),
           sheets: [
             _createPdfSheet(
               'Sala: $room',
@@ -4440,7 +4416,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             ),
           ];
           final bytes = await _pdfService.generate(
-            term: _term,
+            term: AcademicTerm.displayName(_term),
             sheets: sheets,
             isLightTheme: AppTheme.isLight,
           );
@@ -4499,7 +4475,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       );
       if (path == null) return;
       final bytes = await _pdfService.generate(
-        term: _term,
+        term: AcademicTerm.displayName(_term),
         sheets: sheets,
         isLightTheme: AppTheme.isLight,
       );
@@ -6501,8 +6477,10 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                   ),
                   items: destinations
                       .map(
-                        (term) =>
-                            DropdownMenuItem(value: term, child: Text(term)),
+                        (term) => DropdownMenuItem(
+                          value: term,
+                          child: Text(AcademicTerm.displayName(term)),
+                        ),
                       )
                       .toList(),
                   onChanged: (value) {

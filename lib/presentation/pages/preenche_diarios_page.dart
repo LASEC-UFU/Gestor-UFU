@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
@@ -20,11 +19,13 @@ import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/data/services/diary_automation_service.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
 const _diaryPeriodsKey = 'ajusta_horarios_periodos_letivos';
@@ -106,11 +107,11 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   Future<void> _loadSavedEntries() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _terms = (prefs.getStringList(_diaryPeriodsKey) ?? const <String>[])
-          .map((term) => term.trim())
-          .where((term) => term.isNotEmpty)
-          .toSet()
-          .toList();
+      _terms = AcademicTerm.newestFirst(
+        (prefs.getStringList(_diaryPeriodsKey) ?? const <String>[])
+            .map((term) => term.trim())
+            .where((term) => term.isNotEmpty),
+      );
       if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
       final savedTerm = prefs.getString(_activeDiaryPeriodKey)?.trim();
       _term = savedTerm != null && _terms.contains(savedTerm)
@@ -356,49 +357,26 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     await prefs.setString(_activeDiaryPeriodKey, term);
     setState(() => _term = term);
     await _loadPeriodWorkspace(term, prefs: prefs);
-    _log('Periodo letivo alterado para $term.');
+    _log('Periodo letivo alterado para ${AcademicTerm.displayName(term)}.');
   }
 
   Future<void> _createTerm() async {
-    final controller = TextEditingController();
-    final value = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Criar periodo letivo'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nome do periodo letivo',
-            hintText: 'Ex.: 1o semestre de 2027',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text),
-            child: const Text('Criar'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
+    final value = await AcademicTermDialog.show(context);
     final name = value?.trim() ?? '';
     if (name.isEmpty) return;
-    final existing = _terms.cast<String?>().firstWhere(
-      (term) => term?.toLowerCase() == name.toLowerCase(),
-      orElse: () => null,
-    );
+    final existing =
+        AcademicTerm.findEquivalent(_terms, name) ??
+        _terms.cast<String?>().firstWhere(
+          (term) => term?.toLowerCase() == name.toLowerCase(),
+          orElse: () => null,
+        );
     if (existing != null) {
       await _changeTerm(existing);
       return;
     }
     await _persist();
     final prefs = await SharedPreferences.getInstance();
-    final updated = [..._terms, name];
+    final updated = AcademicTerm.newestFirst([..._terms, name]);
     await prefs.setStringList(_diaryPeriodsKey, updated);
     await prefs.setString(_activeDiaryPeriodKey, name);
     setState(() {
@@ -432,7 +410,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                   active ? Icons.radio_button_checked : Icons.radio_button_off,
                   color: active ? AppTheme.primary : AppTheme.textSecondary,
                 ),
-                title: Text(item),
+                title: Text(AcademicTerm.displayName(item)),
                 subtitle: active ? const Text('Em uso') : null,
                 onTap: () => Navigator.pop(dialogContext, item),
               );
@@ -469,7 +447,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _entries
         ..clear()
         ..addAll(_sortMap(diary.entries));
-      _sourceLabel = diary.sourceLabel ?? '$_term - ${diary.name}';
+      _sourceLabel =
+          diary.sourceLabel ??
+          '${AcademicTerm.displayName(_term)} - ${diary.name}';
     });
     await _persist();
   }
@@ -522,7 +502,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _selectedDiaryId = diary.id;
     });
     await _persist();
-    _log('Diario "$trimmedName" salvo no periodo $_term.');
+    _log(
+      'Diario "$trimmedName" salvo no periodo ${AcademicTerm.displayName(_term)}.',
+    );
   }
 
   Future<List<_SavedDiary>> _loadDiariesForTerm(String term) async {
@@ -557,7 +539,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
               final term = _terms[index];
               return ListTile(
                 leading: const Icon(Icons.date_range_rounded),
-                title: Text(term),
+                title: Text(AcademicTerm.displayName(term)),
                 subtitle: term == _term ? const Text('Período atual') : null,
                 onTap: () => Navigator.pop(dialogContext, term),
               );
@@ -656,7 +638,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _sourceLabel = copy.sourceLabel;
     });
     await _persist();
-    _log('Diário copiado para "$targetName" no período $_term.');
+    _log(
+      'Diário copiado para "$targetName" no período ${AcademicTerm.displayName(_term)}.',
+    );
   }
 
   void _log(String message) {
@@ -775,7 +759,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       rowIndex++
     ) {
       final row = rows[rowIndex];
-      final date = _parseExcelDate(_cell(row, header['data']!));
+      final date = _parseWorksheetDate(_cell(row, header['data']!), rows);
       final modality = _cellText(_cell(row, header['modality']!)).toLowerCase();
       final content = _cellText(_cell(row, header['content']!)).trim();
       final suffix = _stripAccents(modality).contains('teor')
@@ -784,7 +768,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
           ? 'P'
           : null;
       if (date == null || suffix == null || content.isEmpty) {
-        if (row.any((cell) => cell?.value != null)) skipped++;
+        if (modality.isNotEmpty || content.isNotEmpty) skipped++;
         continue;
       }
       final key = '${_formatDate(date)} -$suffix';
@@ -857,6 +841,57 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     return date.year == year && date.month == month && date.day == day
         ? date
         : null;
+  }
+
+  DateTime? _parseWorksheetDate(
+    Data? cell,
+    List<List<Data?>> rows, [
+    Set<String>? references,
+  ]) {
+    final value = cell?.value;
+    if (value is! FormulaCellValue) return _parseExcelDate(cell);
+
+    final formula = value.formula
+        .trim()
+        .replaceFirst(RegExp(r'^='), '')
+        .replaceAll(r'$', '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .toUpperCase();
+    final match = RegExp(
+      r'^([A-Z]{1,3})(\d+)(?:([+-])(\d+(?:\.\d+)?))?$',
+    ).firstMatch(formula);
+    if (match == null) return null;
+
+    var column = 0;
+    for (final character in match.group(1)!.codeUnits) {
+      column = column * 26 + character - 64;
+    }
+    final rowIndex = int.parse(match.group(2)!) - 1;
+    final columnIndex = column - 1;
+    if (rowIndex < 0 || rowIndex >= rows.length || columnIndex < 0) {
+      return null;
+    }
+
+    final address = '${match.group(1)}${match.group(2)}';
+    final visited = references ?? <String>{};
+    if (!visited.add(address)) return null;
+    final referencedRows = rows[rowIndex];
+    final baseDate = _parseWorksheetDate(
+      _cell(referencedRows, columnIndex),
+      rows,
+      visited,
+    );
+    visited.remove(address);
+    if (baseDate == null) return null;
+
+    final offset = double.tryParse(match.group(4) ?? '0');
+    if (offset == null) return null;
+    final signedOffset = match.group(3) == '-' ? -offset : offset;
+    return baseDate.add(
+      Duration(
+        microseconds: (signedOffset * Duration.microsecondsPerDay).round(),
+      ),
+    );
   }
 
   Future<void> _importJson() async {
@@ -1620,21 +1655,48 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   Future<void> _shiftDates() async {
     if (_entries.isEmpty) return;
     final amountController = TextEditingController(text: '1');
+    var shiftMode = 'amount';
     var unit = 'Dias';
     var filter = 'all';
     DateTime? startDate;
+    DateTime? targetDate;
     final selectedKeys = <String>{};
-    final params =
-        await showDialog<(String, int, String, DateTime?, Set<String>)>(
-          context: context,
-          builder: (context) => StatefulBuilder(
-            builder: (context, setDialogState) => AlertDialog(
-              title: const Text('Ajustar datas'),
-              content: SizedBox(
-                width: 430,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+    final params = await showDialog<(String, int, String, DateTime?, Set<String>)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final calculatedOffset = startDate == null || targetDate == null
+              ? null
+              : DateUtils.dateOnly(
+                  targetDate!,
+                ).difference(DateUtils.dateOnly(startDate!)).inDays;
+          return AlertDialog(
+            title: const Text('Ajustar datas'),
+            content: SizedBox(
+              width: 430,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    value: shiftMode,
+                    decoration: const InputDecoration(
+                      labelText: 'Como definir a mudança',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'amount',
+                        child: Text('Informar quantidade'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'targetDate',
+                        child: Text('Escolher nova data'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setDialogState(() => shiftMode = v);
+                    },
+                  ),
+                  if (shiftMode == 'amount') ...[
                     DropdownButtonFormField<String>(
                       value: unit,
                       decoration: const InputDecoration(labelText: 'Unidade'),
@@ -1659,59 +1721,144 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                         labelText: 'Quantidade (pode ser negativa)',
                       ),
                     ),
-                    DropdownButtonFormField<String>(
-                      value: filter,
-                      decoration: const InputDecoration(
-                        labelText: 'Aplicar em',
+                  ] else ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            startDate == null
+                                ? 'Data original: selecione'
+                                : 'Data original: ${_formatDate(startDate!)}',
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final dates = _entries.keys
+                                .map(_dateFromKey)
+                                .whereType<DateTime>()
+                                .toList();
+                            final selected = await showDatePicker(
+                              context: context,
+                              initialDate:
+                                  startDate ??
+                                  (dates.isEmpty
+                                      ? DateTime.now()
+                                      : dates.reduce(
+                                          (a, b) => a.isBefore(b) ? a : b,
+                                        )),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (selected != null) {
+                              setDialogState(() => startDate = selected);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_month_rounded),
+                          label: const Text('Data original'),
+                        ),
+                        if (startDate != null)
+                          IconButton(
+                            tooltip: 'Limpar data original',
+                            onPressed: () => setDialogState(() {
+                              startDate = null;
+                            }),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            targetDate == null
+                                ? 'Nova data: selecione'
+                                : 'Nova data: ${_formatDate(targetDate!)}',
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () async {
+                            final selected = await showDatePicker(
+                              context: context,
+                              initialDate:
+                                  targetDate ?? startDate ?? DateTime.now(),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (selected != null) {
+                              setDialogState(() => targetDate = selected);
+                            }
+                          },
+                          icon: const Icon(Icons.event_available_rounded),
+                          label: const Text('Data de destino'),
+                        ),
+                        if (targetDate != null)
+                          IconButton(
+                            tooltip: 'Limpar data de destino',
+                            onPressed: () => setDialogState(() {
+                              targetDate = null;
+                            }),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                      ],
+                    ),
+                    Text(
+                      calculatedOffset == null
+                          ? 'Selecione as duas datas para calcular o deslocamento.'
+                          : 'Deslocamento calculado: ${calculatedOffset > 0 ? '+' : ''}$calculatedOffset dias',
+                      style: TextStyle(color: AppTheme.textSecondary),
+                    ),
+                  ],
+                  DropdownButtonFormField<String>(
+                    value: filter,
+                    decoration: const InputDecoration(labelText: 'Aplicar em'),
+                    items: const [
+                      DropdownMenuItem(value: 'all', child: Text('Todas')),
+                      DropdownMenuItem(
+                        value: 'theoretical',
+                        child: Text('S\u00f3 T (Te\u00f3ricas)'),
                       ),
-                      items: const [
-                        DropdownMenuItem(value: 'all', child: Text('Todas')),
-                        DropdownMenuItem(
-                          value: 'theoretical',
-                          child: Text('S\u00f3 T (Te\u00f3ricas)'),
+                      DropdownMenuItem(
+                        value: 'practical',
+                        child: Text('S\u00f3 P (Pr\u00e1ticas)'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'selected',
+                        child: Text('Selecionadas'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setDialogState(() => filter = v);
+                    },
+                  ),
+                  if (filter == 'selected') ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text('${selectedKeys.length} selecionada(s)'),
                         ),
-                        DropdownMenuItem(
-                          value: 'practical',
-                          child: Text('S\u00f3 P (Pr\u00e1ticas)'),
+                        TextButton(
+                          onPressed: () => setDialogState(
+                            () => selectedKeys.addAll(_entries.keys),
+                          ),
+                          child: const Text('Todas'),
                         ),
-                        DropdownMenuItem(
-                          value: 'selected',
-                          child: Text('Selecionadas'),
+                        TextButton(
+                          onPressed: () => setDialogState(selectedKeys.clear),
+                          child: const Text('Limpar'),
                         ),
                       ],
-                      onChanged: (v) {
-                        if (v != null) setDialogState(() => filter = v);
-                      },
                     ),
-                    if (filter == 'selected') ...[
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${selectedKeys.length} selecionada(s)',
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () => setDialogState(
-                              () => selectedKeys.addAll(_entries.keys),
-                            ),
-                            child: const Text('Todas'),
-                          ),
-                          TextButton(
-                            onPressed: () => setDialogState(selectedKeys.clear),
-                            child: const Text('Limpar'),
-                          ),
-                        ],
-                      ),
-                      SizedBox(
-                        height: 190,
-                        child: ListView(
-                          children: _sortMap(_entries).entries.map((entry) {
-                            final isPractical = entry.key
-                                .toUpperCase()
-                                .contains('-P');
-                            return CheckboxListTile(
+                    SizedBox(
+                      height: 190,
+                      child: ListView(
+                        children: _sortMap(_entries).entries.map((entry) {
+                          final isPractical = entry.key.toUpperCase().contains(
+                            '-P',
+                          );
+                          return Material(
+                            color: Colors.transparent,
+                            child: CheckboxListTile(
                               dense: true,
                               contentPadding: EdgeInsets.zero,
                               value: selectedKeys.contains(entry.key),
@@ -1729,11 +1876,13 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                                   selectedKeys.remove(entry.key);
                                 }
                               }),
-                            );
-                          }).toList(),
-                        ),
+                            ),
+                          );
+                        }).toList(),
                       ),
-                    ],
+                    ),
+                  ],
+                  if (shiftMode == 'amount') ...[
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -1779,31 +1928,38 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                       ],
                     ),
                   ],
-                ),
+                ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final amount = int.tryParse(amountController.text);
-                    if (amount != null)
-                      Navigator.pop(context, (
-                        unit,
-                        amount,
-                        filter,
-                        startDate,
-                        selectedKeys,
-                      ));
-                  },
-                  child: const Text('Aplicar'),
-                ),
-              ],
             ),
-          ),
-        );
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: shiftMode == 'targetDate' && calculatedOffset == null
+                    ? null
+                    : () {
+                        final amount = shiftMode == 'targetDate'
+                            ? calculatedOffset
+                            : int.tryParse(amountController.text);
+                        if (amount != null) {
+                          Navigator.pop(context, (
+                            shiftMode == 'targetDate' ? 'Dias' : unit,
+                            amount,
+                            filter,
+                            startDate,
+                            selectedKeys,
+                          ));
+                        }
+                      },
+                child: const Text('Aplicar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
     amountController.dispose();
     if (params == null) return;
     final result = _shiftMap(
@@ -1973,6 +2129,44 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     }
   }
 
+  Future<void> _clearPortalDiary() async {
+    if (!_browserReady || !_automation.isConnected || _filling) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Limpar di\u00e1rio no Portal?'),
+        content: const Text(
+          'O Portal remove espa\u00e7os comuns ao salvar e restaura o conte\u00fado anterior. Para deix\u00e1-lo visualmente em branco, o Gestor vai inserir um caractere de largura zero (U+200B). Esse marcador invis\u00edvel ficar\u00e1 armazenado no Portal. A p\u00e1gina n\u00e3o ser\u00e1 recarregada; confira e clique em Salvar no Portal.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            child: const Text('Limpar com marcador invis\u00edvel'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    setState(() => _filling = true);
+    try {
+      _log('Varrendo as datas do di\u00e1rio aberto no Portal.');
+      final result = await _automation.clearDiaryFields(log: _log);
+      _log(
+        'Campos visualmente limpos: ${result.marked} marcador(es) invis\u00edvel(is) inserido(s), ${result.notFound} n\u00e3o localizado(s). Confira e clique em Salvar no Portal para gravar.',
+      );
+    } catch (error) {
+      _log('Falha ao limpar o di\u00e1rio no Portal: $error');
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _filling = false);
+    }
+  }
+
   Future<void> _showMessage(String title, String message) => showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -2004,6 +2198,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
               _PageHeader(
                 onBack: () => context.go('/'),
                 entryCount: _entries.length,
+                term: _term,
+                onManageTerms: _manageTerms,
               ),
               Expanded(
                 child: _loading
@@ -2014,8 +2210,6 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                           final left = _WorkspacePanel(
                             entryCount: _entries.length,
                             browserReady: _browserReady,
-                            term: _term,
-                            onManageTerms: _manageTerms,
                             savedDiaries: _savedDiaries,
                             selectedDiaryId: _selectedDiaryId,
                             onSelectDiary: _selectSavedDiary,
@@ -2072,6 +2266,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onOpen: _openBrowser,
                             onConfigureCredentials: _configurePortalCredentials,
                             onFill: _fillPortal,
+                            onClearPortalDiary: _clearPortalDiary,
                             onHighlight: (value) =>
                                 setState(() => _highlight = value),
                             onRequireEmpty: (value) =>
@@ -2114,9 +2309,16 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
 }
 
 class _PageHeader extends StatelessWidget {
-  const _PageHeader({required this.onBack, required this.entryCount});
+  const _PageHeader({
+    required this.onBack,
+    required this.entryCount,
+    required this.term,
+    required this.onManageTerms,
+  });
   final VoidCallback onBack;
   final int entryCount;
+  final String term;
+  final VoidCallback onManageTerms;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(28, 16, 28, 8),
@@ -2164,6 +2366,38 @@ class _PageHeader extends StatelessWidget {
           ],
         ),
         const Spacer(),
+        InkWell(
+          onTap: onManageTerms,
+          borderRadius: BorderRadius.circular(13),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            decoration: BoxDecoration(
+              color: AppTheme.bgCard.withAlpha(160),
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: AppTheme.divider),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.date_range_rounded,
+                  size: 16,
+                  color: AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  AcademicTerm.displayName(term),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
         _StatusPill(count: entryCount),
         const SizedBox(width: 10),
         const ThemeSelector(compact: true),
@@ -2192,8 +2426,6 @@ class _WorkspacePanel extends StatelessWidget {
   const _WorkspacePanel({
     required this.entryCount,
     required this.browserReady,
-    required this.term,
-    required this.onManageTerms,
     required this.savedDiaries,
     required this.selectedDiaryId,
     required this.onSelectDiary,
@@ -2224,8 +2456,6 @@ class _WorkspacePanel extends StatelessWidget {
   });
   final int entryCount;
   final bool browserReady;
-  final String term;
-  final VoidCallback onManageTerms;
   final List<_SavedDiary> savedDiaries;
   final String? selectedDiaryId;
   final ValueChanged<String?> onSelectDiary;
@@ -2298,39 +2528,6 @@ class _WorkspacePanel extends StatelessWidget {
                     ),
                   ),
                 ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: InkWell(
-                  onTap: onManageTerms,
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
-                    ),
-                    decoration: AppTheme.glassDecoration(opacity: .06),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.calendar_month_rounded,
-                          size: 17,
-                          color: AppTheme.textSecondary,
-                        ),
-                        const SizedBox(width: 9),
-                        Text(
-                          term,
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -2499,7 +2696,7 @@ class _WorkspacePanel extends StatelessWidget {
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
                     onPressed: entryCount == 0 ? null : onClear,
-                    tooltip: 'Limpar todos os lancamentos',
+                    tooltip: 'Limpar todos os lançamentos',
                     style: IconButton.styleFrom(
                       foregroundColor: AppTheme.danger,
                     ),
@@ -2724,6 +2921,7 @@ class _BrowserPanel extends StatelessWidget {
     required this.onOpen,
     required this.onConfigureCredentials,
     required this.onFill,
+    required this.onClearPortalDiary,
     required this.onHighlight,
     required this.onRequireEmpty,
   });
@@ -2736,6 +2934,7 @@ class _BrowserPanel extends StatelessWidget {
   final bool opening, browserReady, filling, highlight, requireEmpty;
   final String? error;
   final VoidCallback onOpen, onConfigureCredentials, onFill;
+  final VoidCallback onClearPortalDiary;
   final ValueChanged<bool> onHighlight, onRequireEmpty;
 
   @override
@@ -2887,6 +3086,23 @@ class _BrowserPanel extends StatelessWidget {
                         )
                       : const Icon(Icons.play_arrow_rounded),
                   label: Text(filling ? 'Preenchendo…' : 'Preencher diário'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: browserReady && !filling
+                      ? onClearPortalDiary
+                      : null,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppTheme.danger,
+                    side: BorderSide(
+                      color: AppTheme.danger.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                  label: const Text('Limpar di\u00e1rio no Portal'),
                 ),
               ),
               if (error != null)

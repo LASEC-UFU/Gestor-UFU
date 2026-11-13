@@ -3,6 +3,7 @@ import 'package:uuid/uuid.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/utils/date_calculator.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/repositories/i_config_repository.dart';
@@ -37,11 +38,11 @@ class ConfigController extends ChangeNotifier {
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
-      _terms = (prefs.getStringList(_termsKey) ?? const <String>[])
-          .map((term) => term.trim())
-          .where((term) => term.isNotEmpty)
-          .toSet()
-          .toList();
+      _terms = AcademicTerm.newestFirst(
+        (prefs.getStringList(_termsKey) ?? const <String>[])
+            .map((term) => term.trim())
+            .where((term) => term.isNotEmpty),
+      );
       if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
       final storedTerm = prefs.getString(_termKey)?.trim();
       _activeTerm = storedTerm != null && _terms.contains(storedTerm)
@@ -85,21 +86,24 @@ class ConfigController extends ChangeNotifier {
   }
 
   Future<void> createTerm(String name) async {
-    final term = name.trim();
-    if (term.isEmpty) return;
-    final existing = _terms.cast<String?>().firstWhere(
-      (item) => item?.toLowerCase() == term.toLowerCase(),
-      orElse: () => null,
-    );
+    final requested = name.trim();
+    if (requested.isEmpty) return;
+    final canonical = AcademicTerm.parse(requested)?.key ?? requested;
+    final existing =
+        AcademicTerm.findEquivalent(_terms, canonical) ??
+        _terms.cast<String?>().firstWhere(
+          (item) => item?.toLowerCase() == canonical.toLowerCase(),
+          orElse: () => null,
+        );
     if (existing != null) {
       await setActiveTerm(existing);
       return;
     }
-    _terms = [..._terms, term];
-    _activeTerm = term;
+    _terms = AcademicTerm.newestFirst([..._terms, canonical]);
+    _activeTerm = canonical;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_termsKey, _terms);
-    await prefs.setString(_termKey, term);
+    await prefs.setString(_termKey, canonical);
     notifyListeners();
     await loadAll();
   }

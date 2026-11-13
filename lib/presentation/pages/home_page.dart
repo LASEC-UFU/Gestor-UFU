@@ -8,6 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/template_generator.dart';
 import 'package:gestor_ufu/data/web_xlsx_picker.dart';
+import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
@@ -16,6 +17,7 @@ import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 import 'package:gestor_ufu/presentation/widgets/word_table_dialog.dart';
 import 'package:gestor_ufu/presentation/widgets/moodle_config_history_dialog.dart';
+import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
@@ -200,7 +202,10 @@ class _HomePageState extends State<HomePage> {
                 .map(
                   (term) => DropdownMenuItem(
                     value: term,
-                    child: Text(term, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      AcademicTerm.displayName(term),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 )
                 .toList(),
@@ -225,36 +230,8 @@ class _HomePageState extends State<HomePage> {
   );
 
   Future<void> _showCreateTermDialog(ConfigController controller) async {
-    final nameController = TextEditingController();
-    final name = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Criar período letivo'),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Nome do período letivo',
-            hintText: 'Ex.: 1º semestre de 2027',
-          ),
-          onSubmitted: (value) => Navigator.pop(dialogContext, value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, nameController.text),
-            child: const Text('Criar e usar'),
-          ),
-        ],
-      ),
-    );
-    nameController.dispose();
-    if (name?.trim().isNotEmpty == true) {
-      await controller.createTerm(name!.trim());
-    }
+    final name = await AcademicTermDialog.show(context);
+    if (name != null) await controller.createTerm(name);
   }
 
   Widget _buildImportStatusBanner() {
