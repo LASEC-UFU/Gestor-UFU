@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:go_router/go_router.dart';
+import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/presentation/pages/dashboard_page.dart';
 import 'package:gestor_ufu/presentation/pages/home_page.dart';
 import 'package:gestor_ufu/presentation/pages/sei_tree_page.dart';
@@ -16,7 +18,9 @@ class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
   static final GoRouter router = GoRouter(
     navigatorKey: rootNavigatorKey,
-    initialLocation: '/',
+    initialLocation: kDebugMode && diaryAutomationDebugEnabled
+        ? '/diario'
+        : '/',
     routes: [
       GoRoute(path: '/', builder: (context, state) => const DashboardPage()),
       GoRoute(path: '/moodle', builder: (context, state) => const HomePage()),

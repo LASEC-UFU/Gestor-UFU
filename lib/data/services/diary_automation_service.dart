@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
@@ -29,12 +33,49 @@ class DiaryClearResult {
   final int notFound;
 }
 
+class PortalDiaryDownload {
+  const PortalDiaryDownload({
+    required this.term,
+    required this.code,
+    required this.name,
+    required this.className,
+    required this.diaryFieldId,
+    required this.originFieldId,
+    required this.typeFieldId,
+  });
+
+  final String term;
+  final String code;
+  final String name;
+  final String className;
+  final String diaryFieldId;
+  final String originFieldId;
+  final String typeFieldId;
+}
+
+class PortalDiaryDownloadResult {
+  const PortalDiaryDownloadResult({
+    required this.downloaded,
+    required this.failed,
+  });
+
+  final int downloaded;
+  final int failed;
+}
+
 /// Automação local em Dart via Chrome DevTools Protocol (Puppeteer).
 /// O navegador abre visível e mantém um perfil separado para preservar a sessão.
 class DiaryAutomationService {
+  static final DiaryAutomationService instance = DiaryAutomationService();
+
   Browser? _browser;
   Page? _page;
   bool _saveMonitorActive = false;
+  HttpServer? _debugServer;
+  StreamSubscription<HttpRequest>? _debugServerSubscription;
+  String? _debugToken;
+  File? _debugBridgeInfoFile;
+  String? _debugDiaryListUrl;
 
   bool get isConnected =>
       _browser?.isConnected == true && _page != null && !_page!.isClosed;
@@ -58,6 +99,7 @@ class DiaryAutomationService {
         log: log,
       );
       await existingPage.bringToFront();
+      await _startDebugBridge(log);
       return existingPage.url ?? url;
     }
 
@@ -70,6 +112,38 @@ class DiaryAutomationService {
 
     final profileDir = _profileDirectory();
     await Directory(profileDir).create(recursive: true);
+    final activePortFile = File(p.join(profileDir, 'DevToolsActivePort'));
+    if (await activePortFile.exists()) {
+      try {
+        final activePort = (await activePortFile.readAsLines()).first.trim();
+        if (int.tryParse(activePort) != null) {
+          _browser = await puppeteer.connect(
+            browserUrl: 'http://127.0.0.1:$activePort',
+            defaultViewport: null,
+          );
+          final existingPages = await _browser!.pages;
+          _page = existingPages.isEmpty
+              ? await _browser!.newPage()
+              : existingPages.first;
+          await _page!.goto(url, wait: Until.domContentLoaded);
+          await _tryPortalLogin(
+            _page!,
+            username: username,
+            password: password,
+            log: log,
+          );
+          await _page!.bringToFront();
+          await _startDebugBridge(log);
+          return _page!.url ?? url;
+        }
+      } catch (error) {
+        log?.call(
+          'NÃ£o consegui reconectar ao Edge jÃ¡ aberto; tentando iniciar uma nova sessÃ£o: $error',
+        );
+        _browser = null;
+        _page = null;
+      }
+    }
     _browser = await puppeteer.launch(
       executablePath: edgePath,
       headless: false,
@@ -89,7 +163,220 @@ class DiaryAutomationService {
       log: log,
     );
     await _page!.bringToFront();
+    await _startDebugBridge(log);
     return _page!.url ?? url;
+  }
+
+  Future<void> _startDebugBridge(DiaryAutomationLog? log) async {
+    if (!kDebugMode || !diaryAutomationDebugEnabled || _debugServer != null) {
+      return;
+    }
+    final token = base64UrlEncode(
+      List<int>.generate(32, (_) => Random.secure().nextInt(256)),
+    ).replaceAll('=', '');
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    _debugServer = server;
+    _debugToken = token;
+    _debugServerSubscription = server.listen((request) {
+      unawaited(_handleDebugRequest(request));
+    });
+    final infoFile = File(
+      p.join(Directory.systemTemp.path, 'GestorUFU', 'diary-debug-bridge.json'),
+    );
+    await infoFile.parent.create(recursive: true);
+    await infoFile.writeAsString(
+      jsonEncode({'port': server.port, 'token': token}),
+      flush: true,
+    );
+    _debugBridgeInfoFile = infoFile;
+    log?.call(
+      'Canal local de diagnóstico do Edge ativo (somente debug; vinculado a localhost).',
+    );
+  }
+
+  Future<void> _handleDebugRequest(HttpRequest request) async {
+    final response = request.response;
+    try {
+      final remoteAddress = request.connectionInfo?.remoteAddress;
+      if (remoteAddress == null ||
+          !remoteAddress.isLoopback ||
+          request.headers.value(HttpHeaders.authorizationHeader) !=
+              'Bearer $_debugToken') {
+        response.statusCode = HttpStatus.forbidden;
+        await response.close();
+        return;
+      }
+      final page = _page;
+      if (!isConnected || page == null) {
+        await _writeDebugJson(response, HttpStatus.serviceUnavailable, {
+          'error': 'Edge/Puppeteer não está conectado.',
+        });
+        return;
+      }
+      final path = request.uri.path;
+      if (request.method == 'GET' && path == '/api/status') {
+        final state = await page.evaluate<Map<String, dynamic>>(
+          _inspectPortalDiaryPageScript,
+        );
+        state['frames'] = [for (final frame in page.frames) frame.url];
+        state['browserPages'] = [
+          for (final browserPage in await _browser!.pages)
+            await browserPage.evaluate<Map<String, dynamic>>(
+              _inspectPortalDiaryPageScript,
+            ),
+        ];
+        await _writeDebugJson(response, HttpStatus.ok, state);
+        return;
+      }
+      if (request.method == 'GET' && path == '/api/help') {
+        await _writeDebugJson(response, HttpStatus.ok, {
+          'routes': {
+            'GET /api/status': 'Estado e resumo da página atual do Edge.',
+            'GET /api/screenshot': 'Captura PNG da página atual.',
+            'GET /api/diaries':
+                'Linhas encontradas e parâmetros do botão Baixar.',
+            'POST /api/download-diario':
+                'JSON {"index": N}; aciona a seta Baixar e salva o PDF de teste em pasta temporaria.',
+            'POST /api/back-to-list': 'Volta à lista do Diário Eletrônico.',
+          },
+        });
+        return;
+      }
+      if (request.method == 'GET' && path == '/api/screenshot') {
+        response.headers.contentType = ContentType('image', 'png');
+        response.headers.set('Cache-Control', 'no-store');
+        response.add(await page.screenshot());
+        await response.close();
+        return;
+      }
+      if (request.method == 'GET' && path == '/api/diaries') {
+        final diaries = await findPortalDiaryDownloads();
+        await _writeDebugJson(response, HttpStatus.ok, {
+          'count': diaries.length,
+          'diaries': [
+            for (var index = 0; index < diaries.length; index++)
+              {
+                'index': index,
+                'term': diaries[index].term,
+                'code': diaries[index].code,
+                'name': diaries[index].name,
+                'class': diaries[index].className,
+                'arguments': [
+                  diaries[index].diaryFieldId,
+                  diaries[index].originFieldId,
+                  diaries[index].typeFieldId,
+                ],
+              },
+          ],
+        });
+        return;
+      }
+      if (request.method == 'POST' && path == '/api/download-diario') {
+        final payload = await _readDebugJson(request);
+        final index = payload['index'];
+        if (index is! int) {
+          await _writeDebugJson(response, HttpStatus.badRequest, {
+            'error': 'Informe o indice do diario na lista atual.',
+          });
+          return;
+        }
+        final diaries = await findPortalDiaryDownloads();
+        if (index < 0 || index >= diaries.length) {
+          await _writeDebugJson(response, HttpStatus.badRequest, {
+            'error': 'Indice fora da lista atual (${diaries.length} diarios).',
+          });
+          return;
+        }
+        final diary = diaries[index];
+        final directory = Directory(
+          p.join(Directory.systemTemp.path, 'GestorUFU', 'DiaryDebugDownloads'),
+        );
+        await directory.create(recursive: true);
+        final before = await _listDownloadedFiles(directory);
+        await _browser!.browser.setDownloadBehavior(
+          'allow',
+          downloadPath: directory.path,
+        );
+        var clicked = false;
+        File? file;
+        try {
+          clicked = await _invokePortalDiaryDownload(
+            page,
+            diary,
+            const Duration(seconds: 10),
+          );
+          if (clicked) {
+            file = await _waitForDownloadedFile(
+              directory,
+              before,
+              const Duration(seconds: 45),
+            );
+          }
+        } finally {
+          await _browser!.browser.setDownloadBehavior('default');
+        }
+        await _writeDebugJson(response, HttpStatus.ok, {
+          'clicked': clicked,
+          'downloaded': file != null,
+          'index': index,
+          'term': diary.term,
+          'code': diary.code,
+          'class': diary.className,
+          'arguments': [
+            diary.diaryFieldId,
+            diary.originFieldId,
+            diary.typeFieldId,
+          ],
+          'file': file?.path,
+          'directory': directory.path,
+        });
+        return;
+      }
+      if (request.method == 'POST' && path == '/api/back-to-list') {
+        final listUrl = _debugDiaryListUrl;
+        if (listUrl == null || listUrl.isEmpty) {
+          await _writeDebugJson(response, HttpStatus.conflict, {
+            'error': 'Leia a lista de diários antes de voltar para ela.',
+          });
+          return;
+        }
+        await page.goto(listUrl, wait: Until.domContentLoaded);
+        await _writeDebugJson(response, HttpStatus.ok, {'url': page.url});
+        return;
+      }
+      await _writeDebugJson(response, HttpStatus.notFound, {
+        'error': 'Rota de diagnóstico inexistente.',
+      });
+    } catch (error) {
+      await _writeDebugJson(response, HttpStatus.internalServerError, {
+        'error': '$error',
+      });
+    }
+  }
+
+  Future<Map<String, dynamic>> _readDebugJson(HttpRequest request) async {
+    if (request.contentLength > 4096) {
+      throw const HttpException('Corpo da requisição excede 4 KB.');
+    }
+    final text = await utf8.decoder.bind(request).join();
+    if (text.trim().isEmpty) return <String, dynamic>{};
+    final value = jsonDecode(text);
+    if (value is! Map) {
+      throw const FormatException('JSON precisa ser um objeto.');
+    }
+    return Map<String, dynamic>.from(value);
+  }
+
+  Future<void> _writeDebugJson(
+    HttpResponse response,
+    int statusCode,
+    Object body,
+  ) async {
+    response.statusCode = statusCode;
+    response.headers.contentType = ContentType.json;
+    response.headers.set('Cache-Control', 'no-store');
+    response.write(jsonEncode(body));
+    await response.close();
   }
 
   Future<void> _tryPortalLogin(
@@ -100,6 +387,14 @@ class DiaryAutomationService {
   }) async {
     if (username == null || username.trim().isEmpty || password == null) {
       return;
+    }
+    try {
+      if (await page.evaluate<bool>(_isAuthenticatedPortalPageScript)) {
+        log?.call('Sessão autenticada do Portal do Docente detectada.');
+        return;
+      }
+    } catch (_) {
+      // The page may still be navigating; continue with the normal login check.
     }
     final host = Uri.tryParse(page.url ?? '')?.host.toLowerCase() ?? '';
     if (host != 'ufu.br' && !host.endsWith('.ufu.br')) {
@@ -382,7 +677,203 @@ class DiaryAutomationService {
     )).whereType<String>().toSet().toList();
   }
 
+  Future<List<PortalDiaryDownload>> findPortalDiaryDownloads() async {
+    final page = _page;
+    if (!isConnected || page == null) {
+      throw StateError(
+        'Abra o Portal do Docente e entre em Diário Eletrônico.',
+      );
+    }
+    final rows = await page.evaluate<List<dynamic>>(
+      _collectPortalDiaryDownloadsScript,
+    );
+    if (rows.isEmpty) {
+      throw StateError(
+        'Não encontrei a tabela com as colunas Ano/Período e Baixar. Abra a lista de Diários de Classe no Portal e tente novamente.',
+      );
+    }
+    if (rows.first is List && (rows.first as List).first == '__error__') {
+      final first = rows.first as List;
+      final reason = first.length > 1 ? first[1].toString() : null;
+      throw StateError(reason ?? 'Não foi possível ler a tabela de diários.');
+    }
+    final diaries = rows
+        .whereType<List<dynamic>>()
+        .where((row) => row.length >= 7)
+        .map((row) {
+          return PortalDiaryDownload(
+            term: row[0].toString(),
+            code: row[1].toString(),
+            name: row[2].toString(),
+            className: row[3].toString(),
+            diaryFieldId: row[4].toString(),
+            originFieldId: row[5].toString(),
+            typeFieldId: row[6].toString(),
+          );
+        })
+        .toList();
+    if (diaries.isNotEmpty) _debugDiaryListUrl = page.url;
+    return diaries;
+  }
+
+  Future<PortalDiaryDownloadResult> downloadPortalDiaries(
+    List<PortalDiaryDownload> diaries,
+    String directoryPath, {
+    required DiaryAutomationLog log,
+  }) async {
+    final page = _page;
+    if (!isConnected || page == null) {
+      throw StateError('A sessão do Portal do Docente não está conectada.');
+    }
+    final listUrl = page.url;
+    if (listUrl == null || listUrl.isEmpty) {
+      throw StateError(
+        'Não consegui identificar a página da lista de diários.',
+      );
+    }
+    final outputDirectory = Directory(directoryPath);
+    await outputDirectory.create(recursive: true);
+    await _browser!.browser.setDownloadBehavior(
+      'allow',
+      downloadPath: outputDirectory.path,
+    );
+    var downloaded = 0;
+    var failed = 0;
+    try {
+      for (var index = 0; index < diaries.length; index++) {
+        final diary = diaries[index];
+        final detail = '${diary.term} · ${diary.code} · ${diary.className}';
+        log('Baixando ${index + 1}/${diaries.length}: $detail.');
+        try {
+          final pdfFilesBefore = await _listDownloadedFiles(outputDirectory);
+          final clicked = await _invokePortalDiaryDownload(
+            page,
+            diary,
+            const Duration(seconds: 20),
+          );
+          if (!clicked) {
+            failed++;
+            log('Não localizei a ação baixarDiario para $detail.');
+            continue;
+          }
+          log('Baixar acionado; aguardando o PDF direto do Portal.');
+          final newFile = await _waitForDownloadedFile(
+            outputDirectory,
+            pdfFilesBefore,
+            const Duration(seconds: 45),
+          );
+          if (newFile == null) {
+            failed++;
+            log('O Portal não concluiu o download de $detail em 45 segundos.');
+            continue;
+          }
+          downloaded++;
+          log('Arquivo original salvo: ${p.basename(newFile.path)}.');
+        } catch (error) {
+          failed++;
+          log('Falha ao baixar $detail: $error');
+        } finally {
+          if (page.url != listUrl) {
+            try {
+              await page.goto(listUrl, wait: Until.domContentLoaded);
+              await Future<void>.delayed(const Duration(milliseconds: 500));
+            } catch (error) {
+              log('Nao consegui voltar a lista para continuar: $error');
+            }
+          }
+        }
+      }
+    } finally {
+      await _browser!.browser.setDownloadBehavior('default');
+    }
+    return PortalDiaryDownloadResult(downloaded: downloaded, failed: failed);
+  }
+
+  Future<Map<String, DateTime>> _listDownloadedFiles(
+    Directory directory,
+  ) async {
+    final files = <String, DateTime>{};
+    await for (final entity in directory.list(followLinks: false)) {
+      if (entity is File) files[entity.path] = await entity.lastModified();
+    }
+    return files;
+  }
+
+  Future<bool> _invokePortalDiaryDownload(
+    Page page,
+    PortalDiaryDownload diary,
+    Duration timeout,
+  ) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final position = await page.evaluate<List<dynamic>>(
+          _invokePortalDiaryDownloadScript,
+          args: [diary.diaryFieldId, diary.originFieldId, diary.typeFieldId],
+        );
+        if (position.length >= 2) {
+          await page.mouse.click(
+            Point(
+              (position[0] as num).toDouble(),
+              (position[1] as num).toDouble(),
+            ),
+          );
+          return true;
+        }
+      } catch (_) {
+        // Aguarda a lista ficar pronta e tenta novamente o clique exato da linha.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    return false;
+  }
+
+  Future<File?> _waitForDownloadedFile(
+    Directory directory,
+    Map<String, DateTime> existingFiles,
+    Duration timeout,
+  ) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final candidates = <File>[];
+      await for (final entity in directory.list(followLinks: false)) {
+        if (entity is! File ||
+            entity.path.toLowerCase().endsWith('.crdownload') ||
+            entity.path.toLowerCase().endsWith('.tmp')) {
+          continue;
+        }
+        final previousModified = existingFiles[entity.path];
+        final currentModified = await entity.lastModified();
+        if (previousModified == null ||
+            currentModified.isAfter(previousModified)) {
+          candidates.add(entity);
+        }
+      }
+      if (candidates.isNotEmpty) {
+        candidates.sort(
+          (left, right) =>
+              right.lastModifiedSync().compareTo(left.lastModifiedSync()),
+        );
+        return candidates.first;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+    }
+    return null;
+  }
+
   Future<void> close() async {
+    final subscription = _debugServerSubscription;
+    _debugServerSubscription = null;
+    await subscription?.cancel();
+    final debugServer = _debugServer;
+    _debugServer = null;
+    await debugServer?.close(force: true);
+    _debugToken = null;
+    final infoFile = _debugBridgeInfoFile;
+    _debugBridgeInfoFile = null;
+    if (infoFile != null && await infoFile.exists()) {
+      await infoFile.delete();
+    }
     final browser = _browser;
     _browser = null;
     _page = null;
@@ -406,16 +897,21 @@ class DiaryAutomationService {
 
   String _profileDirectory() {
     final localAppData = Platform.environment['LOCALAPPDATA'];
+    const profileName = 'EdgeDiarioProfile';
     if (localAppData == null || localAppData.isEmpty) {
-      return p.join(
-        Directory.systemTemp.path,
-        'GestorUFU',
-        'EdgeDiarioProfile',
-      );
+      return p.join(Directory.systemTemp.path, 'GestorUFU', profileName);
     }
-    return p.join(localAppData, 'GestorUFU', 'EdgeDiarioProfile');
+    return p.join(localAppData, 'GestorUFU', profileName);
   }
 }
+
+const _isAuthenticatedPortalPageScript = r'''() => {
+  const body = (document.body?.innerText || '').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const visiblePassword = Array.from(document.querySelectorAll('input[type="password"]'))
+    .some(element => !!element.offsetParent);
+  return !visiblePassword && (body.includes('diarios de classe') || body.includes('sair'));
+}''';
 
 const _portalLoginScript = r'''(username, password) => {
   const visible = element => !!element && !!element.offsetParent;
@@ -449,6 +945,177 @@ const _portalLoginScript = r'''(username, password) => {
   usernameInput.dispatchEvent(new Event('blur', { bubbles: true }));
   passwordInput.dispatchEvent(new Event('blur', { bubbles: true }));
   return 'filled';
+}''';
+
+const _collectPortalDiaryDownloadsScript = r'''() => {
+  const norm = value => (value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const termPattern = /(\d{4})\s*[\/-]\s*([12])/;
+  const tables = Array.from(document.querySelectorAll('table'));
+  const downloadArgs = action => {
+    const onclick = action?.getAttribute('onclick') || '';
+    const match = onclick.match(/baixarDiario\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
+    return match ? match.slice(1, 4) : null;
+  };
+  const actionsWithDiaryId = Array.from(document.querySelectorAll('a[onclick],button[onclick],[onclick]'))
+    .filter(action => downloadArgs(action));
+  const diagnostics = [];
+  for (const table of tables) {
+    const tableRows = Array.from(table.querySelectorAll('tr'));
+    const rowCells = row => Array.from(row.children)
+      .filter(cell => cell.tagName === 'TH' || cell.tagName === 'TD');
+    const headerRow = tableRows.find(row => {
+      const cells = rowCells(row).map(cell => norm(cell.innerText || cell.textContent));
+      return cells.some(cell => /ano\s*\/?\s*periodo/.test(cell)) &&
+        cells.some(cell => cell === 'baixar');
+    });
+    if (!headerRow) continue;
+    const headers = rowCells(headerRow)
+      .map(cell => norm(cell.innerText || cell.textContent));
+    const termIndex = headers.findIndex(header => /ano\s*\/?\s*periodo/.test(header));
+    const downloadIndex = headers.findIndex(header => /^baixar$/.test(header));
+    if (termIndex < 0 || downloadIndex < 0) {
+      diagnostics.push(headers.join(' | ') || norm(headerRow.innerText));
+      continue;
+    }
+    const rows = tableRows.filter(row => row !== headerRow && rowCells(row).length > downloadIndex);
+    const output = [];
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const row = rows[rowIndex];
+      const cells = rowCells(row);
+      if (cells.length <= Math.max(termIndex, downloadIndex)) continue;
+      const termText = (cells[termIndex].innerText || cells[termIndex].textContent || '').trim();
+      const match = termText.match(termPattern);
+      if (!match) continue;
+      const downloadCell = cells[downloadIndex];
+      const action = downloadCell.querySelector('a[onclick],button[onclick],[onclick]');
+      const args = downloadArgs(action);
+      if (!args) continue;
+      const code = (cells[headers.findIndex(h => h === 'codigo')]?.innerText || '').trim();
+      const name = (cells[headers.findIndex(h => h.includes('nome da disciplina'))]?.innerText || '').trim();
+      const className = (cells[headers.findIndex(h => h === 'turma')]?.innerText || '').trim();
+      output.push([`${match[1]}_${match[2]}`, code, name, className, ...args]);
+    }
+    if (output.length) return output;
+    diagnostics.push(`Tabela com cabeçalho identificado, mas sem botão Baixar reconhecido. Cabeçalhos: ${headers.join(' | ')}`);
+  }
+  if (diagnostics.length) {
+    return [['__error__', `Encontrei tabelas, mas não consegui reconhecer as colunas Ano/Período e Baixar. Cabeçalhos lidos: ${diagnostics.join(' || ')}`]];
+  }
+  return [['__error__', `Não encontrei linhas baixáveis. Tabelas: ${tables.length}; ações com ID de diário: ${actionsWithDiaryId.length}. Confirme que a página terminou de carregar.`]];
+}''';
+
+const _invokePortalDiaryDownloadScript =
+    r'''(diaryFieldId, originFieldId, typeFieldId) => {
+  const norm = value => (value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const wanted = [diaryFieldId, originFieldId, typeFieldId];
+  const tables = Array.from(document.querySelectorAll('table'));
+  for (const table of tables) {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    const cellsOf = row => Array.from(row.children)
+      .filter(cell => cell.tagName === 'TH' || cell.tagName === 'TD');
+    const header = rows.find(row => {
+      const labels = cellsOf(row).map(cell => norm(cell.innerText || cell.textContent));
+      return labels.some(label => /ano\s*\/?\s*periodo/.test(label)) &&
+        labels.some(label => label === 'baixar');
+    });
+    if (!header) continue;
+    const labels = cellsOf(header).map(cell => norm(cell.innerText || cell.textContent));
+    const downloadIndex = labels.findIndex(label => label === 'baixar');
+    for (const row of rows) {
+      if (row === header) continue;
+      const cell = cellsOf(row)[downloadIndex];
+      if (!cell) continue;
+      const action = Array.from(cell.querySelectorAll('a[onclick],button[onclick],[onclick]'))
+        .find(element => {
+      const match = (element.getAttribute('onclick') || '').match(
+        /baixarDiario\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/i);
+      return match && match.slice(1, 4).every((value, index) => value === wanted[index]);
+        });
+      if (action) {
+        action.scrollIntoView({behavior: 'auto', block: 'center', inline: 'nearest'});
+        const rect = action.getBoundingClientRect();
+        if (!rect.width || !rect.height) return [];
+        return [rect.left + rect.width / 2, rect.top + rect.height / 2];
+      }
+    }
+  }
+  return [];
+}''';
+
+const _inspectPortalDiaryPageScript = r'''() => {
+  const norm = value => (value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  const tables = Array.from(document.querySelectorAll('table'));
+  const summaries = tables.map((table, tableIndex) => {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    const cellsOf = row => Array.from(row.children)
+      .filter(cell => cell.tagName === 'TH' || cell.tagName === 'TD');
+    const header = rows.find(row => {
+      const labels = cellsOf(row).map(cell => norm(cell.innerText || cell.textContent));
+      return labels.some(label => /ano\s*\/?\s*periodo/.test(label)) &&
+        labels.some(label => label === 'baixar');
+    });
+    if (!header) return {tableIndex, rowCount: rows.length, headers: []};
+    const headers = cellsOf(header).map(cell => (cell.innerText || cell.textContent || '').trim());
+    const labels = headers.map(norm);
+    const downloadIndex = labels.findIndex(label => label === 'baixar');
+    const rowsWithButtons = rows.filter(row => {
+      if (row === header) return false;
+      const cell = cellsOf(row)[downloadIndex];
+      return !!cell?.querySelector('[onclick]');
+    });
+    return {
+      tableIndex,
+      headers,
+      dataRowCount: rows.filter(row => row !== header).length,
+      baixarRowsWithOnclick: rowsWithButtons.length,
+      sample: rowsWithButtons.slice(0, 25).map(row => {
+        const cells = cellsOf(row);
+        const cell = cells[downloadIndex];
+        const action = cell?.querySelector('[onclick]');
+        const image = action?.querySelector('img');
+        return {
+          row: (row.innerText || row.textContent || '').trim(),
+          onclick: action?.getAttribute('onclick') || null,
+          image: image?.getAttribute('src') || null,
+          alt: image?.getAttribute('alt') || null,
+          href: action?.getAttribute('href') || null,
+          rect: action ? (() => {
+            const rect = action.getBoundingClientRect();
+            return {x: rect.x, y: rect.y, width: rect.width, height: rect.height};
+          })() : null,
+        };
+      }),
+    };
+  });
+  const buttons = Array.from(document.querySelectorAll(
+    'button,a,[role="button"],input[type="button"],input[type="submit"]'))
+    .filter(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    })
+    .map(element => ({
+      text: (element.innerText || element.textContent || element.value || '').trim(),
+      title: element.title || '',
+      alt: element.querySelector('img')?.alt || element.alt || '',
+      onclick: element.getAttribute('onclick') || '',
+    }))
+    .filter(item => /baixar|voltar/i.test([item.text, item.title, item.alt, item.onclick].join(' ')))
+    .slice(0, 30);
+  return {
+    url: location.href,
+    title: document.title,
+    headings: Array.from(document.querySelectorAll('h1,h2,h3'))
+      .map(item => (item.innerText || item.textContent || '').trim()).filter(Boolean).slice(0, 12),
+    viewport: {width: innerWidth, height: innerHeight, devicePixelRatio},
+    baixarDiarioFunction: typeof window.baixarDiario === 'function'
+      ? String(window.baixarDiario).slice(0, 3000) : null,
+    tables: summaries,
+    buttons,
+    bodyExcerpt: (document.body?.innerText || '').trim().slice(0, 4000),
+  };
 }''';
 
 const _collectPortalDiaryDatesScript = r'''() => {

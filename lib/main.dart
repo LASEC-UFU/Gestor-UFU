@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +21,8 @@ import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/data/services/windows_update_service.dart';
+import 'package:gestor_ufu/data/services/diary_automation_service.dart';
+import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
 import 'package:window_manager/window_manager.dart';
@@ -183,6 +186,19 @@ Future<void> main(List<String> args) async {
   final authCtrl = AuthController(moodleRepo)..init();
   final configCtrl = ConfigController(configRepo);
   final syncCtrl = SyncController(moodleRepo);
+
+  if (kDebugMode && diaryAutomationDebugEnabled) {
+    unawaited(() async {
+      try {
+        await DiaryAutomationService.instance.openBrowser(
+          'https://www.portaldocente.ufu.br/diarioEletronico',
+          log: (message) => debugPrint('[Diário debug] $message'),
+        );
+      } catch (error) {
+        debugPrint('[Diário debug] Falha ao abrir o Edge: $error');
+      }
+    }());
+  }
 
   runApp(
     MultiProvider(

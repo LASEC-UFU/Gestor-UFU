@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -12,6 +13,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/core/utils/text_encoding.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
@@ -47,7 +49,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   final _urlController = TextEditingController(text: _portalDefaultUrl);
   final Map<String, String> _entries = {};
   final List<String> _logs = [];
-  final _automation = DiaryAutomationService();
+  final _automation = DiaryAutomationService.instance;
   final _uuid = const Uuid();
   List<String> _terms = [AjustaHorariosStore.defaultTerm];
   String _term = AjustaHorariosStore.defaultTerm;
@@ -65,6 +67,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   bool _openingBrowser = false;
   bool _browserReady = false;
   bool _filling = false;
+  bool _extractingDiaries = false;
   bool _loadingMoodleCourses = false;
   bool _requireEmpty = false;
   bool _highlight = true;
@@ -81,6 +84,18 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       await _loadPortalAddress();
       await _loadPortalCredentials();
       await _loadSavedEntries();
+      if (kDebugMode && diaryAutomationDebugEnabled && mounted) {
+        for (
+          var attempt = 0;
+          attempt < 40 && !_automation.isConnected;
+          attempt++
+        ) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+        if (mounted) {
+          setState(() => _browserReady = _automation.isConnected);
+        }
+      }
     });
   }
 
@@ -1133,6 +1148,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     );
   }
 
+  DateTime? _parseDateInput(String value) {
+    try {
+      return DateFormat('dd/MM/yyyy').parseStrict(value.trim());
+    } on FormatException {
+      return null;
+    }
+  }
+
   Future<void> _useMoodleConfig(
     CourseConfig config, {
     String? sourceLabel,
@@ -1652,14 +1675,26 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     _log('Lançamento removido: $key.');
   }
 
-  Future<void> _shiftDates() async {
+  Future<void> _shiftDates({String? entryKey}) async {
     if (_entries.isEmpty) return;
     final amountController = TextEditingController(text: '1');
-    var shiftMode = 'amount';
+    final initialDate = entryKey == null ? null : _dateFromKey(entryKey);
+    final originalDateController = TextEditingController(
+      text: initialDate == null ? '' : _formatDate(initialDate),
+    );
+    final targetDateController = TextEditingController(
+      text: initialDate == null ? '' : _formatDate(initialDate),
+    );
+    var shiftMode = entryKey == null ? 'amount' : 'targetDate';
     var unit = 'Dias';
-    var filter = 'all';
-    DateTime? startDate;
-    DateTime? targetDate;
+    final initialModality = entryKey?.toUpperCase().contains('-P') == true
+        ? 'practical'
+        : entryKey == null
+        ? 'all'
+        : 'theoretical';
+    var filter = initialModality;
+    DateTime? startDate = initialDate;
+    DateTime? targetDate = initialDate;
     final selectedKeys = <String>{};
     final params = await showDialog<(String, int, String, DateTime?, Set<String>)>(
       context: context,
@@ -1722,60 +1757,53 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                       ),
                     ),
                   ] else ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            startDate == null
-                                ? 'Data original: selecione'
-                                : 'Data original: ${_formatDate(startDate!)}',
-                          ),
-                        ),
-                        TextButton.icon(
+                    TextField(
+                      controller: originalDateController,
+                      keyboardType: TextInputType.datetime,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Data original (dd/MM/aaaa)',
+                        suffixIcon: IconButton(
+                          tooltip: 'Escolher data original no calendário',
+                          icon: const Icon(Icons.calendar_month_rounded),
                           onPressed: () async {
-                            final dates = _entries.keys
-                                .map(_dateFromKey)
-                                .whereType<DateTime>()
-                                .toList();
                             final selected = await showDatePicker(
                               context: context,
-                              initialDate:
-                                  startDate ??
-                                  (dates.isEmpty
-                                      ? DateTime.now()
-                                      : dates.reduce(
-                                          (a, b) => a.isBefore(b) ? a : b,
-                                        )),
+                              initialDate: startDate ?? DateTime.now(),
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
                             if (selected != null) {
-                              setDialogState(() => startDate = selected);
+                              setDialogState(() {
+                                startDate = selected;
+                                originalDateController.text = _formatDate(
+                                  selected,
+                                );
+                              });
                             }
                           },
-                          icon: const Icon(Icons.calendar_month_rounded),
-                          label: const Text('Data original'),
                         ),
-                        if (startDate != null)
-                          IconButton(
-                            tooltip: 'Limpar data original',
-                            onPressed: () => setDialogState(() {
-                              startDate = null;
-                            }),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                      ],
+                      ),
+                      onChanged: (value) => setDialogState(
+                        () => startDate = _parseDateInput(value),
+                      ),
                     ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            targetDate == null
-                                ? 'Nova data: selecione'
-                                : 'Nova data: ${_formatDate(targetDate!)}',
-                          ),
-                        ),
-                        TextButton.icon(
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: targetDateController,
+                      keyboardType: TextInputType.datetime,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9/]')),
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: 'Nova data (dd/MM/aaaa)',
+                        suffixIcon: IconButton(
+                          tooltip: 'Escolher nova data no calendário',
+                          icon: const Icon(Icons.event_available_rounded),
                           onPressed: () async {
                             final selected = await showDatePicker(
                               context: context,
@@ -1785,21 +1813,19 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                               lastDate: DateTime(2100),
                             );
                             if (selected != null) {
-                              setDialogState(() => targetDate = selected);
+                              setDialogState(() {
+                                targetDate = selected;
+                                targetDateController.text = _formatDate(
+                                  selected,
+                                );
+                              });
                             }
                           },
-                          icon: const Icon(Icons.event_available_rounded),
-                          label: const Text('Data de destino'),
                         ),
-                        if (targetDate != null)
-                          IconButton(
-                            tooltip: 'Limpar data de destino',
-                            onPressed: () => setDialogState(() {
-                              targetDate = null;
-                            }),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                      ],
+                      ),
+                      onChanged: (value) => setDialogState(
+                        () => targetDate = _parseDateInput(value),
+                      ),
                     ),
                     Text(
                       calculatedOffset == null
@@ -1961,6 +1987,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       ),
     );
     amountController.dispose();
+    originalDateController.dispose();
+    targetDateController.dispose();
     if (params == null) return;
     final result = _shiftMap(
       _entries,
@@ -2066,8 +2094,12 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     try {
       final openedUrl = await _automation.openBrowser(
         uri.toString(),
-        username: _portalUsername,
-        password: _portalPassword,
+        username: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalUsername,
+        password: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalPassword,
         log: _log,
       );
       if (!mounted) return;
@@ -2167,6 +2199,202 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     }
   }
 
+  Future<void> _extractPortalDiaries() async {
+    if (_extractingDiaries) return;
+    setState(() {
+      _extractingDiaries = true;
+      _error = null;
+    });
+    try {
+      const archiveUrl = 'https://www.portaldocente.ufu.br/diarioEletronico';
+      _urlController.text = archiveUrl;
+      await _saveAddress(_portalAddressKey, archiveUrl);
+      _log('Abrindo Diário Eletrônico para ler a coluna Baixar.');
+      final openedUrl = await _automation.openBrowser(
+        archiveUrl,
+        username: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalUsername,
+        password: kDebugMode && diaryAutomationDebugEnabled
+            ? null
+            : _portalPassword,
+        log: _log,
+      );
+      if (!mounted) return;
+      setState(() => _browserReady = true);
+      final host = Uri.tryParse(openedUrl)?.host.toLowerCase() ?? '';
+      if (host != 'www.portaldocente.ufu.br' &&
+          host != 'portaldocente.ufu.br') {
+        _log(
+          'O Portal redirecionou para autenticação. Entre no Portal no Edge e clique em Extrair diários novamente.',
+        );
+        return;
+      }
+
+      final available = await _automation.findPortalDiaryDownloads();
+      final terms = AcademicTerm.newestFirst(
+        available
+            .map((diary) => diary.term)
+            .where((term) => AcademicTerm.parse(term) != null),
+      );
+      if (terms.isEmpty) {
+        throw StateError('A tabela não contém períodos reconhecíveis.');
+      }
+      final selection = await _showDiaryDownloadRange(terms, available);
+      if (selection == null || !mounted) return;
+      final directoryPath = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Escolha a pasta para salvar os diários originais',
+      );
+      if (directoryPath == null || !mounted) return;
+
+      final startOrder = _academicTermOrder(selection.$1);
+      final endOrder = selection.$2 == null
+          ? _academicTermOrder(terms.first)
+          : _academicTermOrder(selection.$2!);
+      final selectedDiaries = available.where((diary) {
+        final order = _academicTermOrder(diary.term);
+        return order >= startOrder && order <= endOrder;
+      }).toList();
+      if (selectedDiaries.isEmpty) {
+        throw StateError('Não há diários na faixa de períodos escolhida.');
+      }
+      _log(
+        '${selectedDiaries.length} diário(s) selecionado(s), dos períodos ${selection.$1} a ${selection.$2 ?? terms.first}.',
+      );
+      final result = await _automation.downloadPortalDiaries(
+        selectedDiaries,
+        directoryPath,
+        log: _log,
+      );
+      _log(
+        'Extração concluída: ${result.downloaded} arquivo(s) salvo(s), ${result.failed} falha(s). Pasta: $directoryPath',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${result.downloaded} diário(s) salvo(s) em $directoryPath.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      _log('Falha ao extrair diários do Portal: $error');
+      if (mounted) setState(() => _error = '$error');
+    } finally {
+      if (mounted) setState(() => _extractingDiaries = false);
+    }
+  }
+
+  Future<(String, String?)?> _showDiaryDownloadRange(
+    List<String> terms,
+    List<PortalDiaryDownload> diaries,
+  ) {
+    var startTerm = terms.first;
+    String? endTerm;
+    return showDialog<(String, String?)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final startOrder = _academicTermOrder(startTerm);
+          final endChoices = terms
+              .where((term) => _academicTermOrder(term) >= startOrder)
+              .toList();
+          final effectiveEnd = endTerm ?? terms.first;
+          final count = diaries.where((diary) {
+            final order = _academicTermOrder(diary.term);
+            return order >= _academicTermOrder(startTerm) &&
+                order <= _academicTermOrder(effectiveEnd);
+          }).length;
+          return AlertDialog(
+            title: const Text('Extrair diários do Portal'),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: startTerm,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Período inicial',
+                    ),
+                    items: terms.reversed
+                        .map(
+                          (term) =>
+                              DropdownMenuItem(value: term, child: Text(term)),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() {
+                        startTerm = value;
+                        if (endTerm != null &&
+                            _academicTermOrder(endTerm!) <
+                                _academicTermOrder(startTerm)) {
+                          endTerm = null;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String?>(
+                    initialValue: endTerm,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Período final',
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Até o último período disponível'),
+                      ),
+                      ...endChoices.map(
+                        (term) => DropdownMenuItem<String?>(
+                          value: term,
+                          child: Text(term),
+                        ),
+                      ),
+                    ],
+                    onChanged: (value) => setDialogState(() => endTerm = value),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '$count diário(s) serão baixados como arquivos originais para a pasta escolhida.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: count == 0
+                    ? null
+                    : () => Navigator.pop(context, (startTerm, endTerm)),
+                child: const Text('Escolher pasta'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  int _academicTermOrder(String value) {
+    final term = AcademicTerm.parse(value);
+    return term == null ? -1 : term.year * 2 + term.semester;
+  }
+
   Future<void> _showMessage(String title, String message) => showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -2246,6 +2474,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onEdit: (key) => _addOrEdit(oldKey: key),
                             onRemove: _remove,
                             onShift: _shiftDates,
+                            onShiftFromEntry: (key) =>
+                                _shiftDates(entryKey: key),
                           );
                           final browser = _BrowserPanel(
                             urlController: _urlController,
@@ -2260,6 +2490,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             opening: _openingBrowser,
                             browserReady: _browserReady,
                             filling: _filling,
+                            extractingDiaries: _extractingDiaries,
                             highlight: _highlight,
                             requireEmpty: _requireEmpty,
                             error: _error,
@@ -2267,6 +2498,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onConfigureCredentials: _configurePortalCredentials,
                             onFill: _fillPortal,
                             onClearPortalDiary: _clearPortalDiary,
+                            onExtractDiaries: _extractPortalDiaries,
                             onHighlight: (value) =>
                                 setState(() => _highlight = value),
                             onRequireEmpty: (value) =>
@@ -2453,6 +2685,7 @@ class _WorkspacePanel extends StatelessWidget {
     required this.onEdit,
     required this.onRemove,
     required this.onShift,
+    required this.onShiftFromEntry,
   });
   final int entryCount;
   final bool browserReady;
@@ -2468,6 +2701,7 @@ class _WorkspacePanel extends StatelessWidget {
   final ValueChanged<String?> onSelectSnapshot;
   final VoidCallback? onUseMoodle;
   final VoidCallback onImportExcel, onImportJson, onExportJson, onAdd, onShift;
+  final ValueChanged<String> onShiftFromEntry;
   final VoidCallback onImportLiveMoodle;
   final VoidCallback onImportSavedConfig;
   final VoidCallback onClear;
@@ -2770,6 +3004,7 @@ class _WorkspacePanel extends StatelessWidget {
                       entry: item,
                       onEdit: () => onEdit(item.key),
                       onRemove: () => onRemove(item.key),
+                      onDateDoubleTap: () => onShiftFromEntry(item.key),
                     );
                   },
                 ),
@@ -2784,9 +3019,11 @@ class _EntryTile extends StatelessWidget {
     required this.entry,
     required this.onEdit,
     required this.onRemove,
+    required this.onDateDoubleTap,
   });
   final MapEntry<String, String> entry;
   final VoidCallback onEdit, onRemove;
+  final VoidCallback onDateDoubleTap;
   @override
   Widget build(BuildContext context) {
     final practical = entry.key.toUpperCase().contains('-P');
@@ -2800,37 +3037,45 @@ class _EntryTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 76,
-            padding: const EdgeInsets.symmetric(vertical: 7),
-            decoration: BoxDecoration(
-              color: (practical ? AppTheme.accent : AppTheme.primaryLight)
-                  .withAlpha(22),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Column(
-              children: [
-                Text(
-                  entry.key.substring(0, 10),
-                  maxLines: 1,
-                  softWrap: false,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                  ),
+          GestureDetector(
+            onDoubleTap: onDateDoubleTap,
+            child: Tooltip(
+              message: 'Clique duas vezes para ajustar as datas a partir daqui',
+              child: Container(
+                width: 76,
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                decoration: BoxDecoration(
+                  color: (practical ? AppTheme.accent : AppTheme.primaryLight)
+                      .withAlpha(22),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  practical ? 'PRÁTICA' : 'TEÓRICA',
-                  style: TextStyle(
-                    color: practical ? AppTheme.accent : AppTheme.primaryLight,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w700,
-                  ),
+                child: Column(
+                  children: [
+                    Text(
+                      entry.key.substring(0, 10),
+                      maxLines: 1,
+                      softWrap: false,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      practical ? 'PRÁTICA' : 'TEÓRICA',
+                      style: TextStyle(
+                        color: practical
+                            ? AppTheme.accent
+                            : AppTheme.primaryLight,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
           const SizedBox(width: 13),
@@ -2915,6 +3160,7 @@ class _BrowserPanel extends StatelessWidget {
     required this.opening,
     required this.browserReady,
     required this.filling,
+    required this.extractingDiaries,
     required this.highlight,
     required this.requireEmpty,
     required this.error,
@@ -2922,6 +3168,7 @@ class _BrowserPanel extends StatelessWidget {
     required this.onConfigureCredentials,
     required this.onFill,
     required this.onClearPortalDiary,
+    required this.onExtractDiaries,
     required this.onHighlight,
     required this.onRequireEmpty,
   });
@@ -2931,10 +3178,16 @@ class _BrowserPanel extends StatelessWidget {
   final bool credentialsFromMoodle;
   final List<String> logs;
   final int entryCount;
-  final bool opening, browserReady, filling, highlight, requireEmpty;
+  final bool opening,
+      browserReady,
+      filling,
+      extractingDiaries,
+      highlight,
+      requireEmpty;
   final String? error;
   final VoidCallback onOpen, onConfigureCredentials, onFill;
   final VoidCallback onClearPortalDiary;
+  final VoidCallback onExtractDiaries;
   final ValueChanged<bool> onHighlight, onRequireEmpty;
 
   @override
@@ -3103,6 +3356,25 @@ class _BrowserPanel extends StatelessWidget {
                   ),
                   icon: const Icon(Icons.delete_sweep_outlined),
                   label: const Text('Limpar di\u00e1rio no Portal'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: extractingDiaries ? null : onExtractDiaries,
+                  icon: extractingDiaries
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_for_offline_outlined),
+                  label: Text(
+                    extractingDiaries
+                        ? 'Extraindo di\u00e1rios\u2026'
+                        : 'Extrair di\u00e1rios por per\u00edodo',
+                  ),
                 ),
               ),
               if (error != null)
