@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-enum AgentProvider { claude, chatgpt }
+enum AgentProvider { claude, chatgpt, gemini }
 
 enum AgentAuthMode { cli, apiKey }
 
@@ -10,16 +10,57 @@ extension AgentProviderLabel on AgentProvider {
   String get label => switch (this) {
     AgentProvider.claude => 'Claude',
     AgentProvider.chatgpt => 'ChatGPT',
+    AgentProvider.gemini => 'Gemini',
   };
 
+  /// Nome do executável do CLI oficial que usa a assinatura do usuário.
   String get cliName => switch (this) {
     AgentProvider.claude => 'claude',
     AgentProvider.chatgpt => 'codex',
+    AgentProvider.gemini => 'gemini',
+  };
+
+  String get cliProductName => switch (this) {
+    AgentProvider.claude => 'Claude Code',
+    AgentProvider.chatgpt => 'Codex',
+    AgentProvider.gemini => 'Gemini CLI',
+  };
+
+  String get npmPackage => switch (this) {
+    AgentProvider.claude => '@anthropic-ai/claude-code',
+    AgentProvider.chatgpt => '@openai/codex',
+    AgentProvider.gemini => '@google/gemini-cli',
+  };
+
+  /// Argumentos que abrem o fluxo de login do CLI num terminal.
+  List<String> get loginArgs => switch (this) {
+    AgentProvider.claude => const ['auth', 'login', '--claudeai'],
+    AgentProvider.chatgpt => const ['login'],
+    AgentProvider.gemini => const [],
+  };
+
+  String get loginHint => switch (this) {
+    AgentProvider.claude =>
+      'Um terminal foi aberto com o Claude Code. Digite /login, entre com '
+          'sua conta Claude (Pro/Max) e feche o terminal ao terminar.',
+    AgentProvider.chatgpt =>
+      'Um terminal foi aberto com "codex login". Entre com sua conta '
+          'ChatGPT e feche o terminal ao terminar.',
+    AgentProvider.gemini =>
+      'Um terminal foi aberto com o Gemini CLI. Escolha "Login with Google", '
+          'entre com sua conta Google e feche o terminal ao terminar.',
+  };
+
+  String get apiKeyHint => switch (this) {
+    AgentProvider.claude => 'Crie em console.anthropic.com',
+    AgentProvider.chatgpt => 'Crie em platform.openai.com',
+    AgentProvider.gemini => 'Crie em aistudio.google.com',
   };
 
   String get defaultApiModel => switch (this) {
     AgentProvider.claude => 'claude-opus-5-5',
     AgentProvider.chatgpt => 'gpt-5',
+    AgentProvider.gemini => 'gemini-2.5-pro',
   };
 }
 
@@ -29,20 +70,39 @@ extension AgentProviderLabel on AgentProvider {
 class AgentSettings {
   AgentSettings({
     this.provider = AgentProvider.claude,
-    this.mode = AgentAuthMode.cli,
+    Map<String, String>? modes,
     Map<String, String>? models,
     Map<String, String>? cliPaths,
-    this.autoConnect = false,
-  }) : models = models ?? {},
-       cliPaths = cliPaths ?? {};
+    Set<String>? signedOut,
+  }) : modes = modes ?? {},
+       models = models ?? {},
+       cliPaths = cliPaths ?? {},
+       signedOut = signedOut ?? {};
 
   AgentProvider provider;
-  AgentAuthMode mode;
+
+  /// Modo de autenticação escolhido para cada provedor.
+  final Map<String, String> modes;
   final Map<String, String> models;
   final Map<String, String> cliPaths;
 
-  /// Conecta sozinho ao abrir a janela (true depois do primeiro login).
-  bool autoConnect;
+  /// Provedores que o usuário desconectou manualmente: não reconectam
+  /// sozinhos até um novo login.
+  final Set<String> signedOut;
+
+  AgentAuthMode modeFor(AgentProvider p) => AgentAuthMode.values.firstWhere(
+    (m) => m.name == modes[p.name],
+    orElse: () => AgentAuthMode.cli,
+  );
+
+  AgentAuthMode get mode => modeFor(provider);
+  set mode(AgentAuthMode value) => modes[provider.name] = value.name;
+
+  /// Conecta sozinho ao abrir (como a extensão do VS Code), exceto se o
+  /// usuário desconectou este provedor.
+  bool get autoConnect => !signedOut.contains(provider.name);
+  set autoConnect(bool value) =>
+      value ? signedOut.remove(provider.name) : signedOut.add(provider.name);
 
   String _slot(AgentProvider p, AgentAuthMode m) => '${p.name}.${m.name}';
 
@@ -72,13 +132,17 @@ class AgentSettings {
           (p) => p.name == json['provider'],
           orElse: () => AgentProvider.claude,
         ),
-        mode: AgentAuthMode.values.firstWhere(
-          (m) => m.name == json['mode'],
-          orElse: () => AgentAuthMode.cli,
-        ),
+        modes: {
+          ...Map<String, String>.from(json['modes'] as Map? ?? {}),
+          // Versões anteriores guardavam um único modo para todos.
+          if (json['modes'] == null && json['mode'] is String)
+            json['provider'] as String? ?? 'claude': json['mode'] as String,
+        },
         models: Map<String, String>.from(json['models'] as Map? ?? {}),
         cliPaths: Map<String, String>.from(json['cliPaths'] as Map? ?? {}),
-        autoConnect: json['autoConnect'] == true,
+        signedOut: {
+          ...((json['signedOut'] as List?) ?? const []).map((e) => '$e'),
+        },
       );
     } catch (_) {
       return AgentSettings();
@@ -89,10 +153,10 @@ class AgentSettings {
     key: _settingsKey,
     value: jsonEncode({
       'provider': provider.name,
-      'mode': mode.name,
+      'modes': modes,
       'models': models,
       'cliPaths': cliPaths,
-      'autoConnect': autoConnect,
+      'signedOut': signedOut.toList(),
     }),
   );
 

@@ -120,6 +120,19 @@ class _AiAgentPageState extends State<AiAgentPage> {
   bool _busy = false;
   int _undoCount = 0;
 
+  /// Modelos da conta conectada, por provedor/modo (carregados após login).
+  final _modelCache = <String, List<AgentModel>>{};
+  bool _loadingModels = false;
+
+  // Tela de conexão (estilo VS Code).
+  String? _loginStatus;
+  final _loginLines = <String>[];
+  bool _showApiKey = false;
+  final _apiKeyInput = TextEditingController();
+  bool _hasSavedKey = false;
+
+  String get _modelKey => '${_settings.provider.name}.${_settings.mode.name}';
+
   @override
   void initState() {
     super.initState();
@@ -140,11 +153,8 @@ class _AiAgentPageState extends State<AiAgentPage> {
     final settings = await AgentSettings.load();
     if (!mounted) return;
     setState(() => _settings = settings);
-    _info(
-      'Escolha Claude ou ChatGPT e conecte. A skill de '
-      '"${AgentSkills.byId(_skill)?.title}" é entregue ao agente ao conectar.',
-    );
-    if (settings.autoConnect) await _connect(silent: true);
+    await _refreshSavedKey();
+    await _autoConnect();
     await _refreshUndo();
   }
 
@@ -153,6 +163,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
     unawaited(_backend?.dispose());
     unawaited(_mcp?.stop());
     _input.dispose();
+    _apiKeyInput.dispose();
     _inputFocus.dispose();
     _scroll.dispose();
     super.dispose();
@@ -189,9 +200,23 @@ class _AiAgentPageState extends State<AiAgentPage> {
           'Informe a chave de API do ${provider.label} nas configurações.',
         );
       }
-      return provider == AgentProvider.claude
-          ? ClaudeApiBackend(apiKey: key, model: model, callTool: _callTool)
-          : OpenAiApiBackend(apiKey: key, model: model, callTool: _callTool);
+      return switch (provider) {
+        AgentProvider.claude => ClaudeApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: _callTool,
+        ),
+        AgentProvider.chatgpt => OpenAiApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: _callTool,
+        ),
+        AgentProvider.gemini => GeminiApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: _callTool,
+        ),
+      };
     }
     final mcp = _mcp ??= AgentMcpServer(
       _callTool,
@@ -200,10 +225,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
       },
     );
     await mcp.start();
-    final path = _settings.cliPathFor(provider);
-    return provider == AgentProvider.claude
-        ? ClaudeCliBackend(mcp: mcp, configuredPath: path, model: model)
-        : CodexCliBackend(mcp: mcp, configuredPath: path, model: model);
+    return cliBackendFor(
+      provider,
+      mcp: mcp,
+      path: _settings.cliPathFor(provider),
+      model: model,
+    );
   }
 
   Future<void> _connect({bool silent = false}) async {
@@ -220,9 +247,11 @@ class _AiAgentPageState extends State<AiAgentPage> {
       if (!mounted) return;
       setState(() => _backend = backend);
       _info('Conectado: ${backend.label}. $status');
+      unawaited(_loadModels(backend));
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => _backend = null);
+      _loginLog('$error');
       if (!silent || error is! AgentException) {
         _error('$error');
       } else {
@@ -231,6 +260,155 @@ class _AiAgentPageState extends State<AiAgentPage> {
     } finally {
       if (mounted) setState(() => _connecting = false);
     }
+  }
+
+  /// Consulta os modelos disponíveis para a conta e habilita o seletor.
+  Future<void> _loadModels(AgentBackend backend, {bool force = false}) async {
+    final key = _modelKey;
+    if (!force && _modelCache.containsKey(key)) return;
+    setState(() => _loadingModels = true);
+    try {
+      final models = await backend.listModels();
+      if (!mounted) return;
+      setState(() => _modelCache[key] = models);
+      _info(
+        '${models.length} modelos disponíveis para ${_settings.provider.label}.',
+      );
+    } on Object catch (error) {
+      _error('Não foi possível listar os modelos: $error');
+    } finally {
+      if (mounted) setState(() => _loadingModels = false);
+    }
+  }
+
+  /// Conecta sozinho quando o provedor já está logado (CLI) ou tem chave
+  /// salva, como a extensão do VS Code faz ao abrir.
+  bool _autoConnecting = false;
+
+  Future<void> _autoConnect() async {
+    if (!_settings.autoConnect || _backend != null || _connecting) return;
+    final provider = _settings.provider;
+    setState(() => _autoConnecting = true);
+    var needsBrowser = false;
+    try {
+      var ready = false;
+      if (_settings.mode == AgentAuthMode.apiKey) {
+        ready = await AgentSettings.readApiKey(provider) != null;
+      } else {
+        final cli =
+            cliBackendFor(
+                  provider,
+                  mcp: AgentMcpServer((_, _) async => '{}'),
+                  path: _settings.cliPathFor(provider),
+                  model: '',
+                )
+                as CliAgentBackend;
+        final installed = await cli.isInstalled();
+        ready = installed && await cli.isLoggedIn();
+        // Instalado mas sem login: abre direto a tela de login no navegador.
+        // (O Gemini CLI não aceita mais contas pessoais; fica no botão.)
+        needsBrowser = installed && !ready && provider != AgentProvider.gemini;
+      }
+      if (ready && mounted && _settings.provider == provider) {
+        await _connect(silent: true);
+      }
+    } finally {
+      if (mounted) setState(() => _autoConnecting = false);
+    }
+    if (needsBrowser && mounted && _settings.provider == provider) {
+      await _browserLogin();
+    }
+  }
+
+  Future<void> _refreshSavedKey() async {
+    final key = await AgentSettings.readApiKey(_settings.provider);
+    if (mounted) setState(() => _hasSavedKey = key != null);
+  }
+
+  void _loginLog(String line) {
+    if (!mounted) return;
+    setState(() {
+      _loginLines.add(line);
+      if (_loginLines.length > 6) _loginLines.removeAt(0);
+    });
+  }
+
+  /// Fluxo "Entrar com o navegador": instala o CLI se faltar, abre o login
+  /// no navegador quando necessário e conecta ao terminar.
+  Future<void> _browserLogin() async {
+    if (_connecting) return;
+    final provider = _settings.provider;
+    setState(() {
+      _settings.mode = AgentAuthMode.cli;
+      _connecting = true;
+      _loginLines.clear();
+      _loginStatus = 'Verificando o ${provider.cliProductName}…';
+    });
+    await _settings.save();
+    final cli =
+        cliBackendFor(
+              provider,
+              mcp: AgentMcpServer((_, _) async => '{}'),
+              path: _settings.cliPathFor(provider),
+              model: '',
+            )
+            as CliAgentBackend;
+    try {
+      if (!await cli.isInstalled()) {
+        setState(
+          () => _loginStatus = 'Instalando o ${provider.cliProductName} (npm)…',
+        );
+        await cli.install(_loginLog);
+      }
+      if (!await cli.isLoggedIn()) {
+        setState(
+          () => _loginStatus = 'Conclua o login no navegador que foi aberto…',
+        );
+        await cli.loginWithBrowser(_loginLog);
+      }
+      setState(() {
+        _connecting = false;
+        _loginStatus = 'Conectando…';
+      });
+      await _connect();
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _connecting = false;
+          _loginStatus = null;
+        });
+        _loginLog('Erro: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _loginStatus = null);
+    }
+  }
+
+  Future<void> _connectWithApiKey() async {
+    final provider = _settings.provider;
+    final typed = _apiKeyInput.text.trim();
+    if (typed.isNotEmpty) await AgentSettings.writeApiKey(provider, typed);
+    _apiKeyInput.clear();
+    setState(() {
+      _settings.mode = AgentAuthMode.apiKey;
+      _loginLines.clear();
+    });
+    await _settings.save();
+    await _refreshSavedKey();
+    await _connect();
+  }
+
+  Future<void> _selectProvider(AgentProvider provider) async {
+    await _backend?.cancel();
+    setState(() {
+      _settings.provider = provider;
+      _backend = null;
+      _loginLines.clear();
+      _showApiKey = false;
+    });
+    await _settings.save();
+    await _refreshSavedKey();
+    await _autoConnect();
   }
 
   Future<void> _disconnect() async {
@@ -424,9 +602,13 @@ class _AiAgentPageState extends State<AiAgentPage> {
       final excel = Excel.decodeBytes(bytes);
       final buffer = StringBuffer();
       for (final entry in excel.tables.entries) {
-        buffer.writeln('### Planilha "${entry.key}" (colunas separadas por TAB)');
+        buffer.writeln(
+          '### Planilha "${entry.key}" (colunas separadas por TAB)',
+        );
         for (final row in entry.value.rows) {
-          final cells = row.map((c) => '${c?.value ?? ''}'.replaceAll('\n', ' '));
+          final cells = row.map(
+            (c) => '${c?.value ?? ''}'.replaceAll('\n', ' '),
+          );
           if (cells.every((c) => c.trim().isEmpty)) continue;
           buffer.writeln(cells.join('\t'));
         }
@@ -438,7 +620,15 @@ class _AiAgentPageState extends State<AiAgentPage> {
       );
     }
     const textExtensions = {
-      '.txt', '.csv', '.tsv', '.json', '.md', '.html', '.htm', '.xml', '.ics',
+      '.txt',
+      '.csv',
+      '.tsv',
+      '.json',
+      '.md',
+      '.html',
+      '.htm',
+      '.xml',
+      '.ics',
     };
     if (textExtensions.contains(ext) || ext.isEmpty) {
       return AgentAttachment(
@@ -488,9 +678,13 @@ class _AiAgentPageState extends State<AiAgentPage> {
           children: [
             _toolbar(context),
             const Divider(height: 1),
-            Expanded(child: _chat(context)),
-            if (_busy) const LinearProgressIndicator(minHeight: 2),
-            _composer(context),
+            if (_backend == null)
+              Expanded(child: _connectPanel(context))
+            else ...[
+              Expanded(child: _chat(context)),
+              if (_busy) const LinearProgressIndicator(minHeight: 2),
+              _composer(context),
+            ],
           ],
         ),
       ),
@@ -525,76 +719,51 @@ class _AiAgentPageState extends State<AiAgentPage> {
               const SizedBox(width: 10),
               Text(
                 'Agente de IA',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ],
           ),
           SegmentedButton<AgentProvider>(
-            segments: const [
-              ButtonSegment(
-                value: AgentProvider.claude,
-                label: Text('Claude'),
-              ),
-              ButtonSegment(
-                value: AgentProvider.chatgpt,
-                label: Text('ChatGPT'),
-              ),
+            // Só o ícone de cada provedor; o nome aparece ao passar o mouse.
+            segments: [
+              for (final provider in AgentProvider.values)
+                ButtonSegment(
+                  value: provider,
+                  tooltip: provider.label,
+                  label: ProviderIcon(provider),
+                ),
             ],
+            showSelectedIcon: false,
+            style: SegmentedButton.styleFrom(
+              minimumSize: const Size(52, 40),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
             selected: {_settings.provider},
             onSelectionChanged: _busy || _connecting
                 ? null
-                : (value) async {
-                    setState(() {
-                      _settings.provider = value.first;
-                      _backend = null;
-                    });
-                    await _settings.save();
-                  },
+                : (value) => _selectProvider(value.first),
           ),
-          DropdownButton<AgentAuthMode>(
-            value: _settings.mode,
-            underline: const SizedBox.shrink(),
-            items: const [
-              DropdownMenuItem(
-                value: AgentAuthMode.cli,
-                child: Text('Assinatura (CLI)'),
+          if (connected) ...[
+            _modelSelector(),
+            Tooltip(
+              message: '${_backend!.label}\nClique para desconectar.',
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _disconnect,
+                icon: const Icon(
+                  Icons.check_circle,
+                  color: Colors.green,
+                  size: 18,
+                ),
+                label: Text(
+                  _settings.mode == AgentAuthMode.cli
+                      ? 'Conectado · assinatura'
+                      : 'Conectado · chave de API',
+                ),
               ),
-              DropdownMenuItem(
-                value: AgentAuthMode.apiKey,
-                child: Text('Chave de API'),
-              ),
-            ],
-            onChanged: _busy || _connecting
-                ? null
-                : (value) async {
-                    if (value == null) return;
-                    setState(() {
-                      _settings.mode = value;
-                      _backend = null;
-                    });
-                    await _settings.save();
-                  },
-          ),
-          if (connected)
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _disconnect,
-              icon: const Icon(Icons.check_circle, color: Colors.green, size: 18),
-              label: const Text('Conectado'),
-            )
-          else
-            FilledButton.icon(
-              onPressed: _connecting ? null : _connect,
-              icon: _connecting
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.login_rounded, size: 18),
-              label: const Text('Conectar'),
             ),
+          ],
           IconButton(
             tooltip: 'Configurações do agente (chaves, modelos, login)',
             onPressed: _busy ? null : _openSettings,
@@ -638,6 +807,175 @@ class _AiAgentPageState extends State<AiAgentPage> {
     );
   }
 
+  /// Tela exibida enquanto não há conexão: botão central para entrar pelo
+  /// navegador (como na extensão do VS Code) ou usar uma chave de API.
+  Widget _connectPanel(BuildContext context) {
+    final provider = _settings.provider;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    if (_autoConnecting || (_connecting && _loginStatus == null)) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ProviderIcon(provider, size: 64),
+            const SizedBox(height: 18),
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: 12),
+            Text('Conectando ao ${provider.label}…'),
+          ],
+        ),
+      );
+    }
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ProviderIcon(provider, size: 64),
+              const SizedBox(height: 18),
+              Text(
+                'Agente de IA do Gestor UFU',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Entre com sua conta ${provider.label} para preencher, '
+                'corrigir e copiar dados das funcionalidades do Gestor.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: FilledButton.icon(
+                  onPressed: _connecting ? null : _browserLogin,
+                  icon: _connecting && _loginStatus != null
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.open_in_browser_rounded),
+                  label: Text('Entrar com ${provider.label} no navegador'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Usa sua assinatura pelo ${provider.cliProductName} '
+                '(instalado automaticamente se necessário).',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              if (provider == AgentProvider.gemini) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Atenção: o Gemini CLI não aceita mais contas Google pessoais '
+                  '(só Gemini Code Assist pago). Para contas pessoais, use a '
+                  'chave de API gratuita do Google AI Studio.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: AppTheme.warning,
+                  ),
+                ),
+              ],
+              if (_loginStatus != null) ...[
+                const SizedBox(height: 16),
+                Text(_loginStatus!, textAlign: TextAlign.center),
+              ],
+              if (_loginLines.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: SelectableText(
+                    _loginLines.join('\n'),
+                    style: const TextStyle(
+                      fontFamily: 'Consolas',
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Divider()),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      'ou',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                  const Expanded(child: Divider()),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (!_showApiKey)
+                TextButton.icon(
+                  onPressed: _connecting
+                      ? null
+                      : () => setState(() => _showApiKey = true),
+                  icon: const Icon(Icons.key_rounded),
+                  label: const Text('Usar chave de API'),
+                )
+              else ...[
+                TextField(
+                  controller: _apiKeyInput,
+                  obscureText: true,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: _hasSavedKey
+                        ? 'Chave de API (salva — preencha para trocar)'
+                        : 'Chave de API do ${provider.label}',
+                    helperText: provider.apiKeyHint,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _connectWithApiKey(),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _connecting ? null : _connectWithApiKey,
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text(
+                      _hasSavedKey
+                          ? 'Conectar com a chave'
+                          : 'Salvar chave e conectar',
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _chat(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return ListView.builder(
@@ -652,7 +990,11 @@ class _AiAgentPageState extends State<AiAgentPage> {
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: [
-                  Icon(Icons.build_circle_outlined, size: 16, color: scheme.primary),
+                  Icon(
+                    Icons.build_circle_outlined,
+                    size: 16,
+                    color: scheme.primary,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -771,7 +1113,8 @@ class _AiAgentPageState extends State<AiAgentPage> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               IconButton(
-                tooltip: 'Anexar arquivos (xlsx, csv, txt, json, html, pdf, imagens)',
+                tooltip:
+                    'Anexar arquivos (xlsx, csv, txt, json, html, pdf, imagens)',
                 onPressed: enabled && !_busy ? _pickFiles : null,
                 icon: const Icon(Icons.attach_file_rounded),
               ),
@@ -822,6 +1165,166 @@ class _AiAgentPageState extends State<AiAgentPage> {
     );
   }
 
+  String _modelLabel(String model) =>
+      model.isEmpty ? 'Modelo padrão do CLI' : model;
+
+  /// Seletor do modelo do provedor/modo atuais. Sugestões + "Outro modelo…"
+  /// para digitar qualquer nome (ex.: um modelo novo ainda não listado).
+  Widget _modelSelector() {
+    final provider = _settings.provider;
+    final mode = _settings.mode;
+    final current = _settings.modelFor(provider, mode);
+    final backend = _backend;
+    final models = _modelCache[_modelKey];
+    final ready = backend != null && models != null;
+    const other = '\u0000outro';
+    const refresh = '\u0000atualizar';
+    String labelFor(String id) {
+      for (final model in models ?? const <AgentModel>[]) {
+        if (model.id == id) return model.label;
+      }
+      return _modelLabel(id);
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: ready
+          ? 'Modelo do ${provider.label}'
+          : 'Conecte para ver os modelos disponíveis na sua conta',
+      enabled: ready && !_busy && !_connecting,
+      onSelected: (value) async {
+        if (value == refresh) {
+          await _loadModels(backend!, force: true);
+          return;
+        }
+        if (value == other) {
+          final typed = await _askModelName(provider, current);
+          if (typed == null) return;
+          value = typed;
+        }
+        await _setModel(value);
+      },
+      itemBuilder: (context) => [
+        for (final model in models ?? const <AgentModel>[])
+          CheckedPopupMenuItem(
+            value: model.id,
+            checked: model.id == current,
+            child: Text(
+              model.isDefault && model.id.isNotEmpty
+                  ? '${model.label}  (padrão)'
+                  : model.label,
+            ),
+          ),
+        if (!(models ?? const <AgentModel>[]).any((m) => m.id == current))
+          CheckedPopupMenuItem(
+            value: current,
+            checked: true,
+            child: Text(_modelLabel(current)),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: other,
+          child: Row(
+            children: [
+              Icon(Icons.edit_outlined, size: 18),
+              SizedBox(width: 10),
+              Text('Outro modelo…'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: refresh,
+          child: Row(
+            children: [
+              Icon(Icons.refresh_rounded, size: 18),
+              SizedBox(width: 10),
+              Text('Atualizar lista'),
+            ],
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_loadingModels)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Icon(
+                Icons.memory_rounded,
+                size: 18,
+                color: ready ? null : Theme.of(context).disabledColor,
+              ),
+            const SizedBox(width: 6),
+            Text(
+              ready ? labelFor(current) : 'Modelo (conecte primeiro)',
+              style: ready
+                  ? null
+                  : TextStyle(color: Theme.of(context).disabledColor),
+            ),
+            const Icon(Icons.arrow_drop_down),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<String?> _askModelName(AgentProvider provider, String current) async {
+    final controller = TextEditingController(text: current);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Modelo do ${provider.label}'),
+        content: SizedBox(
+          width: 420,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              labelText: 'Nome do modelo',
+              helperText: _settings.mode == AgentAuthMode.cli
+                  ? 'Vazio = modelo padrão do ${provider.cliProductName}.'
+                  : 'Use o nome exato do modelo na API.',
+            ),
+            onSubmitted: (value) => Navigator.pop(context, value.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Usar'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _setModel(String model) async {
+    final provider = _settings.provider;
+    final mode = _settings.mode;
+    if (model == _settings.modelFor(provider, mode)) return;
+    setState(() => _settings.setModel(provider, mode, model));
+    await _settings.save();
+    _info(
+      'Modelo do ${provider.label}: ${_modelLabel(_settings.modelFor(provider, mode))}.',
+    );
+    // Reconecta para aplicar o modelo (inicia uma nova conversa).
+    if (_backend != null) {
+      setState(() => _backend = null);
+      await _connect();
+    }
+  }
+
   Future<void> _openSettings() async {
     final saved = await showDialog<bool>(
       context: context,
@@ -852,7 +1355,9 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
   late final _models = {
     for (final p in AgentProvider.values)
       for (final m in AgentAuthMode.values)
-        (p, m): TextEditingController(text: widget.settings.models['${p.name}.${m.name}'] ?? ''),
+        (p, m): TextEditingController(
+          text: widget.settings.models['${p.name}.${m.name}'] ?? '',
+        ),
   };
   late final _paths = {
     for (final p in AgentProvider.values)
@@ -884,33 +1389,26 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       if (key.isNotEmpty) await AgentSettings.writeApiKey(provider, key);
       widget.settings.cliPaths[provider.name] = _paths[provider]!.text.trim();
       for (final mode in AgentAuthMode.values) {
-        widget.settings.setModel(provider, mode, _models[(provider, mode)]!.text);
+        widget.settings.setModel(
+          provider,
+          mode,
+          _models[(provider, mode)]!.text,
+        );
       }
     }
     if (mounted) Navigator.pop(context, true);
   }
 
   Future<void> _login(AgentProvider provider) async {
-    final backend = provider == AgentProvider.claude
-        ? ClaudeCliBackend(
-            mcp: AgentMcpServer((_, _) async => '{}'),
-            configuredPath: _paths[provider]!.text.trim(),
-            model: '',
-          )
-        : CodexCliBackend(
-            mcp: AgentMcpServer((_, _) async => '{}'),
-            configuredPath: _paths[provider]!.text.trim(),
-            model: '',
-          );
+    final backend = cliBackendFor(
+      provider,
+      mcp: AgentMcpServer((_, _) async => '{}'),
+      path: _paths[provider]!.text.trim(),
+      model: '',
+    );
     try {
       await openCliLogin(backend);
-      setState(
-        () => _message = provider == AgentProvider.claude
-            ? 'Um terminal foi aberto com o Claude Code. Digite /login, conclua '
-                  'o login com sua conta Claude (Pro/Max) e feche o terminal.'
-            : 'Um terminal foi aberto com "codex login". Entre com sua conta '
-                  'ChatGPT e feche o terminal ao terminar.',
-      );
+      setState(() => _message = provider.loginHint);
     } on Object catch (error) {
       setState(() => _message = '$error');
     }
@@ -921,15 +1419,21 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          provider.label,
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+        Row(
+          children: [
+            ProviderIcon(provider),
+            const SizedBox(width: 8),
+            Text(
+              provider.label,
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ],
         ),
         const SizedBox(height: 8),
         Text(
-          'Assinatura: usa o ${provider == AgentProvider.claude ? 'Claude Code' : 'Codex'} '
+          'Assinatura: usa o ${provider.cliProductName} '
           'instalado neste computador, com o login da sua conta.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
@@ -1010,9 +1514,11 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
               'computador e não vão para o banco compartilhado.',
             ),
             const SizedBox(height: 16),
-            _providerSection(AgentProvider.claude),
-            const Divider(height: 32),
-            _providerSection(AgentProvider.chatgpt),
+            for (final provider in AgentProvider.values) ...[
+              if (provider != AgentProvider.values.first)
+                const Divider(height: 32),
+              _providerSection(provider),
+            ],
             if (_message != null) ...[
               const SizedBox(height: 16),
               Text(
@@ -1032,4 +1538,68 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       FilledButton(onPressed: _save, child: const Text('Salvar')),
     ],
   );
+}
+
+/// Cria o back-end do CLI oficial de cada provedor.
+AgentBackend cliBackendFor(
+  AgentProvider provider, {
+  required AgentMcpServer mcp,
+  required String path,
+  required String model,
+}) => switch (provider) {
+  AgentProvider.claude => ClaudeCliBackend(
+    mcp: mcp,
+    configuredPath: path,
+    model: model,
+  ),
+  AgentProvider.chatgpt => CodexCliBackend(
+    mcp: mcp,
+    configuredPath: path,
+    model: model,
+  ),
+  AgentProvider.gemini => GeminiCliBackend(
+    mcp: mcp,
+    configuredPath: path,
+    model: model,
+  ),
+};
+
+/// Ícone de cada provedor (selo colorido). Para usar os logotipos oficiais,
+/// basta trocar o conteúdo por imagens em assets.
+class ProviderIcon extends StatelessWidget {
+  const ProviderIcon(this.provider, {super.key, this.size = 22});
+
+  final AgentProvider provider;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final (IconData icon, List<Color> colors) = switch (provider) {
+      AgentProvider.claude => (
+        Icons.brightness_7_rounded,
+        const [Color(0xFFE08B6D), Color(0xFFC96442)],
+      ),
+      AgentProvider.chatgpt => (
+        Icons.hub_rounded,
+        const [Color(0xFF19C37D), Color(0xFF0E8A5F)],
+      ),
+      AgentProvider.gemini => (
+        Icons.auto_awesome,
+        const [Color(0xFF4796E3), Color(0xFF9177C7)],
+      ),
+    };
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: colors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Icon(icon, size: size * 0.64, color: Colors.white),
+    );
+  }
 }

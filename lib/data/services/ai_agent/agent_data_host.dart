@@ -263,7 +263,10 @@ class AgentDataHost {
 
   void _pushUndo(String key, Object? previous) {
     _undo.add(
-      _UndoEntry(key, previous is List ? List<String>.of(previous.cast()) : previous),
+      _UndoEntry(
+        key,
+        previous is List ? List<String>.of(previous.cast()) : previous,
+      ),
     );
     if (_undo.length > _maxUndo) _undo.removeAt(0);
   }
@@ -435,9 +438,7 @@ class AgentDataHost {
     var node = root;
     for (var i = 0; i < path.length; i++) {
       final segment = path[i];
-      final nextIsIndex = i + 1 < path.length
-          ? path[i + 1] is int
-          : false;
+      final nextIsIndex = i + 1 < path.length ? path[i + 1] is int : false;
       Object? child;
       if (node is Map) {
         child = node['$segment'];

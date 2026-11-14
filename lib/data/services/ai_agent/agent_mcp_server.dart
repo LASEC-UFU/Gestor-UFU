@@ -63,9 +63,7 @@ class AgentMcpServer {
         return;
       }
       response.headers.contentType = ContentType.json;
-      response.write(
-        jsonEncode(decoded is List ? replies : replies.single),
-      );
+      response.write(jsonEncode(decoded is List ? replies : replies.single));
     } catch (error) {
       response.statusCode = HttpStatus.badRequest;
       response.headers.contentType = ContentType.json;

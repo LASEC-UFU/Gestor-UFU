@@ -73,8 +73,7 @@ Gestor UFU:
       id: general,
       title: 'Geral (todas as funcionalidades)',
       summary: 'Visão geral do banco e das funcionalidades.',
-      body:
-          '''
+      body: '''
 Use `list_modules` para ver as funcionalidades e `get_skill` para carregar as
 instruções de uma delas antes de alterar seus dados.
 
