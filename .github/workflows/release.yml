@@ -60,10 +60,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configurar Flutter (stable)
+      # Versão fixa: o motor de versões mais novas do stable trava
+      # (0xc0000005 em flutter_windows.dll) ao abrir janelas secundárias.
+      - name: Configurar Flutter (3.41.9)
         uses: subosito/flutter-action@v2
         with:
           channel: "stable"
+          flutter-version: "3.41.9"
           cache: true
 
       - name: Dependências Flutter
