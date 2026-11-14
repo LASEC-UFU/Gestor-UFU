@@ -25,6 +25,8 @@ import 'package:gestor_ufu/data/services/diary_automation_service.dart';
 import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
+import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:window_manager/window_manager.dart';
 
 String _appVersion = 'desconhecida';
@@ -38,6 +40,32 @@ Future<void> main(List<String> args) async {
     final window = await WindowController.fromCurrentEngine();
     if (window.arguments.isNotEmpty) {
       final payload = jsonDecode(window.arguments) as Map<String, dynamic>;
+      if (payload['type'] == 'aiAgent') {
+        final isLight = payload['isLight'] as bool? ?? false;
+        AppTheme.isLight = isLight;
+        await windowManager.ensureInitialized();
+        unawaited(
+          windowManager.waitUntilReadyToShow(
+            WindowOptions(
+              size: const Size(980, 760),
+              minimumSize: const Size(640, 480),
+              center: true,
+              title: 'Agente de IA - $appTitle',
+            ),
+            () async {
+              await windowManager.show();
+              await windowManager.focus();
+            },
+          ),
+        );
+        runApp(
+          AiAgentWindowApp(
+            initialSkill: payload['skill'] as String? ?? 'geral',
+            isLight: isLight,
+          ),
+        );
+        return;
+      }
       if (payload['type'] == 'scheduleEditor') {
         final isLight = payload['isLight'] as bool? ?? false;
         AppTheme.isLight = isLight;
@@ -187,6 +215,21 @@ Future<void> main(List<String> args) async {
   final configCtrl = ConfigController(configRepo);
   final syncCtrl = SyncController(moodleRepo);
 
+  // Ferramentas do Agente de IA executadas nesta janela (banco + desfazer).
+  final agentHost = AgentDataHost.instance
+    ..currentRoute = (() {
+      try {
+        return AppRouter.router.routerDelegate.currentConfiguration.uri.path;
+      } catch (_) {
+        return null;
+      }
+    })
+    ..onDataChanged = () async {
+      localDs.invalidateCache();
+      await configCtrl.loadAll();
+    };
+  if (Platform.isWindows) await agentHost.start();
+
   if (kDebugMode && diaryAutomationDebugEnabled) {
     unawaited(() async {
       try {
@@ -305,6 +348,13 @@ class _GestorUfuAppState extends State<GestorUfuApp> {
       darkTheme: AppTheme.dark,
       themeMode: themeController.themeMode,
       routerConfig: AppRouter.router,
+      // Quando o Agente de IA grava no banco, a árvore de páginas é recriada
+      // para que cada tela recarregue os dados atualizados.
+      builder: (context, child) => ValueListenableBuilder<int>(
+        valueListenable: AgentDataHost.instance.revision,
+        builder: (context, revision, _) =>
+            KeyedSubtree(key: ValueKey(revision), child: child!),
+      ),
     );
   }
 }

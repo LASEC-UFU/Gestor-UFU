@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:pdf/pdf.dart';
@@ -639,60 +640,75 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        IconButton(
-                          onPressed: () => context.go('/'),
-                          icon: const Icon(Icons.arrow_back),
-                        ),
-                        const SizedBox(width: 8),
-                        const Icon(
-                          Icons.compare_arrows_rounded,
-                          color: AppTheme.accent,
-                          size: 30,
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          width: 480,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        Expanded(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Text(
-                                'Equivalência de Alunos',
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              IconButton(
+                                onPressed: () => context.go('/'),
+                                icon: const Icon(Icons.arrow_back),
                               ),
-                              Text(
-                                'Análise de transferência por blocos curriculares',
-                                style: TextStyle(color: AppTheme.textSecondary),
+                              const SizedBox(width: 8),
+                              const Icon(
+                                Icons.compare_arrows_rounded,
+                                color: AppTheme.accent,
+                                size: 30,
+                              ),
+                              const SizedBox(width: 12),
+                              SizedBox(
+                                width: 480,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Equivalência de Alunos',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    Text(
+                                      'Análise de transferência por blocos curriculares',
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IntrinsicWidth(
+                                child: OutlinedButton.icon(
+                                  onPressed: _curriculumDialog,
+                                  icon: const Icon(Icons.account_tree_outlined),
+                                  label: const Text('Currículos'),
+                                ),
+                              ),
+                              IntrinsicWidth(
+                                child: OutlinedButton.icon(
+                                  onPressed: _importWorkbook,
+                                  icon: const Icon(Icons.upload_file),
+                                  label: const Text('Importar planilha'),
+                                ),
+                              ),
+                              IntrinsicWidth(
+                                child: FilledButton.icon(
+                                  onPressed: () => _newCase(),
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Nova análise'),
+                                ),
                               ),
                             ],
                           ),
                         ),
-                        IntrinsicWidth(
-                          child: OutlinedButton.icon(
-                            onPressed: _curriculumDialog,
-                            icon: const Icon(Icons.account_tree_outlined),
-                            label: const Text('Currículos'),
-                          ),
-                        ),
-                        IntrinsicWidth(
-                          child: OutlinedButton.icon(
-                            onPressed: _importWorkbook,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('Importar planilha'),
-                          ),
-                        ),
-                        IntrinsicWidth(
-                          child: FilledButton.icon(
-                            onPressed: () => _newCase(),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Nova análise'),
-                          ),
-                        ),
+                        const SizedBox(width: 12),
+                        const ThemeSelector(compact: true),
                       ],
                     ),
                   ),

@@ -528,8 +528,9 @@ class _TableEditorPageState extends State<TableEditorPage> {
                 ),
               ),
             const SizedBox(width: 8),
-            const ThemeSelector(compact: true),
           ],
+          // Agente de IA + tema sempre no canto superior direito.
+          const ThemeSelector(compact: true),
         ],
       ),
     );

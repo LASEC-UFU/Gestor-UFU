@@ -12,6 +12,10 @@ class LocalDatasource {
   final _uuid = const Uuid();
   Map<String, CourseConfig>? _cache;
 
+  /// Descarta o cache para reler o SharedPreferences (ex.: após o Agente de
+  /// IA alterar as configurações).
+  void invalidateCache() => _cache = null;
+
   Future<Map<String, CourseConfig>> _loadAll() async {
     if (_cache != null) return _cache!;
     final prefs = await SharedPreferences.getInstance();

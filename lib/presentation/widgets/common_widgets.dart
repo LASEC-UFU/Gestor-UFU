@@ -2,14 +2,78 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
+import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
 
-class ThemeSelector extends StatelessWidget {
-  const ThemeSelector({super.key, this.compact = false});
+/// Botão que abre a janela do Agente de IA. Fica embutido no
+/// [ThemeSelector], então aparece em todas as telas que exibem o seletor de
+/// tema (inclusive telas futuras).
+class AiAgentButton extends StatelessWidget {
+  const AiAgentButton({super.key, this.compact = false});
 
   final bool compact;
 
+  void _open() => AiAgentLauncher.open(
+    route: AgentDataHost.instance.currentRoute?.call(),
+  );
+
   @override
   Widget build(BuildContext context) {
+    // Só a janela principal abre o agente (janelas auxiliares não têm host).
+    if (!AgentDataHost.instance.isRunning) return const SizedBox.shrink();
+    if (compact) {
+      return Tooltip(
+        message: 'Agente de IA',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _open,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: AppTheme.glassDecoration(opacity: 0.06),
+            child: const Icon(
+              Icons.smart_toy_rounded,
+              size: 16,
+              color: AppTheme.primary,
+            ),
+          ),
+        ),
+      );
+    }
+    return FilledButton.icon(
+      onPressed: _open,
+      icon: const Icon(Icons.smart_toy_rounded, size: 17),
+      label: const Text('Agente de IA'),
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 40),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+      ),
+    );
+  }
+}
+
+class ThemeSelector extends StatelessWidget {
+  const ThemeSelector({super.key, this.compact = false, this.showAgent = true});
+
+  final bool compact;
+
+  /// Exibe o botão do Agente de IA ao lado do seletor de tema.
+  final bool showAgent;
+
+  @override
+  Widget build(BuildContext context) {
+    final selector = _themeMenu(context);
+    if (!showAgent || !AgentDataHost.instance.isRunning) return selector;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AiAgentButton(compact: compact),
+        SizedBox(width: compact ? 8 : 10),
+        selector,
+      ],
+    );
+  }
+
+  Widget _themeMenu(BuildContext context) {
     final theme = context.watch<ThemeController>();
     return PopupMenuButton<bool>(
       tooltip: 'Selecionar tema',

@@ -549,7 +549,12 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
                   height: 220,
                   child: ReorderableListView.builder(
                     itemCount: _modules.length,
-                    onReorderItem: _reorderModules,
+                    // onReorder entrega newIndex antes de remover o item;
+                    // ajusta para a semântica usada por _reorderModules.
+                    onReorder: (oldIndex, newIndex) => _reorderModules(
+                      oldIndex,
+                      newIndex > oldIndex ? newIndex - 1 : newIndex,
+                    ),
                     buildDefaultDragHandles: false,
                     itemBuilder: (context, index) {
                       final module = _modules[index];

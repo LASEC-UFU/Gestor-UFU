@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 import 'package:gestor_ufu/data/services/plano_trabalho_automation_service.dart';
 import 'package:gestor_ufu/data/services/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/data/services/progressao_pdf_service.dart';
@@ -242,46 +243,61 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        IconButton(
-                          onPressed: () => context.go('/'),
-                          icon: const Icon(Icons.arrow_back),
-                        ),
-                        const Icon(
-                          Icons.trending_up_rounded,
-                          color: AppTheme.accent,
-                          size: 30,
-                        ),
-                        const SizedBox(width: 6),
-                        SizedBox(
-                          width: 560,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        Expanded(
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              Text(
-                                'Progressão / Promoção Docente',
-                                style: Theme.of(context).textTheme.headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              IconButton(
+                                onPressed: () => context.go('/'),
+                                icon: const Icon(Icons.arrow_back),
                               ),
-                              Text(
-                                'Relatório de atividades conforme a Resolução 03/2017 CONDIR '
-                                '(com alterações da Res. SEI 05/2018)',
-                                style: TextStyle(color: AppTheme.textSecondary),
+                              const Icon(
+                                Icons.trending_up_rounded,
+                                color: AppTheme.accent,
+                                size: 30,
+                              ),
+                              const SizedBox(width: 6),
+                              SizedBox(
+                                width: 560,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Progressão / Promoção Docente',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                    ),
+                                    Text(
+                                      'Relatório de atividades conforme a Resolução 03/2017 CONDIR '
+                                      '(com alterações da Res. SEI 05/2018)',
+                                      style: TextStyle(
+                                        color: AppTheme.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IntrinsicWidth(
+                                child: FilledButton.icon(
+                                  onPressed: _novo,
+                                  icon: const Icon(Icons.add),
+                                  label: const Text('Novo processo'),
+                                ),
                               ),
                             ],
                           ),
                         ),
-                        IntrinsicWidth(
-                          child: FilledButton.icon(
-                            onPressed: _novo,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Novo processo'),
-                          ),
-                        ),
+                        const SizedBox(width: 12),
+                        const ThemeSelector(compact: true),
                       ],
                     ),
                     const SizedBox(height: 16),
@@ -484,6 +500,8 @@ class _Editor extends StatelessWidget {
                         icon: const Icon(Icons.picture_as_pdf_outlined),
                         label: const Text('Gerar PDF'),
                       ),
+                      const SizedBox(width: 10),
+                      const ThemeSelector(compact: true),
                     ],
                   ),
                 ),
