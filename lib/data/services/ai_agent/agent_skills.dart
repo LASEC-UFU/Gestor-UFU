@@ -50,6 +50,10 @@ JSON) e é sincronizado entre computadores pelo arquivo compartilhado.
 - `patch_json`: altera partes de um JSON (set, merge, append, delete). Prefira.
 - `write_key`: substitui o valor inteiro de uma chave.
 - `delete_key`: remove uma chave.
+- `list_commands` / `run_command`: executam as AÇÕES DAS TELAS (importar
+  arquivo, exportar, gerar PDF…) com as mesmas regras da interface. Sempre que
+  existir um comando para o que o usuário pediu, use-o em vez de gravar no
+  banco à mão.
 - `list_templates` / `create_template`: gera arquivos-modelo das importações,
   com exemplos ou com os dados que você montar (arquivo pronto para importar).
 `path` é sempre uma LISTA de segmentos, ex.: ["savedDiaries", 0, "entries",
@@ -115,7 +119,8 @@ entrar no próprio navegador e avise quando terminar.
     return buffer.toString();
   }
 
-  static final List<AgentSkill> all = [
+  /// Skills que ainda não migraram para o seu módulo.
+  static final List<AgentSkill> _legacy = [
     AgentSkill(
       id: general,
       title: 'Geral (todas as funcionalidades)',
@@ -500,52 +505,6 @@ ignoredFormulas: [...] } | null }.
 Para mudar um valor, altere `value` do campo (section + cell) com patch_json.
 ''',
     ),
-    const AgentSkill(
-      id: 'equivalencia-alunos',
-      title: 'Equivalência de Alunos',
-      summary: 'Aproveitamento de disciplinas entre currículos e certidão.',
-      body: '''
-## Para que serve
-Registra os currículos (disciplinas e cargas) e as análises de transferência
-de cada aluno: blocos que ligam disciplinas do currículo atual às cursadas no
-currículo anterior, com situação e certidão de estudos em PDF.
-
-## Onde fica cada ação (tela Equivalência de Alunos)
-- "Currículos": cadastra currículos (curso + nome) e suas disciplinas —
-  "Editar e importar disciplinas" (planilha), "Cadastrar disciplina
-  manualmente", remover.
-- "Nova análise" / "Importar planilha" (análise pronta); em cada análise:
-  aluno, matrícula, currículo atual e anterior, situação (Em análise,
-  Deferida, Indeferida), observações, "Adicionar bloco", "Agrupar com outro
-  bloco", catálogo de disciplinas ("Aplicar catálogo"), "Salvar análise".
-- "Imprimir certidão de estudos em PDF".
-
-## Importar disciplinas do currículo (.xlsx/.xlsm)
-Cabeçalho nas 30 primeiras linhas (qualquer aba, ordem livre). Reconhece:
-código ("Código Disciplina", "Cód Disc", "Código Componente", "Código",
-"Sigla"), nome ("Nome Disciplina", "Disciplina", "Componente") — obrigatório
-—, "CH Teórica", "CH Prática", "CH Total", "Tipo"/"Natureza" e "Estrutura
-Curricular". Modelo: `create_template("equivalencia_curriculo", rows: [...])`
-(colunas: código, nome, CH T, CH P, CH total, tipo, estrutura).
-
-## Importar análise (aba "Equivalencia")
-A1 = nome do aluno, A2 = matrícula; dados a partir da linha 7:
-A período | B código atual | C disciplina atual | D CH T | E CH P | (F) |
-G Saldo | H código anterior | I disciplina anterior | J CH T | K CH P.
-Linhas cuja coluna G está MESCLADA formam um bloco (várias disciplinas de um
-lado ↔ do outro); linhas soltas viram blocos individuais. Exige um currículo
-atual selecionado. Modelo: `create_template("equivalencia_analise", rows:
-[...], options: {student, student_id, blocks: [[1,2]]})`.
-
-## Banco
-Chave: `student_equivalencies.blocks.v1` — { "curricula": [ { id, course,
-name, subjects: [ {code, name, theoretical, practical} ] } ], "cases": [ {
-id, student, studentId, currentCurriculumId, priorCurriculumId, status ("Em
-análise"|"Deferida"|"Indeferida"), notes, blocks: [ { id, period, current:
-[subject], prior: [subject] } ], currentCatalog: [subject], priorCatalog:
-[subject] } ] }. Cargas (theoretical/practical) são inteiros (horas).
-''',
-    ),
     AgentSkill(
       id: 'progressao',
       title: 'Progressão / Promoção',
@@ -616,6 +575,30 @@ do agente (browser_*), com o usuário fazendo o login.
 ''',
     ),
   ];
+
+  /// Geral + skills declaradas pelos módulos instalados (as que ainda não
+  /// migraram vêm da lista [_legacy]).
+  static List<AgentSkill> get all {
+    final result = <AgentSkill>[_legacy.first];
+    for (final module in ModuleRegistry.instance.modules) {
+      final skill = module.skill;
+      if (skill != null) {
+        result.add(
+          AgentSkill(
+            id: module.id,
+            title: skill.title,
+            summary: skill.summary,
+            body: skill.body,
+          ),
+        );
+        continue;
+      }
+      for (final legacy in _legacy.skip(1)) {
+        if (legacy.id == module.id) result.add(legacy);
+      }
+    }
+    return result;
+  }
 
   static AgentSkill? byId(String id) {
     for (final skill in all) {

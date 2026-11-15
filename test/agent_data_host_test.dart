@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/app/installed_modules.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final host = AgentDataHost.instance;
+  installModules(ModuleRegistry.instance);
 
   Future<Map<String, dynamic>> run(String name, Map<String, dynamic> input) async =>
       Map<String, dynamic>.from(jsonDecode(await host.runTool(name, input)) as Map);
@@ -86,5 +89,39 @@ void main() {
     expect(prefs.getString('nova'), '[1,2]');
     await host.undoLast();
     expect(prefs.containsKey('nova'), isFalse);
+  });
+
+  test('list_commands lista os comandos dos módulos', () async {
+    final result = await run('list_commands', {
+      'module': 'equivalencia-alunos',
+    });
+    final commands = (result['commands'] as List).cast<Map>();
+    expect(
+      commands.map((c) => c['id']),
+      containsAll([
+        'equivalencia.importarCurriculo',
+        'equivalencia.removerAnalise',
+      ]),
+    );
+    final remove = commands.firstWhere(
+      (c) => c['id'] == 'equivalencia.removerAnalise',
+    );
+    expect(remove['requires_approval'], isTrue);
+  });
+
+  test('run_command executa e devolve erros com código', () async {
+    final listed = await run('run_command', {
+      'command': 'equivalencia.listar',
+    });
+    expect(listed['ok'], isTrue);
+    expect(listed['currentId'], 'eca-2020');
+    final failed = await run('run_command', {
+      'command': 'equivalencia.importarAnalise',
+      'input': {'path': 'nao-existe.xlsx'},
+    });
+    expect(failed['ok'], isFalse);
+    expect(failed['code'], 'arquivo_nao_encontrado');
+    final unknown = await run('run_command', {'command': 'nao.existe'});
+    expect(unknown['error'], contains('list_commands'));
   });
 }

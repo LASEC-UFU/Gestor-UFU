@@ -23,7 +23,7 @@ void installModules([ModuleRegistry? target]) {
     ..register(const PlanosEnsinoModule())
     ..register(const PlanosTrabalhoModule())
     ..register(const AjustaHorariosModule())
-    ..register(const EquivalenciaModule())
+    ..register(EquivalenciaModule())
     ..register(const ProgressaoModule())
     ..register(const InserirDocumentosSeiModule());
 }

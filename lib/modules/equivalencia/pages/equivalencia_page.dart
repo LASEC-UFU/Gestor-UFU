@@ -1,448 +1,104 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
-import 'package:excel/excel.dart' as xls;
-import 'package:file_picker/file_picker.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gestor_ufu/modules/equivalencia/application/certidao_pdf.dart';
+import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_service.dart';
+import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 
 /// Cadastro de currículos e análise de transferência por blocos curriculares.
-class EquivalenciaAlunosPage extends StatefulWidget {
-  const EquivalenciaAlunosPage({super.key});
+/// A tela só cuida da interface; dados e regras ficam no [EquivalenciaService]
+/// (os mesmos usados pelos comandos do módulo e pelo Agente de IA).
+class EquivalenciaPage extends StatefulWidget {
+  const EquivalenciaPage({required this.service, super.key});
+
+  final EquivalenciaService service;
 
   @override
-  State<EquivalenciaAlunosPage> createState() => _EquivalenciaAlunosPageState();
+  State<EquivalenciaPage> createState() => _EquivalenciaPageState();
 }
 
-class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
-  static const _key = 'student_equivalencies.blocks.v1';
+class _EquivalenciaPageState extends State<EquivalenciaPage> {
   final _search = TextEditingController();
-  List<_Case> _cases = [];
-  List<_Curriculum> _curricula = [
-    const _Curriculum(
-      id: 'eca-2020',
-      course: 'Engenharia de Controle e Automação',
-      name: 'Currículo Proposto (2020/1)',
-    ),
-  ];
-  String? _currentId = 'eca-2020';
   bool _busy = true;
+
+  EquivalenciaService get _service => widget.service;
+  List<EquivalenceCase> get _cases => _service.state.cases;
+  List<Curriculum> get _curricula => _service.state.curricula;
+  String? get _currentId => _service.state.currentId;
 
   @override
   void initState() {
     super.initState();
+    _service.addListener(_onChanged);
     _load();
-    _search.addListener(() {
-      if (mounted) setState(() {});
-    });
+    _search.addListener(_onChanged);
   }
 
   @override
   void dispose() {
+    _service.removeListener(_onChanged);
     _search.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
-    if (raw != null) {
-      try {
-        final data = jsonDecode(raw) as Map<String, dynamic>;
-        _curricula = (data['curricula'] as List? ?? const [])
-            .map(
-              (e) => _Curriculum.fromJson(Map<String, dynamic>.from(e as Map)),
-            )
-            .toList();
-        _curricula.removeWhere(
-          (c) => c.id == 'eca-2013' || c.name == 'Currículo Anterior (2013/2)',
-        );
-        _cases = (data['cases'] as List? ?? const [])
-            .map((e) => _Case.fromJson(Map<String, dynamic>.from(e as Map)))
-            .toList();
-        _currentId = data['currentId'] as String?;
-      } on Object {
-        /* Mantém o catálogo inicial se o JSON estiver inválido. */
-      }
-    } else {
-      // Migra análises simples da versão anterior para blocos de uma disciplina
-      // em cada lado, sem apagar a chave original do SharedPreferences.
-      final legacy = prefs.getString('student_equivalencies.v1');
-      if (legacy != null) {
-        try {
-          final entries = jsonDecode(legacy) as List<dynamic>;
-          for (final entry in entries) {
-            final old = Map<String, dynamic>.from(entry as Map);
-            final currentCourse = (old['destinationCourse'] as String? ?? '')
-                .trim();
-            String profile(String course, String suffix, String label) {
-              final match = _curricula.where(
-                (c) => c.course == course && c.name == label,
-              );
-              if (match.isNotEmpty) return match.first.id;
-              final id =
-                  'legacy-$suffix-${DateTime.now().microsecondsSinceEpoch}-${_curricula.length}';
-              _curricula.add(
-                _Curriculum(
-                  id: id,
-                  course: course.isEmpty ? 'Curso não informado' : course,
-                  name: label,
-                ),
-              );
-              return id;
-            }
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
 
-            final hoursText = (old['hours'] as String? ?? '0').trim();
-            final hours = int.tryParse(hoursText) ?? 0;
-            final currentId = profile(
-              currentCourse,
-              'current',
-              'Currículo de destino',
-            );
-            _cases.add(
-              _Case(
-                id:
-                    old['id'] as String? ??
-                    DateTime.now().microsecondsSinceEpoch.toString(),
-                student: old['student'] as String? ?? '',
-                studentId: old['studentId'] as String? ?? '',
-                currentCurriculumId: currentId,
-                priorCurriculumId: '',
-                status: old['status'] as String? ?? 'Em análise',
-                notes: old['notes'] as String? ?? '',
-                blocks: [
-                  _Block(
-                    id: DateTime.now().microsecondsSinceEpoch.toString(),
-                    period: '',
-                    current: [
-                      _Subject(
-                        code: '',
-                        name: old['destinationSubject'] as String? ?? '',
-                        theoretical: hours,
-                        practical: 0,
-                      ),
-                    ],
-                    prior: [
-                      _Subject(
-                        code: '',
-                        name: old['sourceSubject'] as String? ?? '',
-                        theoretical: hours,
-                        practical: 0,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            );
-          }
-          if (_cases.isNotEmpty) await _persist();
-        } on Object {
-          // Um JSON legado inválido não impede o uso dos novos cadastros.
-        }
-      }
-    }
-    if (_curricula.isEmpty)
-      _curricula = [
-        const _Curriculum(
-          id: 'eca-2020',
-          course: 'Engenharia de Controle e Automação',
-          name: 'Currículo Proposto (2020/1)',
-        ),
-      ];
-    _currentId ??= _curricula.first.id;
+  Future<void> _load() async {
+    await _service.load();
     if (mounted) setState(() => _busy = false);
   }
 
-  Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
-      _key,
-      jsonEncode({
-        'curricula': _curricula.map((e) => e.toJson()).toList(),
-        'cases': _cases.map((e) => e.toJson()).toList(),
-        'currentId': _currentId,
-      }),
-    );
-  }
+  Curriculum? _curriculum(String? id) => _service.state.curriculum(id);
 
-  _Curriculum? _curriculum(String? id) {
-    for (final c in _curricula) {
-      if (c.id == id) return c;
-    }
-    return null;
-  }
-
-  Future<void> _printCertificate(_Case item) async {
+  Future<void> _printCertificate(EquivalenceCase item) async {
     try {
       final path = await FilePicker.platform.saveFile(
         dialogTitle: 'Salvar certidão de estudos em PDF',
-        fileName: 'certidao-estudos-${_safeFileName(item.student)}.pdf',
+        fileName: CertidaoPdf.fileName(item),
         type: FileType.custom,
         allowedExtensions: const ['pdf'],
       );
       if (path == null) return;
-      final bytes = await _certificatePdf(
-        item,
-        _curriculum(item.currentCurriculumId),
-      );
-      await File(
-        path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf',
-      ).writeAsBytes(bytes, flush: true);
+      await _service.exportCertidao(item.id, path);
       _message('PDF da certidão gerado com sucesso.');
     } catch (error) {
       _message('Não foi possível gerar o PDF: $error');
     }
   }
 
-  Future<Uint8List> _certificatePdf(_Case item, _Curriculum? curriculum) async {
-    final regular = pw.Font.ttf(
-      ByteData.sublistView(
-        await File('C:/Windows/Fonts/arial.ttf').readAsBytes(),
-      ),
-    );
-    final bold = pw.Font.ttf(
-      ByteData.sublistView(
-        await File('C:/Windows/Fonts/arialbd.ttf').readAsBytes(),
-      ),
-    );
-    final document = pw.Document(
-      theme: pw.ThemeData.withFont(base: regular, bold: bold),
-    );
-    final blocks = item.blocks;
-    final totalCurrent = blocks.fold<int>(
-      0,
-      (sum, block) => sum + block.currentHours,
-    );
-    final totalPrior = blocks.fold<int>(
-      0,
-      (sum, block) => sum + block.priorHours,
-    );
-    document.addPage(
-      pw.MultiPage(
-        pageTheme: pw.PageTheme(
-          pageFormat: PdfPageFormat.a4.landscape,
-          margin: const pw.EdgeInsets.fromLTRB(34, 28, 34, 30),
+  Future<void> _removeCase(EquivalenceCase item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Remover análise?'),
+        content: Text(
+          'A análise de "${item.student.isEmpty ? 'aluno sem nome' : item.student}" '
+          'será apagada.',
         ),
-        header: (_) => pw.Column(
-          children: [
-            pw.Text(
-              'UNIVERSIDADE FEDERAL DE UBERLÂNDIA',
-              style: pw.TextStyle(font: bold, fontSize: 12),
-            ),
-            pw.SizedBox(height: 4),
-            pw.Text(
-              'CERTIDÃO DE ESTUDOS',
-              style: pw.TextStyle(font: bold, fontSize: 17),
-            ),
-            pw.SizedBox(height: 10),
-          ],
-        ),
-        build: (_) => [
-          pw.Text(
-            'Curso: ${curriculum?.course ?? '—'}',
-            style: const pw.TextStyle(fontSize: 10),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
           ),
-          pw.SizedBox(height: 4),
-          pw.Text(
-            'Discente: ${item.student.isEmpty ? '—' : item.student}    Matrícula: ${item.studentId.isEmpty ? '—' : item.studentId}',
-            style: const pw.TextStyle(fontSize: 10),
-          ),
-          pw.SizedBox(height: 12),
-          for (var index = 0; index < blocks.length; index++) ...[
-            _certificateBlock(blocks[index], index),
-            pw.SizedBox(height: 9),
-          ],
-          pw.Table(
-            border: pw.TableBorder.all(color: PdfColors.grey600, width: .5),
-            columnWidths: const {
-              0: pw.FlexColumnWidth(4),
-              1: pw.FlexColumnWidth(.7),
-              2: pw.FlexColumnWidth(4),
-              3: pw.FlexColumnWidth(.7),
-            },
-            children: [
-              pw.TableRow(
-                decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                children: [
-                  _pdfCell('Total geral dispensado', bold: true),
-                  _pdfCell('$totalCurrent h', bold: true, centered: true),
-                  _pdfCell('Total geral cursado na origem', bold: true),
-                  _pdfCell('$totalPrior h', bold: true, centered: true),
-                ],
-              ),
-            ],
-          ),
-          if (item.notes.trim().isNotEmpty) ...[
-            pw.SizedBox(height: 12),
-            pw.Text(
-              'Observações: ${item.notes.trim()}',
-              style: const pw.TextStyle(fontSize: 9),
-            ),
-          ],
-          pw.SizedBox(height: 22),
-          pw.Center(
-            child: pw.Text(
-              'Documento gerado para conferência',
-              style: const pw.TextStyle(fontSize: 9),
-            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remover'),
           ),
         ],
       ),
     );
-    return document.save();
+    if (confirmed != true) return;
+    await _service.removeCase(item.id);
   }
 
-  pw.Widget _certificateBlock(_Block block, int index) {
-    final blockName = block.period.trim().isEmpty
-        ? 'Bloco ${index + 1}'
-        : block.period;
-    return pw.Container(
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: PdfColors.grey600, width: .6),
-      ),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: [
-          pw.Container(
-            color: PdfColors.grey300,
-            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: pw.Text(
-              blockName,
-              style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-            ),
-          ),
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Expanded(
-                child: _certificateSide(
-                  title: 'Disciplinas dispensadas',
-                  subjects: block.current,
-                  total: block.currentHours,
-                ),
-              ),
-              pw.Container(width: .6, color: PdfColors.grey500),
-              pw.Expanded(
-                child: _certificateSide(
-                  title: 'Disciplinas realizadas na IES de origem',
-                  subjects: block.prior,
-                  total: block.priorHours,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _certificateSide({
-    required String title,
-    required List<_Subject> subjects,
-    required int total,
-  }) => pw.Padding(
-    padding: const pw.EdgeInsets.all(5),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Row(
-          children: [
-            pw.Expanded(
-              child: pw.Text(
-                title,
-                style: pw.TextStyle(
-                  fontSize: 8,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-            ),
-            pw.Text(
-              'Subtotal: $total h',
-              style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-            ),
-          ],
-        ),
-        pw.SizedBox(height: 3),
-        if (subjects.isEmpty)
-          _pdfCell('Nenhuma disciplina neste lado', centered: true)
-        else
-          for (final subject in subjects)
-            pw.Container(
-              decoration: const pw.BoxDecoration(
-                border: pw.Border(
-                  top: pw.BorderSide(color: PdfColors.grey300, width: .35),
-                ),
-              ),
-              padding: const pw.EdgeInsets.symmetric(vertical: 3),
-              child: pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Expanded(
-                    child: pw.Text(
-                      '${subject.code.isEmpty ? '' : '${subject.code} - '}${subject.name}',
-                      style: const pw.TextStyle(fontSize: 8),
-                    ),
-                  ),
-                  pw.SizedBox(width: 5),
-                  pw.Text(
-                    '${subject.hours} h',
-                    style: const pw.TextStyle(fontSize: 8),
-                  ),
-                ],
-              ),
-            ),
-      ],
-    ),
-  );
-
-  pw.Widget _pdfCell(String text, {bool bold = false, bool centered = false}) =>
-      pw.Padding(
-        padding: const pw.EdgeInsets.all(5),
-        child: pw.Text(
-          text,
-          textAlign: centered ? pw.TextAlign.center : pw.TextAlign.left,
-          style: pw.TextStyle(
-            fontSize: 8.5,
-            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
-          ),
-        ),
-      );
-
-  String _safeFileName(String value) => value
-      .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
-      .trim()
-      .replaceAll(RegExp(r'\s+'), '-');
-
-  Future<void> _removeCurriculumSubject(
-    String curriculumId,
-    _Subject subject,
-  ) async {
-    final index = _curricula.indexWhere((item) => item.id == curriculumId);
-    if (index < 0) return;
-    final curriculum = _curricula[index];
-    final key = _subjectCatalogKey(subject);
-    final updated = _Curriculum(
-      id: curriculum.id,
-      course: curriculum.course,
-      name: curriculum.name,
-      subjects: curriculum.subjects
-          .where((item) => _subjectCatalogKey(item) != key)
-          .toList(),
-    );
-    setState(() => _curricula[index] = updated);
-    await _persist();
-  }
-
-  Future<void> _newCase({_Case? seed}) async {
+  Future<void> _newCase({EquivalenceCase? seed}) async {
     final draft =
         seed ??
-        _Case(
+        EquivalenceCase(
           id: DateTime.now().microsecondsSinceEpoch.toString(),
           student: '',
           studentId: '',
@@ -452,39 +108,26 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
           notes: '',
           blocks: [],
         );
-    final result = await showDialog<_Case>(
+    final result = await showDialog<EquivalenceCase>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _CaseDialog(
         value: draft,
         curricula: _curricula,
-        removeCurriculumSubject: _removeCurriculumSubject,
+        removeCurriculumSubject: _service.removeCurriculumSubject,
       ),
     );
     if (result == null || !mounted) return;
-    setState(() {
-      final i = _cases.indexWhere((e) => e.id == result.id);
-      if (i < 0) {
-        _cases.insert(0, result);
-      } else {
-        _cases[i] = result;
-      }
-    });
-    await _persist();
+    await _service.saveCase(result);
   }
 
   Future<void> _curriculumDialog() async {
-    final result = await showDialog<List<_Curriculum>>(
+    final result = await showDialog<List<Curriculum>>(
       context: context,
-      builder: (_) => _CurriculumDialog(initial: _curricula),
+      builder: (_) => _CurriculumDialog(initial: _curricula, service: _service),
     );
     if (result == null || result.isEmpty || !mounted) return;
-    setState(() {
-      _curricula = result;
-      if (!_curricula.any((e) => e.id == _currentId))
-        _currentId = _curricula.first.id;
-    });
-    await _persist();
+    await _service.replaceCurricula(result);
   }
 
   Future<void> _importWorkbook() async {
@@ -501,118 +144,22 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
       return;
     }
     try {
-      final book = xls.Excel.decodeBytes(bytes);
-      final sheet =
-          book.tables['Equivalencia'] ??
-          (book.tables.isNotEmpty ? book.tables.values.first : null);
-      if (sheet == null)
-        throw const FormatException('A planilha não contém uma aba legível.');
-      String cell(int r, int c) {
-        if (r >= sheet.maxRows || c >= sheet.maxColumns) return '';
-        final v = sheet
-            .cell(xls.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r))
-            .value;
-        return v?.toString().trim() ?? '';
-      }
-
-      // The workbook's merged Saldo cells identify multi-row blocks. Unmerged
-      // course rows become individual blocks.
-      final blockRows = <int, int>{};
-      for (final span in sheet.spannedItems) {
-        final match = RegExp(r'^G(\d+):G(\d+)$').firstMatch(span);
-        if (match != null) {
-          final start = int.parse(match.group(1)!) - 1;
-          final end = int.parse(match.group(2)!) - 1;
-          if (end >= 6) blockRows[start] = end;
-        }
-      }
-      final starts = <int, int>{};
-      for (var r = 6; r < sheet.maxRows; r++) {
-        final hasCourse = [
-          cell(r, 1),
-          cell(r, 2),
-          cell(r, 7),
-          cell(r, 8),
-        ].any((e) => e.isNotEmpty);
-        if (!hasCourse) continue;
-        final parent = blockRows.entries
-            .where((e) => r >= e.key && r <= e.value)
-            .map((e) => e.key)
-            .firstOrNull;
-        starts[parent ?? r] = blockRows[parent ?? r] ?? r;
-      }
-      final blocks = <_Block>[];
-      for (final entry in starts.entries) {
-        final left = <_Subject>[];
-        final right = <_Subject>[];
-        for (var r = entry.key; r <= entry.value; r++) {
-          final curCode = cell(r, 1), curName = cell(r, 2);
-          if (curCode.isNotEmpty || curName.isNotEmpty) {
-            left.add(
-              _Subject(
-                code: curCode,
-                name: curName,
-                theoretical: _number(cell(r, 3)),
-                practical: _number(cell(r, 4)),
-              ),
-            );
-          }
-          final oldCode = cell(r, 7), oldName = cell(r, 8);
-          if (oldCode.isNotEmpty || oldName.isNotEmpty) {
-            right.add(
-              _Subject(
-                code: oldCode,
-                name: oldName,
-                theoretical: _number(cell(r, 9)),
-                practical: _number(cell(r, 10)),
-              ),
-            );
-          }
-        }
-        if (left.isNotEmpty && right.isNotEmpty) {
-          blocks.add(
-            _Block(
-              id:
-                  DateTime.now().microsecondsSinceEpoch.toString() +
-                  '${blocks.length}',
-              period: cell(entry.key, 0),
-              current: left,
-              prior: right,
-            ),
-          );
-        }
-      }
-      if (blocks.isEmpty)
-        throw const FormatException(
-          'Não encontrei blocos com disciplinas nos dois currículos. Confira se selecionou a planilha modelo.',
-        );
-      final student = cell(0, 0);
-      final studentId = cell(1, 0);
-      final imported = _Case(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        student: student,
-        studentId: studentId,
-        currentCurriculumId: _currentId!,
-        priorCurriculumId: '',
-        status: 'Em análise',
-        notes: '',
-        blocks: blocks,
-      );
+      final imported = await _service.parseAnalysis(bytes);
       await _newCase(seed: imported);
-      if (mounted)
+      if (mounted) {
         _message(
-          '${blocks.length} blocos importados. Revise os dados do aluno e as cargas horárias.',
+          '${imported.blocks.length} blocos importados. Revise os dados do aluno e as cargas horárias.',
         );
+      }
     } on Object catch (e) {
       _message('Falha ao importar: $e');
     }
   }
 
-  int _number(String value) =>
-      int.tryParse(value.replaceAll(',', '.').split('.').first) ?? 0;
   void _message(String text) {
-    if (mounted)
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
   }
 
   @override
@@ -629,130 +176,56 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
               ].join(' ').toLowerCase().contains(query),
         )
         .toList();
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1800),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              IconButton(
-                                onPressed: () => context.go('/'),
-                                icon: const Icon(Icons.arrow_back),
-                              ),
-                              const SizedBox(width: 8),
-                              const Icon(
-                                Icons.compare_arrows_rounded,
-                                color: AppTheme.accent,
-                                size: 30,
-                              ),
-                              const SizedBox(width: 12),
-                              SizedBox(
-                                width: 480,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Equivalência de Alunos',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                    Text(
-                                      'Análise de transferência por blocos curriculares',
-                                      style: TextStyle(
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IntrinsicWidth(
-                                child: OutlinedButton.icon(
-                                  onPressed: _curriculumDialog,
-                                  icon: const Icon(Icons.account_tree_outlined),
-                                  label: const Text('Currículos'),
-                                ),
-                              ),
-                              IntrinsicWidth(
-                                child: OutlinedButton.icon(
-                                  onPressed: _importWorkbook,
-                                  icon: const Icon(Icons.upload_file),
-                                  label: const Text('Importar planilha'),
-                                ),
-                              ),
-                              IntrinsicWidth(
-                                child: FilledButton.icon(
-                                  onPressed: () => _newCase(),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Nova análise'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const ThemeSelector(compact: true),
-                      ],
-                    ),
+    return ModuleScaffold(
+      moduleId: 'equivalencia-alunos',
+      subtitle: 'Análise de transferência por blocos curriculares',
+      actions: [
+        OutlinedButton.icon(
+          onPressed: _curriculumDialog,
+          icon: const Icon(Icons.account_tree_outlined),
+          label: const Text('Currículos'),
+        ),
+        OutlinedButton.icon(
+          onPressed: _importWorkbook,
+          icon: const Icon(Icons.upload_file),
+          label: const Text('Importar planilha'),
+        ),
+        FilledButton.icon(
+          onPressed: () => _newCase(),
+          icon: const Icon(Icons.add),
+          label: const Text('Nova análise'),
+        ),
+      ],
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1440),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              children: [
+                _curriculumSelector(),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: _search,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Buscar aluno, matrícula ou curso',
                   ),
-                  Expanded(
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1440),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-                          child: Column(
-                            children: [
-                              _curriculumSelector(),
-                              const SizedBox(height: 14),
-                              TextField(
-                                controller: _search,
-                                decoration: const InputDecoration(
-                                  prefixIcon: Icon(Icons.search),
-                                  hintText: 'Buscar aluno, matrícula ou curso',
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Expanded(
-                                child: _busy
-                                    ? const Center(
-                                        child: CircularProgressIndicator(),
-                                      )
-                                    : visible.isEmpty
-                                    ? _empty()
-                                    : ListView.separated(
-                                        itemCount: visible.length,
-                                        separatorBuilder: (_, __) =>
-                                            const SizedBox(height: 10),
-                                        itemBuilder: (context, i) =>
-                                            _caseTile(visible[i]),
-                                      ),
-                              ),
-                            ],
-                          ),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: _busy
+                      ? const Center(child: CircularProgressIndicator())
+                      : visible.isEmpty
+                      ? _empty()
+                      : ListView.separated(
+                          itemCount: visible.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (context, i) => _caseTile(visible[i]),
                         ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
@@ -773,7 +246,7 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
           child: _curriculumDrop(
             'Curso / currículo de destino',
             _currentId,
-            (v) => setState(() => _currentId = v),
+            (v) => _service.selectCurriculum(v),
           ),
         ),
         const SizedBox(width: 20),
@@ -809,7 +282,7 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
     onChanged: onChanged,
   );
 
-  Widget _caseTile(_Case item) {
+  Widget _caseTile(EquivalenceCase item) {
     final current = _curriculum(item.currentCurriculumId);
     final deficits = item.blocks
         .where((b) => b.currentHours < b.priorHours)
@@ -850,7 +323,7 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
           spacing: 4,
           children: [
             Chip(label: Text(item.status)),
-            if (item.status.trim().toLowerCase() == 'deferida')
+            if (item.isApproved)
               IconButton(
                 tooltip: 'Imprimir certidão de estudos em PDF',
                 onPressed: () => _printCertificate(item),
@@ -860,6 +333,11 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
               tooltip: 'Abrir blocos',
               onPressed: () => _newCase(seed: item),
               icon: const Icon(Icons.edit_outlined),
+            ),
+            IconButton(
+              tooltip: 'Remover análise',
+              onPressed: () => _removeCase(item),
+              icon: const Icon(Icons.delete_outline),
             ),
           ],
         ),
@@ -888,163 +366,18 @@ class _EquivalenciaAlunosPageState extends State<EquivalenciaAlunosPage> {
   );
 }
 
-class _Curriculum {
-  const _Curriculum({
-    required this.id,
-    required this.course,
-    required this.name,
-    this.subjects = const [],
-  });
-  final String id, course, name;
-  final List<_Subject> subjects;
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'course': course,
-    'name': name,
-    'subjects': subjects.map((e) => e.toJson()).toList(),
-  };
-  factory _Curriculum.fromJson(Map<String, dynamic> j) => _Curriculum(
-    id: j['id'] ?? '',
-    course: j['course'] ?? '',
-    name: j['name'] ?? '',
-    subjects: (j['subjects'] as List? ?? const [])
-        .map((e) => _Subject.fromJson(Map<String, dynamic>.from(e)))
-        .toList(),
-  );
-}
-
-class _Subject {
-  const _Subject({
-    required this.code,
-    required this.name,
-    required this.theoretical,
-    required this.practical,
-  });
-  final String code, name;
-  final int theoretical, practical;
-  int get hours => theoretical + practical;
-  Map<String, dynamic> toJson() => {
-    'code': code,
-    'name': name,
-    'theoretical': theoretical,
-    'practical': practical,
-  };
-  factory _Subject.fromJson(Map<String, dynamic> j) => _Subject(
-    code: j['code'] ?? '',
-    name: j['name'] ?? '',
-    theoretical: j['theoretical'] ?? 0,
-    practical: j['practical'] ?? 0,
-  );
-}
-
-class _Block {
-  const _Block({
-    required this.id,
-    required this.period,
-    required this.current,
-    required this.prior,
-  });
-  final String id, period;
-  final List<_Subject> current, prior;
-  int get currentHours => current.fold(0, (sum, s) => sum + s.hours);
-  int get priorHours => prior.fold(0, (sum, s) => sum + s.hours);
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'period': period,
-    'current': current.map((e) => e.toJson()).toList(),
-    'prior': prior.map((e) => e.toJson()).toList(),
-  };
-  factory _Block.fromJson(Map<String, dynamic> j) => _Block(
-    id: j['id'] ?? '',
-    period: j['period'] ?? '',
-    current: (j['current'] as List? ?? const [])
-        .map((e) => _Subject.fromJson(Map<String, dynamic>.from(e)))
-        .toList(),
-    prior: (j['prior'] as List? ?? const [])
-        .map((e) => _Subject.fromJson(Map<String, dynamic>.from(e)))
-        .toList(),
-  );
-}
-
-class _Case {
-  const _Case({
-    required this.id,
-    required this.student,
-    required this.studentId,
-    required this.currentCurriculumId,
-    required this.priorCurriculumId,
-    required this.status,
-    required this.notes,
-    required this.blocks,
-    this.currentCatalog = const [],
-    this.priorCatalog = const [],
-  });
-  final String id,
-      student,
-      studentId,
-      currentCurriculumId,
-      priorCurriculumId,
-      status,
-      notes;
-  final List<_Block> blocks;
-  final List<_Subject> currentCatalog, priorCatalog;
-  Map<String, dynamic> toJson() => {
-    'id': id,
-    'student': student,
-    'studentId': studentId,
-    'currentCurriculumId': currentCurriculumId,
-    'priorCurriculumId': priorCurriculumId,
-    'status': status,
-    'notes': notes,
-    'blocks': blocks.map((e) => e.toJson()).toList(),
-    'currentCatalog': currentCatalog.map((e) => e.toJson()).toList(),
-    'priorCatalog': priorCatalog.map((e) => e.toJson()).toList(),
-  };
-  factory _Case.fromJson(Map<String, dynamic> j) {
-    final blocks = (j['blocks'] as List? ?? const [])
-        .map((e) => _Block.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
-    List<_Subject> catalog(String key, bool current) {
-      final stored = j[key] as List?;
-      final values = stored == null
-          ? blocks.expand((b) => current ? b.current : b.prior).toList()
-          : stored
-                .map((e) => _Subject.fromJson(Map<String, dynamic>.from(e)))
-                .toList();
-      final unique = <String, _Subject>{};
-      for (final subject in values) {
-        unique['${subject.code.trim().toLowerCase()}|${subject.name.trim().toLowerCase()}'] =
-            subject;
-      }
-      return unique.values.toList();
-    }
-
-    return _Case(
-      id: j['id'] ?? '',
-      student: j['student'] ?? '',
-      studentId: j['studentId'] ?? '',
-      currentCurriculumId: j['currentCurriculumId'] ?? '',
-      priorCurriculumId: '',
-      status: j['status'] ?? 'Em análise',
-      notes: j['notes'] ?? '',
-      blocks: blocks,
-      currentCatalog: catalog('currentCatalog', true),
-      priorCatalog: catalog('priorCatalog', false),
-    );
-  }
-}
-
 class _CurriculumDialog extends StatefulWidget {
-  const _CurriculumDialog({required this.initial});
-  final List<_Curriculum> initial;
+  const _CurriculumDialog({required this.initial, required this.service});
+  final List<Curriculum> initial;
+  final EquivalenciaService service;
   @override
   State<_CurriculumDialog> createState() => _CurriculumDialogState();
 }
 
 class _CurriculumDialogState extends State<_CurriculumDialog> {
-  late final List<_Curriculum> _items = [...widget.initial];
+  late final List<Curriculum> _items = [...widget.initial];
   final _course = TextEditingController(), _name = TextEditingController();
-  List<_Subject> _subjects = [];
+  List<Subject> _subjects = [];
   String? _editingId;
   @override
   void dispose() {
@@ -1056,7 +389,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
   void _add() {
     if (_course.text.trim().isEmpty || _name.text.trim().isEmpty) return;
     setState(() {
-      final curriculum = _Curriculum(
+      final curriculum = Curriculum(
         id: _editingId ?? DateTime.now().microsecondsSinceEpoch.toString(),
         course: _course.text.trim(),
         name: _name.text.trim(),
@@ -1075,7 +408,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
     });
   }
 
-  void _edit(_Curriculum curriculum) {
+  void _edit(Curriculum curriculum) {
     setState(() {
       _editingId = curriculum.id;
       _course.text = curriculum.course;
@@ -1098,168 +431,8 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
       return;
     }
     try {
-      final book = xls.Excel.decodeBytes(bytes);
-      List<_Subject>? parsed;
-      for (final sheet in book.tables.values) {
-        String value(int r, int c) {
-          if (r >= sheet.maxRows || c >= sheet.maxColumns) return '';
-          return sheet
-                  .cell(
-                    xls.CellIndex.indexByColumnRow(columnIndex: c, rowIndex: r),
-                  )
-                  .value
-                  ?.toString()
-                  .trim() ??
-              '';
-        }
-
-        String norm(String s) => s
-            .toLowerCase()
-            .replaceAll('á', 'a')
-            .replaceAll('à', 'a')
-            .replaceAll('ã', 'a')
-            .replaceAll('â', 'a')
-            .replaceAll('é', 'e')
-            .replaceAll('ê', 'e')
-            .replaceAll('í', 'i')
-            .replaceAll('ó', 'o')
-            .replaceAll('ô', 'o')
-            .replaceAll('õ', 'o')
-            .replaceAll('ú', 'u')
-            .replaceAll('ç', 'c')
-            .replaceAll(RegExp(r'[^a-z0-9]'), '');
-        for (
-          var headerRow = 0;
-          headerRow < sheet.maxRows && headerRow < 30;
-          headerRow++
-        ) {
-          final columnsByKey = <String, int>{};
-          for (var c = 0; c < sheet.maxColumns; c++) {
-            final key = norm(value(headerRow, c));
-            if (key.isNotEmpty) columnsByKey.putIfAbsent(key, () => c);
-          }
-          int column(List<String> keys) {
-            for (final key in keys) {
-              final index = columnsByKey[key];
-              if (index != null) return index;
-            }
-            return -1;
-          }
-
-          // Resolve source fields by header key; column order is irrelevant.
-          final codeKey = column([
-            'codigodisciplina',
-            'coddisc',
-            'coddisciplina',
-            'codigocomponente',
-            'codigo',
-            'codcomponente',
-            'codcomponenteorganizacional',
-            'sigla',
-          ]);
-          final nameKey = column([
-            'nomedisciplina',
-            'disciplina',
-            'nomecomponente',
-            'componente',
-            'nomedocomponente',
-          ]);
-          if (nameKey < 0) continue;
-          final theorKey = column([
-            'chteorica',
-            'cargahorariateorica',
-            'horasteoricas',
-            'ch',
-          ]);
-          final pracKey = column([
-            'chpratica',
-            'cargahorariapratica',
-            'horaspraticas',
-          ]);
-          final typeKey = column([
-            'tipo',
-            'natureza',
-            'categoria',
-            'classificacao',
-            'tipodisciplina',
-          ]);
-          final structureKey = column([
-            'estruturacurricular',
-            'estrutura',
-            'grupocurricular',
-          ]);
-          final totalHoursKey = column([
-            'chtotal',
-            'cargahorariatotal',
-            'horastotais',
-          ]);
-          Map<String, String> rowByKey(int rowIndex) => {
-            for (final entry in columnsByKey.entries)
-              entry.key: value(rowIndex, entry.value),
-          };
-          String number(String raw) => raw
-              .replaceAll(',', '.')
-              .replaceAll(RegExp(r'[^0-9.]'), '')
-              .split('.')
-              .first;
-          final result = <_Subject>[];
-          for (var r = headerRow + 1; r < sheet.maxRows; r++) {
-            final row = rowByKey(r);
-            String field(int key) => key < 0
-                ? ''
-                : row[columnsByKey.entries
-                          .firstWhere((entry) => entry.value == key)
-                          .key] ??
-                      '';
-            final subjectName = field(nameKey);
-            if (subjectName.isEmpty) continue;
-            final type = norm(field(typeKey));
-            final structure = norm(field(structureKey));
-            final details = norm(
-              '$subjectName ${field(typeKey)} ${field(structureKey)}',
-            );
-            final isInternship =
-                type.contains('estagio') ||
-                structure.contains('estagio') ||
-                norm(subjectName).contains('estagio');
-            final isComplementaryActivity =
-                (details.contains('atividad') &&
-                    details.contains('complement')) ||
-                (structure.contains('deoutros') &&
-                    structure.contains('curriculo'));
-            if (type.contains('optativa') ||
-                isInternship ||
-                isComplementaryActivity ||
-                details.contains('equivalencia')) {
-              continue;
-            }
-            final code = field(codeKey);
-            if (code.isEmpty && subjectName.toLowerCase().contains('total'))
-              continue;
-            final theoretical = int.tryParse(number(field(theorKey))) ?? 0;
-            final practical = int.tryParse(number(field(pracKey))) ?? 0;
-            final total = int.tryParse(number(field(totalHoursKey))) ?? 0;
-            result.add(
-              _Subject(
-                code: code,
-                name: subjectName,
-                theoretical: theoretical + practical == 0 ? total : theoretical,
-                practical: theoretical + practical == 0 ? 0 : practical,
-              ),
-            );
-          }
-          if (result.isNotEmpty) {
-            parsed = result;
-            break;
-          }
-        }
-        if (parsed != null) break;
-      }
-      if (parsed == null)
-        throw const FormatException(
-          'Não encontrei colunas de disciplina e nome. Confira se a planilha contém o código/nome das disciplinas.',
-        );
-      setState(() => _subjects = _mergeSubjects([..._subjects, ...parsed!]));
+      final parsed = widget.service.parseCurriculum(bytes);
+      setState(() => _subjects = mergeSubjects([..._subjects, ...parsed]));
       _notice(
         '${_subjects.length} disciplinas importadas. Equivalências automáticas, estágio, atividades complementares e optativas foram ignoradas.',
       );
@@ -1368,9 +541,9 @@ class _CaseDialog extends StatefulWidget {
     required this.curricula,
     required this.removeCurriculumSubject,
   });
-  final _Case value;
-  final List<_Curriculum> curricula;
-  final Future<void> Function(String curriculumId, _Subject subject)
+  final EquivalenceCase value;
+  final List<Curriculum> curricula;
+  final Future<void> Function(String curriculumId, Subject subject)
   removeCurriculumSubject;
   @override
   State<_CaseDialog> createState() => _CaseDialogState();
@@ -1382,8 +555,8 @@ class _CaseDialogState extends State<_CaseDialog> {
       _notes = TextEditingController(text: widget.value.notes);
   late String _current = widget.value.currentCurriculumId,
       _status = widget.value.status;
-  late List<_Block> _blocks = [...widget.value.blocks];
-  late final List<_Subject> _currentCatalog = _mergeSubjects([
+  late List<EquivalenceBlock> _blocks = [...widget.value.blocks];
+  late final List<Subject> _currentCatalog = mergeSubjects([
     ...?widget.curricula
         .where((c) => c.id == widget.value.currentCurriculumId)
         .firstOrNull
@@ -1391,7 +564,7 @@ class _CaseDialogState extends State<_CaseDialog> {
     ...widget.value.currentCatalog,
     ...widget.value.blocks.expand((b) => b.current),
   ]);
-  late final List<_Subject> _priorCatalog = _mergeSubjects([
+  late final List<Subject> _priorCatalog = mergeSubjects([
     ...widget.value.priorCatalog,
     ...widget.value.blocks.expand((b) => b.prior),
   ]);
@@ -1403,12 +576,12 @@ class _CaseDialogState extends State<_CaseDialog> {
     super.dispose();
   }
 
-  Future<void> _block([_Block? old]) async {
-    final value = await showDialog<_Block>(
+  Future<void> _block([EquivalenceBlock? old]) async {
+    final value = await showDialog<EquivalenceBlock>(
       context: context,
       builder: (_) => _BlockDialog(
         value: old,
-        currentCatalog: _mergeSubjects([
+        currentCatalog: mergeSubjects([
           ..._currentCatalog,
           ...?widget.curricula
               .where((c) => c.id == _current)
@@ -1417,18 +590,16 @@ class _CaseDialogState extends State<_CaseDialog> {
         ]),
         priorCatalog: _priorCatalog,
         removeCurrentSubject: (subject) async {
-          final key = _subjectCatalogKey(subject);
-          _currentCatalog.removeWhere(
-            (item) => _subjectCatalogKey(item) == key,
-          );
+          final key = subjectCatalogKey(subject);
+          _currentCatalog.removeWhere((item) => subjectCatalogKey(item) == key);
           await widget.removeCurriculumSubject(_current, subject);
         },
       ),
     );
     if (value != null)
       setState(() {
-        _addSubjects(_currentCatalog, value.current);
-        _addSubjects(_priorCatalog, value.prior);
+        addSubjects(_currentCatalog, value.current);
+        addSubjects(_priorCatalog, value.prior);
         final i = _blocks.indexWhere((b) => b.id == value.id);
         if (i < 0)
           _blocks.add(value);
@@ -1440,9 +611,9 @@ class _CaseDialogState extends State<_CaseDialog> {
   Future<void> _manageCatalog() async {
     final curriculumSubjects =
         widget.curricula.where((c) => c.id == _current).firstOrNull?.subjects ??
-        const <_Subject>[];
+        const <Subject>[];
     final result =
-        await showDialog<({List<_Subject> current, List<_Subject> prior})>(
+        await showDialog<({List<Subject> current, List<Subject> prior})>(
           context: context,
           builder: (_) => _SubjectCatalogDialog(
             current: _currentCatalog,
@@ -1483,7 +654,7 @@ class _CaseDialogState extends State<_CaseDialog> {
     }
     Navigator.pop(
       context,
-      _Case(
+      EquivalenceCase(
         id: widget.value.id,
         student: _student.text.trim(),
         studentId: _id.text.trim(),
@@ -1492,7 +663,7 @@ class _CaseDialogState extends State<_CaseDialog> {
         status: _status,
         notes: _notes.text.trim(),
         blocks: _blocks,
-        currentCatalog: _mergeSubjects([
+        currentCatalog: mergeSubjects([
           ..._currentCatalog,
           ...?widget.curricula
               .where((c) => c.id == _current)
@@ -1672,7 +843,7 @@ class _CaseDialogState extends State<_CaseDialog> {
     );
   }
 
-  Widget _blockCard(_Block b, int index) {
+  Widget _blockCard(EquivalenceBlock b, int index) {
     final ok = b.currentHours <= b.priorHours;
     final color = ok ? AppTheme.green : AppTheme.danger;
     return Card(
@@ -1738,7 +909,7 @@ class _CaseDialogState extends State<_CaseDialog> {
     );
   }
 
-  Future<void> _mergeBlocks(_Block primary) async {
+  Future<void> _mergeBlocks(EquivalenceBlock primary) async {
     final candidates = _blocks
         .where((block) => block.id != primary.id)
         .toList();
@@ -1807,11 +978,11 @@ class _CaseDialogState extends State<_CaseDialog> {
       primary.period.trim(),
       other.period.trim(),
     ].where((period) => period.isNotEmpty).toSet();
-    final merged = _Block(
+    final merged = EquivalenceBlock(
       id: primary.id,
       period: periods.join(' + '),
-      current: _mergeSubjects([...primary.current, ...other.current]),
-      prior: _mergeSubjects([...primary.prior, ...other.prior]),
+      current: mergeSubjects([...primary.current, ...other.current]),
+      prior: mergeSubjects([...primary.prior, ...other.prior]),
     );
     setState(() {
       _blocks[primaryIndex] = merged;
@@ -1819,7 +990,7 @@ class _CaseDialogState extends State<_CaseDialog> {
     });
   }
 
-  Widget _subjectColumn(String label, List<_Subject> subjects) => Column(
+  Widget _subjectColumn(String label, List<Subject> subjects) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
       Text(
@@ -1845,16 +1016,16 @@ class _BlockDialog extends StatefulWidget {
     required this.priorCatalog,
     required this.removeCurrentSubject,
   });
-  final _Block? value;
-  final List<_Subject> currentCatalog, priorCatalog;
-  final Future<void> Function(_Subject subject) removeCurrentSubject;
+  final EquivalenceBlock? value;
+  final List<Subject> currentCatalog, priorCatalog;
+  final Future<void> Function(Subject subject) removeCurrentSubject;
   @override
   State<_BlockDialog> createState() => _BlockDialogState();
 }
 
 class _BlockDialogState extends State<_BlockDialog> {
   late final _period = TextEditingController(text: widget.value?.period ?? '');
-  late List<_Subject> _current = [...?widget.value?.current],
+  late List<Subject> _current = [...?widget.value?.current],
       _prior = [...?widget.value?.prior];
   @override
   void dispose() {
@@ -1862,8 +1033,8 @@ class _BlockDialogState extends State<_BlockDialog> {
     super.dispose();
   }
 
-  Future<void> _subject(bool currentSide, [_Subject? old]) async {
-    final result = await showDialog<_Subject>(
+  Future<void> _subject(bool currentSide, [Subject? old]) async {
+    final result = await showDialog<Subject>(
       context: context,
       builder: (_) => _SubjectDialog(value: old),
     );
@@ -1882,7 +1053,7 @@ class _BlockDialogState extends State<_BlockDialog> {
   Future<void> _pickSubjects(bool currentSide) async {
     final list = currentSide ? _current : _prior;
     final catalog = currentSide ? widget.currentCatalog : widget.priorCatalog;
-    final selected = await showDialog<List<_Subject>>(
+    final selected = await showDialog<List<Subject>>(
       context: context,
       builder: (_) => _SubjectPickerDialog(
         catalog: catalog,
@@ -1960,7 +1131,7 @@ class _BlockDialogState extends State<_BlockDialog> {
           }
           Navigator.pop(
             context,
-            _Block(
+            EquivalenceBlock(
               id:
                   widget.value?.id ??
                   DateTime.now().microsecondsSinceEpoch.toString(),
@@ -1976,9 +1147,9 @@ class _BlockDialogState extends State<_BlockDialog> {
   );
   Widget _side(
     String title,
-    List<_Subject> list,
+    List<Subject> list,
     bool currentSide,
-    List<_Subject> catalog,
+    List<Subject> catalog,
   ) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
@@ -2028,31 +1199,14 @@ class _BlockDialogState extends State<_BlockDialog> {
   );
 }
 
-List<_Subject> _mergeSubjects(Iterable<_Subject> subjects) {
-  final result = <String, _Subject>{};
-  for (final subject in subjects) {
-    final key =
-        '${subject.code.trim().toLowerCase()}|${subject.name.trim().toLowerCase()}';
-    result[key] = subject;
-  }
-  return result.values.toList();
-}
-
-void _addSubjects(List<_Subject> catalog, Iterable<_Subject> subjects) {
-  final merged = _mergeSubjects([...catalog, ...subjects]);
-  catalog
-    ..clear()
-    ..addAll(merged);
-}
-
 class _SubjectCatalogDialog extends StatefulWidget {
   const _SubjectCatalogDialog({
     required this.current,
     required this.prior,
     this.availableCurrent = const [],
   });
-  final List<_Subject> current, prior;
-  final List<_Subject> availableCurrent;
+  final List<Subject> current, prior;
+  final List<Subject> availableCurrent;
 
   @override
   State<_SubjectCatalogDialog> createState() => _SubjectCatalogDialogState();
@@ -2062,8 +1216,8 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
   late final _current = [...widget.current];
   late final _prior = [...widget.prior];
 
-  Future<void> _edit(List<_Subject> list, [_Subject? old]) async {
-    final subject = await showDialog<_Subject>(
+  Future<void> _edit(List<Subject> list, [Subject? old]) async {
+    final subject = await showDialog<Subject>(
       context: context,
       builder: (_) => _SubjectDialog(value: old),
     );
@@ -2075,7 +1229,7 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
       } else {
         list[i] = subject;
       }
-      final normalized = _mergeSubjects(list);
+      final normalized = mergeSubjects(list);
       list
         ..clear()
         ..addAll(normalized);
@@ -2085,14 +1239,14 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
   Future<void> _selectFromCurriculum() async {
     if (widget.availableCurrent.isEmpty) return;
     final availableKeys = widget.availableCurrent
-        .map(_subjectCatalogKey)
+        .map(subjectCatalogKey)
         .toSet();
-    final selectedFromCurriculum = await showDialog<List<_Subject>>(
+    final selectedFromCurriculum = await showDialog<List<Subject>>(
       context: context,
       builder: (_) => _SubjectPickerDialog(
         catalog: widget.availableCurrent,
         selected: _current
-            .where((s) => availableKeys.contains(_subjectCatalogKey(s)))
+            .where((s) => availableKeys.contains(subjectCatalogKey(s)))
             .toList(),
         title: 'Selecionar disciplinas do currículo',
         applyLabel: 'Adicionar selecionadas',
@@ -2101,18 +1255,18 @@ class _SubjectCatalogDialogState extends State<_SubjectCatalogDialog> {
     );
     if (selectedFromCurriculum == null) return;
     final manual = _current
-        .where((s) => !availableKeys.contains(_subjectCatalogKey(s)))
+        .where((s) => !availableKeys.contains(subjectCatalogKey(s)))
         .toList();
     setState(() {
       _current
         ..clear()
-        ..addAll(_mergeSubjects([...manual, ...selectedFromCurriculum]));
+        ..addAll(mergeSubjects([...manual, ...selectedFromCurriculum]));
     });
   }
 
   Widget _side(
     String title,
-    List<_Subject> list, {
+    List<Subject> list, {
     bool destination = false,
   }) => Expanded(
     child: Column(
@@ -2216,8 +1370,8 @@ class _SubjectPickerDialog extends StatefulWidget {
     this.applyLabel = 'Aplicar ao bloco',
     this.emptyMessage = 'Nenhuma disciplina disponível no catálogo.',
   });
-  final List<_Subject> catalog, selected;
-  final Future<void> Function(_Subject subject)? onRemoveFromCurriculum;
+  final List<Subject> catalog, selected;
+  final Future<void> Function(Subject subject)? onRemoveFromCurriculum;
   final String title, applyLabel, emptyMessage;
 
   @override
@@ -2226,10 +1380,10 @@ class _SubjectPickerDialog extends StatefulWidget {
 
 class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
   late final Set<String> _selected = widget.selected.map(_key).toSet();
-  late final List<_Subject> _catalog = [...widget.catalog];
+  late final List<Subject> _catalog = [...widget.catalog];
   final _search = TextEditingController();
   final _scrollController = ScrollController();
-  String _key(_Subject s) =>
+  String _key(Subject s) =>
       '${s.code.trim().toLowerCase()}|${s.name.trim().toLowerCase()}';
 
   @override
@@ -2239,7 +1393,7 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
     super.dispose();
   }
 
-  Future<void> _removeFromCurriculum(_Subject subject) async {
+  Future<void> _removeFromCurriculum(Subject subject) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2359,7 +1513,7 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
     ],
   );
 
-  List<_Subject> get _visibleSubjects {
+  List<Subject> get _visibleSubjects {
     final query = _search.text.trim().toLowerCase();
     if (query.isEmpty) return _catalog;
     return _catalog
@@ -2371,12 +1525,9 @@ class _SubjectPickerDialogState extends State<_SubjectPickerDialog> {
   }
 }
 
-String _subjectCatalogKey(_Subject subject) =>
-    '${subject.code.trim().toLowerCase()}|${subject.name.trim().toLowerCase()}';
-
 class _SubjectDialog extends StatefulWidget {
   const _SubjectDialog({this.value});
-  final _Subject? value;
+  final Subject? value;
   @override
   State<_SubjectDialog> createState() => _SubjectDialogState();
 }
@@ -2456,7 +1607,7 @@ class _SubjectDialogState extends State<_SubjectDialog> {
           }
           Navigator.pop(
             context,
-            _Subject(
+            Subject(
               code: _code.text.trim(),
               name: _name.text.trim(),
               theoretical: int.tryParse(_theory.text) ?? 0,

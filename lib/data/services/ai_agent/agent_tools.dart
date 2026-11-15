@@ -166,6 +166,38 @@ const agentTools = <AgentToolSpec>[
     },
   ),
 
+  // ------------------------------------------------- comandos dos módulos
+  AgentToolSpec(
+    name: 'list_commands',
+    description:
+        'Lista os comandos dos módulos do Gestor — as mesmas ações dos botões '
+        'das telas (importar, exportar, gerar PDF, abrir sistemas…), com a '
+        'entrada esperada. module filtra por módulo.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'module': {'type': 'string'},
+      },
+    },
+  ),
+  AgentToolSpec(
+    name: 'run_command',
+    description:
+        'Executa um comando de módulo (id de list_commands) com a entrada '
+        'indicada. Prefira comandos a gravar direto no banco: eles aplicam as '
+        'regras da tela. Comandos com requires_approval pedem confirmação ao '
+        'usuário.',
+    mutates: true,
+    schema: {
+      'type': 'object',
+      'properties': {
+        'command': {'type': 'string'},
+        'input': {'type': 'object'},
+      },
+      'required': ['command'],
+    },
+  ),
+
   // ------------------------------------------------- modelos de importação
   AgentToolSpec(
     name: 'list_templates',

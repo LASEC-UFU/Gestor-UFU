@@ -21,6 +21,8 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_mcp_server.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_widgets.dart';
 
 /// Abre (ou traz para frente) a janela separada do Agente de IA. A janela é
@@ -296,6 +298,21 @@ class _AiAgentPageState extends State<AiAgentPage> {
   /// Executa uma ferramenta do Gestor para a sessão [s]. Back-ends que não
   /// relatam as ferramentas têm a chamada mostrada pela janela.
   AgentToolCaller _toolCaller(_Session s) => (name, input) async {
+    // Comandos que exigem aprovação: confirma no chat antes de executar.
+    if (name == 'run_command' && _settings.access != AgentAccess.bypass) {
+      final command = ModuleRegistry.instance.commandById(
+        '${input['command'] ?? ''}',
+      );
+      if (command != null && command.approval == CommandApproval.required) {
+        final allowed = await _permissionFor(s)(
+          'Comando: ${command.title}',
+          Map<String, dynamic>.from(input['input'] as Map? ?? const {}),
+        );
+        if (!allowed) {
+          return jsonEncode({'error': 'O usuário negou "${command.title}".'});
+        }
+      }
+    }
     final show = !(s.backend?.reportsTools ?? false);
     AgentEntry? entry;
     if (show && mounted) {

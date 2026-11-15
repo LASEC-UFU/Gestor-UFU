@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gestor_ufu/data/services/ai_agent/agent_browser.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_templates.dart';
@@ -145,6 +147,45 @@ class AgentDataHost {
   Future<Object?> _dispatch(String name, Map<String, dynamic> input) async {
     // Navegador do agente: roda aqui, na janela principal, para continuar
     // aberto em segundo plano mesmo com a janela do agente fechada.
+    // Comandos dos módulos: as mesmas ações dos botões das telas.
+    if (name == 'list_commands') {
+      final module = '${input['module'] ?? ''}'.trim();
+      return {
+        'commands': [
+          for (final m in ModuleRegistry.instance.modules)
+            if (module.isEmpty || m.id == module)
+              for (final c in m.commands)
+                {
+                  'id': c.id,
+                  'module': m.id,
+                  'title': c.title,
+                  'description': c.description,
+                  'input': c.inputSchema,
+                  if (c.approval == CommandApproval.required)
+                    'requires_approval': true,
+                },
+        ],
+      };
+    }
+    if (name == 'run_command') {
+      final id = '${input['command'] ?? ''}'.trim();
+      final command = ModuleRegistry.instance.commandById(id);
+      if (command == null) {
+        throw _ToolError(
+          'Comando "$id" não existe. Use list_commands para ver os disponíveis.',
+        );
+      }
+      try {
+        final result = await command.run(
+          Map<String, dynamic>.from(input['input'] as Map? ?? const {}),
+          CommandOrigin.agent,
+        );
+        if (command.mutates && result.ok) await _changed();
+        return result.toJson();
+      } on CommandException catch (error) {
+        return {'ok': false, 'code': error.code, 'message': error.message};
+      }
+    }
     if (name == 'list_templates') {
       return {
         'templates': [
