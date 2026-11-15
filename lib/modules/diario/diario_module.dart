@@ -12,6 +12,7 @@ import 'package:gestor_ufu/platform/module/gestor_module.dart';
 import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
+import 'package:gestor_ufu/modules/diario/diario_templates.dart';
 
 /// Módulo Preenche Diários.
 class DiarioModule extends GestorModule {
@@ -68,4 +69,7 @@ class DiarioModule extends GestorModule {
 
   @override
   List<ModuleCommand> get commands => diarioCommands(service);
+
+  @override
+  List<ModuleTemplate> get templates => diarioTemplates();
 }

@@ -4,7 +4,9 @@ import 'package:gestor_ufu/core/utils/text_encoding.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
-import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/domain/ajusta_horarios.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/domain/distribuicao_docente.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 
 class AjustaHorariosStore {
   static const _storageKey = 'ajusta_horarios_disciplinas_2026_2_ca_v2';
@@ -29,7 +31,7 @@ class AjustaHorariosStore {
       'ajusta_horarios_migracao_codificacao_texto_v1';
   static const _teacherNamesMigrationKey =
       'ajusta_horarios_migracao_nomes_docentes_v1';
-  static const defaultTerm = '2\u00ba semestre de 2026';
+  static const defaultTerm = AcademicTermService.defaultTermName;
 
   String _keyForTerm(String term) {
     final token = base64Url
@@ -965,6 +967,87 @@ class AjustaHorariosStore {
       _keyForTerm(term),
       jsonEncode(entries.map((entry) => entry.toJson()).toList()),
     );
+  }
+
+  static const distributionKey = 'ajusta_horarios_distribuicao_docente';
+  static const teacherRosterKey = 'ajusta_horarios_docentes_cadastrados';
+  static const roomRosterKey = 'ajusta_horarios_salas_cadastradas';
+  static const programsKey = 'ajusta_horarios_cursos';
+
+  /// Chave por período letivo usada pela tela (`<chave>_<base64 do período>`).
+  static String termScopedKey(String key, String term) {
+    final token = base64Url
+        .encode(utf8.encode(term.trim()))
+        .replaceAll('=', '');
+    return '${key}_$token';
+  }
+
+  /// Substitui a base de disciplinas do período e zera a distribuição
+  /// docente (que se referia à base anterior).
+  Future<void> replaceBase(
+    List<HorarioDisciplina> entries, {
+    String term = defaultTerm,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(termScopedKey(distributionKey, term));
+    await save(entries, term: term);
+  }
+
+  Future<List<DistribuicaoDocente>> distribution({
+    String term = defaultTerm,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(termScopedKey(distributionKey, term));
+    if (raw == null) return [];
+    return [
+      for (final item in jsonDecode(raw) as List)
+        DistribuicaoDocente.fromJson(Map<String, dynamic>.from(item as Map)),
+    ];
+  }
+
+  /// Grava a distribuição docente (aba Banco) e acrescenta os docentes ao
+  /// cadastro do período. Devolve o cadastro atualizado.
+  Future<List<String>> importDistribution(
+    List<DistribuicaoDocente> records, {
+    String term = defaultTerm,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final rosterKey = termScopedKey(teacherRosterKey, term);
+    final roster = {
+      ...?prefs.getStringList(rosterKey),
+      for (final item in records)
+        if (item.teacher.trim().isNotEmpty) item.teacher.trim(),
+    }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    await prefs.setString(
+      termScopedKey(distributionKey, term),
+      jsonEncode(records.map((item) => item.toJson()).toList()),
+    );
+    await prefs.setStringList(rosterKey, roster);
+    return roster;
+  }
+
+  Future<List<String>> teacherRoster({String term = defaultTerm}) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(termScopedKey(teacherRosterKey, term)) ?? [];
+  }
+
+  Future<List<String>> roomRoster({String term = defaultTerm}) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(termScopedKey(roomRosterKey, term)) ?? [];
+  }
+
+  /// Cursos ({número: nome}); os padrões quando nada foi salvo.
+  Future<Map<int, String>> programs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(programsKey);
+    if (raw == null) return {...horarioProgramas};
+    try {
+      return (jsonDecode(raw) as Map).map(
+        (key, value) => MapEntry(int.parse('$key'), '$value'),
+      );
+    } catch (_) {
+      return {...horarioProgramas};
+    }
   }
 
   Future<void> clear({String term = defaultTerm}) async {

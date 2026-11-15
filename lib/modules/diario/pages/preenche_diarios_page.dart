@@ -22,7 +22,7 @@ import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
 import 'package:gestor_ufu/modules/diario/application/diario_lancamentos.dart';
 import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
@@ -54,8 +54,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   final List<String> _logs = [];
   final _automation = DiaryAutomationService.instance;
   final _uuid = const Uuid();
-  List<String> _terms = [AjustaHorariosStore.defaultTerm];
-  String _term = AjustaHorariosStore.defaultTerm;
+  List<String> _terms = [AcademicTermService.defaultTermName];
+  String _term = AcademicTermService.defaultTermName;
   List<_SavedDiary> _savedDiaries = [];
   String? _selectedDiaryId;
   String? _selectedSnapshotId;
@@ -131,7 +131,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
             .map((term) => term.trim())
             .where((term) => term.isNotEmpty),
       );
-      if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
+      if (_terms.isEmpty) _terms = [AcademicTermService.defaultTermName];
       final savedTerm = prefs.getString(_activeDiaryPeriodKey)?.trim();
       _term = savedTerm != null && _terms.contains(savedTerm)
           ? savedTerm

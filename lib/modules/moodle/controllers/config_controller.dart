@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/utils/date_calculator.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
@@ -20,8 +20,8 @@ class ConfigController extends ChangeNotifier {
   CourseConfig? _current;
   bool _loading = false;
   String? _error;
-  String _activeTerm = AjustaHorariosStore.defaultTerm;
-  List<String> _terms = [AjustaHorariosStore.defaultTerm];
+  String _activeTerm = AcademicTermService.defaultTermName;
+  List<String> _terms = [AcademicTermService.defaultTermName];
   final Set<String> _selectedActivityIds = {};
 
   List<CourseConfig> get configs => _configs;
@@ -43,7 +43,7 @@ class ConfigController extends ChangeNotifier {
             .map((term) => term.trim())
             .where((term) => term.isNotEmpty),
       );
-      if (_terms.isEmpty) _terms = [AjustaHorariosStore.defaultTerm];
+      if (_terms.isEmpty) _terms = [AcademicTermService.defaultTermName];
       final storedTerm = prefs.getString(_termKey)?.trim();
       _activeTerm = storedTerm != null && _terms.contains(storedTerm)
           ? storedTerm

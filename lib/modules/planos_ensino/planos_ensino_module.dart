@@ -10,6 +10,7 @@ import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
+import 'package:gestor_ufu/modules/planos_ensino/planos_ensino_templates.dart';
 
 /// Módulo Planos de Ensino.
 class PlanosEnsinoModule extends GestorModule {
@@ -67,4 +68,7 @@ class PlanosEnsinoModule extends GestorModule {
   @override
   List<ModuleCommand> get commands =>
       planosEnsinoCommands(_service, _sei, _moodle);
+
+  @override
+  List<ModuleTemplate> get templates => planosEnsinoTemplates();
 }

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:excel/excel.dart' as xls;
 import 'package:file_picker/file_picker.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -12,15 +11,22 @@ import 'package:pdf/pdf.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_pdf_service.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
-import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/application/ajusta_horarios_pdf_service.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/application/ajusta_horarios_planilhas.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/domain/distribuicao_docente.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/data/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/domain/ajusta_horarios.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class AjustaHorariosPage extends StatefulWidget {
-  const AjustaHorariosPage({super.key});
+  const AjustaHorariosPage({this.changes, super.key});
+
+  /// Avisado quando os dados mudam por fora da tela (agente, outro
+  /// computador); a tela recarrega.
+  final Listenable? changes;
+
   @override
   State<AjustaHorariosPage> createState() => _AjustaHorariosPageState();
 }
@@ -65,7 +71,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   List<String> _teacherRoster = [];
   List<String> _roomRoster = [];
   Map<int, String> _programs = {...horarioProgramas};
-  List<_TeacherDistributionRecord> _distributionRecords = [];
+  List<DistribuicaoDocente> _distributionRecords = [];
   Set<String> _hiddenDistributionTeachers = {};
   bool _loading = true;
   bool _busy = false;
@@ -102,11 +108,17 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     }.entries) {
       entry.value.addListener(() => _trackScroll(entry.key, entry.value));
     }
+    widget.changes?.addListener(_reloadFromOutside);
     _load();
+  }
+
+  void _reloadFromOutside() {
+    if (mounted) _load();
   }
 
   @override
   void dispose() {
+    widget.changes?.removeListener(_reloadFromOutside);
     _scrollSaveTimer?.cancel();
     _courseVerticalScroll.dispose();
     _courseHorizontalScroll.dispose();
@@ -248,10 +260,10 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         _termScopedKey(_distributionKey, activeTerm),
       );
       final distribution = savedDistribution == null
-          ? <_TeacherDistributionRecord>[]
+          ? <DistribuicaoDocente>[]
           : (jsonDecode(savedDistribution) as List)
                 .map(
-                  (item) => _TeacherDistributionRecord.fromJson(
+                  (item) => DistribuicaoDocente.fromJson(
                     Map<String, dynamic>.from(item as Map),
                   ),
                 )
@@ -955,24 +967,13 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     int? period,
     String? teacher,
     String? room,
-  }) {
-    final result = <String, List<HorarioDisciplina>>{};
-    for (final entry in _entries) {
-      if (entry.modality == 'ead') continue;
-      final include = room != null
-          ? entry.room.trim().toLowerCase() == room.trim().toLowerCase()
-          : teacher != null
-          ? entry.teacherNames.contains(teacher)
-          : entry.coursePeriods.any(
-              (item) => item.program == program && item.period == period,
-            );
-      if (!include) continue;
-      for (final slot in entry.slots) {
-        result.putIfAbsent(slot.key, () => []).add(entry);
-      }
-    }
-    return result;
-  }
+  }) => AjustaHorariosPlanilhas.grade(
+    _entries,
+    program: program,
+    period: period,
+    teacher: teacher,
+    room: room,
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1006,60 +1007,29 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     padding: EdgeInsets.fromLTRB(compact ? 16 : 30, 14, compact ? 16 : 30, 8),
     child: Column(
       children: [
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Voltar',
-              onPressed: () => context.go('/'),
-              icon: const Icon(Icons.arrow_back_rounded),
-            ),
-            _icon(Icons.calendar_month_rounded, AppTheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ajusta Hor\u00e1rios',
-                    style: TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 21,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    'MONTAGEM E EDI\u00c7\u00c3O DE GRADES',
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 9,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+        ModuleHeader(
+          title: 'Ajusta Horários',
+          subtitle: 'Montagem e edição de grades',
+          icon: Icons.calendar_month_rounded,
+          accent: AppTheme.primary,
+          onBack: () => context.go('/'),
+          actions: [
             if (!compact) _termSelector(),
-            const SizedBox(width: 8),
             IconButton.filledTonal(
               onPressed: _busy ? null : _importDatabase,
               tooltip: 'Importar base da planilha',
               icon: const Icon(Icons.upload_file_rounded),
             ),
-            const SizedBox(width: 6),
             IconButton.filledTonal(
               onPressed: _busy ? null : _exportPdf,
               tooltip: 'Exportar grade em PDF',
               icon: const Icon(Icons.download_rounded),
             ),
-            const SizedBox(width: 6),
             IconButton.filledTonal(
               onPressed: _busy ? null : _exportSchedule,
               tooltip: 'Exportar grade em CSV',
               icon: const Icon(Icons.table_chart_rounded),
             ),
-            const SizedBox(width: 8),
-            const ThemeSelector(compact: true),
           ],
         ),
         if (compact)
@@ -1263,7 +1233,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     if (sourceDistribution != null) {
       final decoded = (jsonDecode(sourceDistribution) as List)
           .map(
-            (item) => _TeacherDistributionRecord.fromJson(
+            (item) => DistribuicaoDocente.fromJson(
               Map<String, dynamic>.from(item as Map),
             ),
           )
@@ -1352,10 +1322,10 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         _termScopedKey(_distributionKey, term),
       );
       final distribution = savedDistribution == null
-          ? <_TeacherDistributionRecord>[]
+          ? <DistribuicaoDocente>[]
           : (jsonDecode(savedDistribution) as List)
                 .map(
-                  (item) => _TeacherDistributionRecord.fromJson(
+                  (item) => DistribuicaoDocente.fromJson(
                     Map<String, dynamic>.from(item as Map),
                   ),
                 )
@@ -2717,7 +2687,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                 )
                 .firstOrNull;
             kept.add(
-              _TeacherDistributionRecord(
+              DistribuicaoDocente(
                 teacher: teacher,
                 discipline: label,
                 period: period,
@@ -2805,7 +2775,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   }).toList();
 
   List<_TeacherDistribution> _summariesFromImportedRecords() {
-    final grouped = <String, List<_TeacherDistributionRecord>>{};
+    final grouped = <String, List<DistribuicaoDocente>>{};
     for (final record in _distributionRecords) {
       grouped.putIfAbsent(record.teacher, () => []).add(record);
     }
@@ -3389,7 +3359,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               if (teacher.isEmpty) return null;
             }
             if (!result.teachers.contains(teacher)) return null;
-            return _TeacherDistributionRecord(
+            return DistribuicaoDocente(
               teacher: teacher,
               discipline: record.discipline,
               period: record.period,
@@ -3399,7 +3369,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               extensionHours: record.extensionHours,
             );
           })
-          .whereType<_TeacherDistributionRecord>()
+          .whereType<DistribuicaoDocente>()
           .toList();
       if (_teacher != null) {
         var selected = _teacher!;
@@ -3642,12 +3612,12 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
         ? null
         : prefs.getString(_termScopedKey(_distributionKey, term));
     var updatedDistribution = term == _term
-        ? List<_TeacherDistributionRecord>.of(_distributionRecords)
+        ? List<DistribuicaoDocente>.of(_distributionRecords)
         : storedDistribution == null
-        ? <_TeacherDistributionRecord>[]
+        ? <DistribuicaoDocente>[]
         : (jsonDecode(storedDistribution) as List)
               .map(
-                (item) => _TeacherDistributionRecord.fromJson(
+                (item) => DistribuicaoDocente.fromJson(
                   Map<String, dynamic>.from(item as Map),
                 ),
               )
@@ -3667,7 +3637,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
               record.discipline != label) {
             return record;
           }
-          return _TeacherDistributionRecord(
+          return DistribuicaoDocente(
             teacher: record.teacher,
             discipline: record.discipline,
             period: record.period,
@@ -3709,219 +3679,62 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             : null);
     if (bytes == null) return;
     try {
-      final book = xls.Excel.decodeBytes(bytes);
-      final banco = book.tables['Banco'];
-      if (banco != null) {
-        await _importDistributionBanco(banco);
-        return;
+      switch (AjustaHorariosPlanilhas.ler(bytes)) {
+        case ImportacaoBanco(:final distribuicao, :final docentes):
+          await _confirmDistributionBanco(distribuicao, docentes);
+        case ImportacaoBDados(:final disciplinas):
+          await _confirmDatabase(disciplinas);
       }
-      final sheet = book.tables['BDados'];
-      if (sheet == null) {
-        throw const FormatException('A planilha não contém a aba BDados.');
-      }
-      String value(int row, int col) =>
-          sheet
-              .cell(
-                xls.CellIndex.indexByColumnRow(columnIndex: col, rowIndex: row),
-              )
-              .value
-              ?.toString()
-              .trim() ??
-          '';
-      List<T> parsePairs<T>(String raw, T Function(int a, int b) create) =>
-          raw.split(';').where((item) => item.contains(',')).map((item) {
-            final parts = item.split(',');
-            return create(
-              int.tryParse(parts[0].trim()) ?? 0,
-              int.tryParse(parts[1].trim()) ?? 0,
-            );
-          }).toList();
-      final imported = <HorarioDisciplina>[];
-      for (var row = 2; row < sheet.maxRows; row++) {
-        final code = value(row, 3),
-            acronym = value(row, 4),
-            name = value(row, 5);
-        if (code.isEmpty && acronym.isEmpty && name.isEmpty) continue;
-        imported.add(
-          HorarioDisciplina(
-            id: 'import_${const Uuid().v4()}',
-            code: code,
-            acronym: acronym,
-            name: name,
-            className: value(row, 6),
-            teachers: value(row, 7)
-                .split(',')
-                .map((name) => name.trim())
-                .where((name) => name.isNotEmpty)
-                .toList(),
-            room: value(row, 8),
-            theoryHours: int.tryParse(value(row, 9)) ?? 0,
-            practiceHours: int.tryParse(value(row, 10)) ?? 0,
-            coursePeriods:
-                parsePairs(
-                      value(row, 1),
-                      (period, program) =>
-                          CursoPeriodo(program: program, period: period),
-                    )
-                    .where(
-                      (v) =>
-                          v.program >= 1 &&
-                          v.program <= 5 &&
-                          v.period >= 1 &&
-                          v.period <= 11,
-                    )
-                    .toList(),
-            slots:
-                parsePairs(
-                      value(row, 2),
-                      (slot, weekdayEncoded) =>
-                          HorarioSlot(weekday: weekdayEncoded - 1, slot: slot),
-                    )
-                    .where(
-                      (v) =>
-                          v.weekday >= 1 &&
-                          v.weekday <= 5 &&
-                          v.slot >= 1 &&
-                          v.slot <= horarioFaixas.length,
-                    )
-                    .toList(),
-          ),
-        );
-      }
-      if (imported.isEmpty) {
-        throw const FormatException(
-          'Nenhuma disciplina foi encontrada em BDados.',
-        );
-      }
-      if (!mounted) return;
-      final replace = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Aplicar base importada?'),
-          content: Text(
-            'Foram encontradas ${imported.length} disciplinas na aba BDados. Substituirá a base atual do Ajusta Horários.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Substituir base'),
-            ),
-          ],
-        ),
-      );
-      if (replace != true) return;
-      setState(() {
-        _entries = imported;
-        _distributionRecords = [];
-      });
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_termScopedKey(_distributionKey, _term));
-      await _persist();
-      _message('${imported.length} disciplinas importadas.');
     } catch (e) {
-      _message('Não foi possível importar a base: $e');
+      _message(
+        'Não foi possível importar a base: '
+        '${e is FormatException ? e.message : e}',
+      );
     }
   }
 
-  Future<void> _importDistributionBanco(xls.Sheet sheet) async {
-    String cell(int row, int column) {
-      if (column < 0 || row >= sheet.maxRows) return '';
-      return sheet
-              .cell(
-                xls.CellIndex.indexByColumnRow(
-                  columnIndex: column,
-                  rowIndex: row,
-                ),
-              )
-              .value
-              ?.toString()
-              .trim() ??
-          '';
-    }
-
-    String normalize(String value) => value
-        .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('à', 'a')
-        .replaceAll('ã', 'a')
-        .replaceAll('â', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('ê', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ô', 'o')
-        .replaceAll('õ', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ç', 'c')
-        .replaceAll(RegExp(r'[^a-z0-9]'), '');
-
-    final headers = [
-      for (var column = 0; column < sheet.maxColumns; column++)
-        normalize(cell(0, column)),
-    ];
-    int column(String name, [String? alternative]) {
-      final result = headers.indexOf(normalize(name));
-      return result >= 0 || alternative == null
-          ? result
-          : headers.indexOf(normalize(alternative));
-    }
-
-    final periodColumn = column('Período');
-    final acronymColumn = column('Sigla');
-    final subjectColumn = column('Disciplina');
-    final classColumn = column('Turma');
-    final teacherColumn = column('Docente');
-    final optionColumn = column('Opção (Sigla Turma)');
-    final theoryColumn = column('CH_T');
-    final practiceColumn = column('CH_P');
-    final eadColumn = column('CH EAD');
-    final extensionColumn = column('CH Extensão');
-    if (teacherColumn < 0 || (optionColumn < 0 && subjectColumn < 0)) {
-      throw const FormatException(
-        'A aba Banco precisa conter Docente e uma coluna de disciplina.',
-      );
-    }
-
-    final imported = <_TeacherDistributionRecord>[];
-    for (var row = 1; row < sheet.maxRows; row++) {
-      final teacher = cell(row, teacherColumn);
-      if (teacher.isEmpty) continue;
-      final option = cell(row, optionColumn);
-      final acronym = cell(row, acronymColumn);
-      final className = cell(row, classColumn);
-      final subject = cell(row, subjectColumn);
-      final discipline = option.isNotEmpty
-          ? option
-          : '${acronym.isEmpty ? subject : acronym}${className.isEmpty ? '' : ' $className'}';
-      if (discipline.trim().isEmpty) continue;
-      imported.add(
-        _TeacherDistributionRecord(
-          teacher: teacher,
-          discipline: discipline.trim(),
-          period: cell(row, periodColumn),
-          theoryHours: int.tryParse(cell(row, theoryColumn)) ?? 0,
-          practiceHours: int.tryParse(cell(row, practiceColumn)) ?? 0,
-          eadHours: int.tryParse(cell(row, eadColumn)) ?? 0,
-          extensionHours: int.tryParse(cell(row, extensionColumn)) ?? 0,
+  Future<void> _confirmDatabase(List<HorarioDisciplina> imported) async {
+    if (!mounted) return;
+    final replace = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Aplicar base importada?'),
+        content: Text(
+          'Foram encontradas ${imported.length} disciplinas na aba BDados. Substituirá a base atual do Ajusta Horários.',
         ),
-      );
-    }
-    if (imported.isEmpty) {
-      throw const FormatException(
-        'Nenhuma distribuição docente encontrada na aba Banco.',
-      );
-    }
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Substituir base'),
+          ),
+        ],
+      ),
+    );
+    if (replace != true) return;
+    await _store.replaceBase(imported, term: _term);
+    if (!mounted) return;
+    setState(() {
+      _entries = imported;
+      _distributionRecords = [];
+    });
+    _message('${imported.length} disciplinas importadas.');
+  }
+
+  Future<void> _confirmDistributionBanco(
+    List<DistribuicaoDocente> imported,
+    Set<String> importedTeachers,
+  ) async {
     if (!mounted) return;
     final replace = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Importar distribuição docente?'),
         content: Text(
-          'A aba Banco contém ${imported.length} turma(s) e ${imported.map((item) => item.teacher).toSet().length} docente(s). A importação atualiza esta aba e mantém as grades semanais existentes.',
+          'A aba Banco contém ${imported.length} turma(s) e ${importedTeachers.length} docente(s). A importação atualiza esta aba e mantém as grades semanais existentes.',
         ),
         actions: [
           TextButton(
@@ -3936,20 +3749,9 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       ),
     );
     if (replace != true) return;
-    final prefs = await SharedPreferences.getInstance();
-    final importedTeachers = imported
-        .map((item) => item.teacher.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet();
-    final updatedRoster = {..._teacherRoster, ...importedTeachers}.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    await prefs.setString(
-      _termScopedKey(_distributionKey, _term),
-      jsonEncode(imported.map((item) => item.toJson()).toList()),
-    );
-    await prefs.setStringList(
-      _termScopedKey(_teacherRosterKey, _term),
-      updatedRoster,
+    final updatedRoster = await _store.importDistribution(
+      imported,
+      term: _term,
     );
     if (!mounted) return;
     setState(() {
@@ -4537,15 +4339,6 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     ),
     child: child,
   );
-  Widget _icon(IconData icon, Color color) => Container(
-    width: 46,
-    height: 46,
-    decoration: BoxDecoration(
-      color: color.withAlpha(35),
-      borderRadius: BorderRadius.circular(15),
-    ),
-    child: Icon(icon, color: color),
-  );
   Widget _infoPill(IconData icon, String value) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
     decoration: BoxDecoration(
@@ -4613,47 +4406,6 @@ class _TeacherDistribution {
   final int eadHours;
   final int extensionHours;
   final List<String> periods;
-}
-
-class _TeacherDistributionRecord {
-  const _TeacherDistributionRecord({
-    required this.teacher,
-    required this.discipline,
-    required this.period,
-    required this.theoryHours,
-    required this.practiceHours,
-    this.eadHours = 0,
-    this.extensionHours = 0,
-  });
-
-  final String teacher;
-  final String discipline;
-  final String period;
-  final int theoryHours;
-  final int practiceHours;
-  final int eadHours;
-  final int extensionHours;
-
-  Map<String, Object> toJson() => {
-    'teacher': teacher,
-    'discipline': discipline,
-    'period': period,
-    'theoryHours': theoryHours,
-    'practiceHours': practiceHours,
-    'eadHours': eadHours,
-    'extensionHours': extensionHours,
-  };
-
-  factory _TeacherDistributionRecord.fromJson(Map<String, dynamic> json) =>
-      _TeacherDistributionRecord(
-        teacher: json['teacher'] as String? ?? '',
-        discipline: json['discipline'] as String? ?? '',
-        period: json['period'] as String? ?? '',
-        theoryHours: (json['theoryHours'] as num?)?.toInt() ?? 0,
-        practiceHours: (json['practiceHours'] as num?)?.toInt() ?? 0,
-        eadHours: (json['eadHours'] as num?)?.toInt() ?? 0,
-        extensionHours: (json['extensionHours'] as num?)?.toInt() ?? 0,
-      );
 }
 
 class HorarioEditorWindowApp extends StatelessWidget {

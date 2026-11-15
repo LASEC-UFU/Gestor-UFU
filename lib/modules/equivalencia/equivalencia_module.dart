@@ -10,6 +10,7 @@ import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
+import 'package:gestor_ufu/modules/equivalencia/equivalencia_templates.dart';
 
 /// Módulo Equivalência de Alunos (módulo piloto da plataforma).
 class EquivalenciaModule extends GestorModule {
@@ -62,4 +63,7 @@ class EquivalenciaModule extends GestorModule {
 
   @override
   List<ModuleCommand> get commands => equivalenciaCommands(service);
+
+  @override
+  List<ModuleTemplate> get templates => equivalenciaTemplates();
 }

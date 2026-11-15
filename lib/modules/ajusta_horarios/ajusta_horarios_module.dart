@@ -2,15 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
-import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/ajusta_horarios_skill.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/ajusta_horarios_templates.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/application/ajusta_horarios_commands.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/data/ajusta_horarios_store.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/domain/ajusta_horarios.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
-import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
+import 'package:gestor_ufu/modules/ajusta_horarios/pages/ajusta_horarios_page.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 
 /// Módulo Ajusta Horários.
 class AjustaHorariosModule extends GestorModule {
-  const AjustaHorariosModule();
+  AjustaHorariosModule();
+
+  final _store = AjustaHorariosStore();
+
+  /// Avisa a tela quando o banco muda por fora (agente, outro computador).
+  final _changes = ValueNotifier<int>(0);
+  AcademicTermService? _terms;
 
   @override
   String get id => 'ajusta-horarios';
@@ -38,15 +49,33 @@ class AjustaHorariosModule extends GestorModule {
   List<RouteBase> get routes => [
     GoRoute(
       path: '/ajusta-horarios',
-      builder: (context, state) => const AjustaHorariosPage(),
+      builder: (context, state) => AjustaHorariosPage(changes: _changes),
     ),
   ];
 
   /// Importa a grade 2026/2 de Controle e Automação na primeira abertura
   /// e aplica as migrações de dados do módulo.
   @override
-  Future<void> activate(GestorServices services) =>
-      AjustaHorariosStore().load();
+  Future<void> activate(GestorServices services) async {
+    _terms = services.terms;
+    await _store.load();
+  }
+
+  @override
+  Future<void> onExternalDataChanged() async => _changes.value++;
+
+  @override
+  ModuleSkill get skill => ajustaHorariosSkill();
+
+  @override
+  List<ModuleTemplate> get templates => ajustaHorariosTemplates();
+
+  @override
+  List<ModuleCommand> get commands {
+    final terms = _terms;
+    if (terms == null) return const [];
+    return ajustaHorariosCommands(_store, terms, changes: _changes);
+  }
 
   @override
   Map<String, ModuleWindowBuilder> get windows => {

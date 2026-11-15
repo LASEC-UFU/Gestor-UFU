@@ -9,7 +9,10 @@ import 'package:gestor_ufu/platform/services/key_value_store.dart';
 ///
 /// As chaves não mudam de nome (dados já sincronizados).
 class AcademicTermService extends ChangeNotifier {
-  AcademicTermService(this._store, {this.defaultTerm = '2º semestre de 2026'});
+  AcademicTermService(this._store, {this.defaultTerm = defaultTermName});
+
+  /// Período usado quando ainda não há nenhum cadastrado.
+  static const defaultTermName = '2º semestre de 2026';
 
   static const termsKey = 'ajusta_horarios_periodos_letivos';
   static const activeKey = 'ajusta_horarios_periodo_letivo';
