@@ -4099,7 +4099,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
                       ),
                       TextButton(
                         onPressed: () => dialogSetState(selected.clear),
-                        child: const Text('Limpar sele??o'),
+                        child: const Text('Limpar seleção'),
                       ),
                       const Spacer(),
                       Text('${selected.length} selecionado(s)'),
@@ -7536,7 +7536,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
     if (exists) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Esse curso j? est? associado a esse per?odo.'),
+          content: Text('Esse curso já está associado a esse período.'),
         ),
       );
       return;
@@ -7555,7 +7555,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'A disciplina precisa permanecer ofertada em pelo menos um curso e per?odo.',
+            'A disciplina precisa permanecer ofertada em pelo menos um curso e período.',
           ),
         ),
       );
@@ -7592,7 +7592,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
               ),
               const SizedBox(width: 10),
               IconButton.filledTonal(
-                tooltip: 'Adicionar curso e per?odo de oferta',
+                tooltip: 'Adicionar curso e período de oferta',
                 onPressed: _addOffering,
                 style: IconButton.styleFrom(
                   fixedSize: const Size(34, 34),

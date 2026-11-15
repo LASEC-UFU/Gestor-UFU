@@ -26,6 +26,9 @@ class AgentAttachment {
   final List<int>? bytes;
   final String? localPath;
 
+  /// Dimensões da imagem ("382×447"), mostradas no chip do anexo.
+  String? dims;
+
   bool get isImage => mimeType.startsWith('image/');
   bool get isPdf => mimeType == 'application/pdf';
 }
@@ -39,10 +42,36 @@ class AgentTextEvent extends AgentEvent {
   final String text;
 }
 
+/// Pedaço de texto da resposta (streaming), anexado ao bloco atual.
+class AgentTextDeltaEvent extends AgentEvent {
+  const AgentTextDeltaEvent(this.text);
+  final String text;
+}
+
+/// Início de um novo bloco de texto da resposta.
+class AgentTextBreakEvent extends AgentEvent {
+  const AgentTextBreakEvent();
+}
+
+/// Ferramenta iniciada pelo próprio CLI (web, comandos, Gestor…).
 class AgentToolEvent extends AgentEvent {
-  const AgentToolEvent(this.name, this.input);
+  const AgentToolEvent(this.id, this.name, this.input);
+  final String id;
   final String name;
   final Map<String, dynamic> input;
+}
+
+/// Resultado de uma ferramenta relatada por [AgentToolEvent].
+class AgentToolResultEvent extends AgentEvent {
+  const AgentToolResultEvent(this.id, this.result, {this.isError = false});
+  final String id;
+  final String result;
+  final bool isError;
+}
+
+/// O modelo está raciocinando antes de responder.
+class AgentThinkingEvent extends AgentEvent {
+  const AgentThinkingEvent();
 }
 
 class AgentInfoEvent extends AgentEvent {
@@ -71,6 +100,28 @@ abstract class AgentBackend {
   /// Instruções de sistema (base + skill) usadas ao iniciar a conversa.
   String systemPrompt = '';
 
+  /// O que o agente pode fazer além das ferramentas do Gestor.
+  AgentAccess access = AgentAccess.gestor;
+
+  /// Pasta de trabalho dos CLIs fora do modo "Só o Gestor".
+  String workDir = '';
+
+  /// Nível de esforço ('' = padrão).
+  String effort = '';
+
+  /// Modelo realmente em uso, informado pelo provedor.
+  String? activeModel;
+
+  /// Aplica mudanças de [access]/[effort] sem perder a conversa.
+  void refreshSession() {}
+
+  /// Pergunta ao usuário antes de comandos/edições (modo "Pedir permissão").
+  AgentPermissionHandler? onPermission;
+
+  /// O back-end relata as ferramentas por [AgentToolEvent]; senão a janela
+  /// mostra as chamadas às ferramentas do Gestor por conta própria.
+  bool get reportsTools => false;
+
   String get label;
 
   /// Verifica credenciais/instalação. Lança [AgentException] se falhar.
@@ -88,6 +139,11 @@ abstract class AgentBackend {
   );
 
   void reset();
+
+  /// Estado da conversa para guardar no histórico e retomar depois.
+  Map<String, dynamic> saveState() => const {};
+
+  void restoreState(Map<String, dynamic> state) {}
 
   Future<void> cancel() async {}
 
@@ -123,6 +179,7 @@ class ClaudeApiBackend extends AgentBackend {
 
   @override
   Future<String> verify() async {
+    activeModel = model;
     final models = await listModels();
     return 'Chave de API da Anthropic válida (${models.length} modelos).';
   }
@@ -158,6 +215,17 @@ class ClaudeApiBackend extends AgentBackend {
   void reset() => _messages.clear();
 
   @override
+  Map<String, dynamic> saveState() => {'messages': _messages};
+
+  @override
+  void restoreState(Map<String, dynamic> state) => _messages
+    ..clear()
+    ..addAll([
+      for (final m in (state['messages'] as List? ?? const []).whereType<Map>())
+        Map<String, dynamic>.from(m),
+    ]);
+
+  @override
   Future<void> cancel() async {
     _client?.close();
     _client = null;
@@ -187,7 +255,11 @@ class ClaudeApiBackend extends AgentBackend {
                 'model': model,
                 'max_tokens': 16000,
                 'fallbacks': 'default',
-                'output_config': {'effort': 'high'},
+                'output_config': {
+                  'effort': effort.isEmpty
+                      ? 'high'
+                      : (effort == 'xhigh' ? 'high' : effort),
+                },
                 'system': [
                   {
                     'type': 'text',
@@ -246,7 +318,6 @@ class ClaudeApiBackend extends AgentBackend {
         for (final block in content.where((b) => b['type'] == 'tool_use')) {
           final name = block['name'] as String;
           final input = Map<String, dynamic>.from(block['input'] as Map? ?? {});
-          emit(AgentToolEvent(name, input));
           final result = await callTool(name, input);
           results.add({
             'type': 'tool_result',
@@ -321,6 +392,7 @@ class OpenAiApiBackend extends AgentBackend {
 
   @override
   Future<String> verify() async {
+    activeModel = model;
     final models = await listModels();
     return 'Chave de API da OpenAI válida (${models.length} modelos).';
   }
@@ -356,6 +428,17 @@ class OpenAiApiBackend extends AgentBackend {
 
   @override
   void reset() => _messages.clear();
+
+  @override
+  Map<String, dynamic> saveState() => {'messages': _messages};
+
+  @override
+  void restoreState(Map<String, dynamic> state) => _messages
+    ..clear()
+    ..addAll([
+      for (final m in (state['messages'] as List? ?? const []).whereType<Map>())
+        Map<String, dynamic>.from(m),
+    ]);
 
   @override
   Future<void> cancel() async {
@@ -427,7 +510,6 @@ class OpenAiApiBackend extends AgentBackend {
           } catch (_) {
             input = {};
           }
-          emit(AgentToolEvent(name, input));
           final result = await callTool(name, input);
           _messages.add({
             'role': 'tool',
@@ -492,8 +574,8 @@ String _apiError(String provider, http.Response response) {
 
 // ======================================================= CLIs (assinatura)
 
-/// Base para os CLIs oficiais (Claude Code e Codex), que usam o login da
-/// assinatura do próprio usuário. As ferramentas chegam a eles pelo
+/// Base para os CLIs oficiais (Claude Code, Codex e Gemini CLI), que usam o
+/// login da assinatura do próprio usuário. As ferramentas chegam a eles pelo
 /// [AgentMcpServer] local.
 abstract class CliAgentBackend extends AgentBackend {
   CliAgentBackend({
@@ -507,9 +589,22 @@ abstract class CliAgentBackend extends AgentBackend {
   final AgentMcpServer mcp;
   final String configuredPath;
   final String model;
+
+  /// Identificador da conversa no CLI (permite retomar pelo histórico).
   String? sessionId;
   Process? _process;
   String? _resolved;
+
+  @override
+  Map<String, dynamic> saveState() => {
+    if (sessionId != null) 'sessionId': sessionId,
+  };
+
+  @override
+  void restoreState(Map<String, dynamic> state) {
+    reset();
+    sessionId = state['sessionId'] as String?;
+  }
 
   @override
   void reset() => sessionId = null;
@@ -541,13 +636,18 @@ abstract class CliAgentBackend extends AgentBackend {
     } catch (_) {}
     final home = Platform.environment['USERPROFILE'] ?? '';
     final appData = Platform.environment['APPDATA'] ?? '';
+    final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
     candidates.addAll([
       p.join(home, '.local', 'bin', '$name.exe'),
       p.join(appData, 'npm', '$name.cmd'),
+      // Instalações pelo winget (ex.: Antigravity CLI).
+      p.join(localAppData, 'Microsoft', 'WinGet', 'Links', '$name.exe'),
     ]);
     for (final candidate in candidates) {
       final lower = candidate.toLowerCase();
       if (!(lower.endsWith('.exe') || lower.endsWith('.cmd'))) continue;
+      // Atalho do VS Code para o Copilot: usa o CLI instalado pelo npm.
+      if (lower.contains('copilot-shim')) continue;
       if (await File(candidate).exists()) return _resolved = candidate;
     }
     throw AgentException(
@@ -611,6 +711,23 @@ abstract class CliAgentBackend extends AgentBackend {
   /// A conta já está logada no CLI?
   Future<bool> isLoggedIn();
 
+  /// A sessão [id] ainda existe neste computador para ser retomada?
+  Future<bool> canResume(String id) async => true;
+
+  /// Procura um arquivo cujo nome contém [id] dentro de [root].
+  static Future<bool> _sessionFileExists(String root, String id) async {
+    final dir = Directory(root);
+    if (!await dir.exists()) return false;
+    try {
+      await for (final entity in dir.list(recursive: true)) {
+        if (entity is File && p.basename(entity.path).contains(id)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   /// Abre o login no navegador e espera terminar. [onOutput] recebe as
   /// linhas do CLI (por exemplo, o link caso o navegador não abra).
   Future<void> loginWithBrowser(void Function(String line) onOutput) async {
@@ -662,29 +779,82 @@ abstract class CliAgentBackend extends AgentBackend {
     ], mode: ProcessStartMode.detached);
   }
 
-  String _composePrompt(String prompt, List<AgentAttachment> attachments) {
+  String get _instructions => access == AgentAccess.gestor
+      ? '$systemPrompt\n'
+            'As ferramentas do Gestor UFU estão no servidor MCP '
+            '"${AgentMcpServer.serverName}". Use somente elas para acessar os '
+            'dados; não edite arquivos nem rode comandos.'
+      : '$systemPrompt\n'
+            'As ferramentas do Gestor UFU estão no servidor MCP '
+            '"${AgentMcpServer.serverName}": use-as sempre para ler e alterar '
+            'os dados do Gestor (nunca edite os arquivos internos do app). '
+            'Você também pode pesquisar na web, ler arquivos e usar as demais '
+            'ferramentas quando ajudar a atender o pedido.';
+
+  /// Pasta usada fora do modo "Só o Gestor".
+  Future<String> _userWorkDir() async {
+    final configured = workDir.trim();
+    final home =
+        Platform.environment['USERPROFILE'] ?? Directory.systemTemp.path;
+    final dir = Directory(
+      configured.isNotEmpty
+          ? configured
+          : p.join(home, 'Documents', 'GestorUFU Agente'),
+    );
+    await dir.create(recursive: true);
+    return dir.path;
+  }
+
+  /// Salva em arquivo temporário um anexo binário colado (sem caminho), para
+  /// que o CLI possa lê-lo.
+  Future<String?> _materialize(AgentAttachment attachment) async {
+    if (attachment.localPath != null) return attachment.localPath;
+    final bytes = attachment.bytes;
+    if (bytes == null) return null;
+    final dir = Directory(
+      p.join(Directory.systemTemp.path, 'gestor_ufu_anexos'),
+    );
+    await dir.create(recursive: true);
+    final file = File(
+      p.join(
+        dir.path,
+        '${DateTime.now().microsecondsSinceEpoch}_${attachment.name}',
+      ),
+    );
+    await file.writeAsBytes(bytes);
+    return file.path;
+  }
+
+  /// Monta o texto enviado ao CLI. [withInstructions] inclui as instruções
+  /// do Gestor (apenas no início da conversa, quando o CLI não as recebe de
+  /// outra forma). Anexos em [inline] já vão como blocos próprios.
+  Future<String> _composePrompt(
+    String prompt,
+    List<AgentAttachment> attachments, {
+    required bool withInstructions,
+    Set<AgentAttachment> inline = const {},
+  }) async {
     final buffer = StringBuffer();
-    if (sessionId == null) {
+    if (withInstructions) {
       buffer
         ..writeln('<instrucoes_do_gestor_ufu>')
-        ..writeln(systemPrompt)
-        ..writeln(
-          'As ferramentas do Gestor UFU estão no servidor MCP '
-          '"${AgentMcpServer.serverName}". Use somente elas para acessar os '
-          'dados; não edite arquivos nem rode comandos.',
-        )
+        ..writeln(_instructions)
         ..writeln('</instrucoes_do_gestor_ufu>')
         ..writeln();
     }
     for (final attachment in attachments) {
+      if (inline.contains(attachment)) continue;
       if (attachment.text != null) {
         buffer
           ..writeln('<anexo nome="${attachment.name}">')
           ..writeln(attachment.text)
           ..writeln('</anexo>');
-      } else if (attachment.localPath != null) {
+        continue;
+      }
+      final path = await _materialize(attachment);
+      if (path != null) {
         buffer.writeln(
-          'Anexo "${attachment.name}" salvo em: ${attachment.localPath} '
+          'Anexo "${attachment.name}" salvo em: $path '
           '(leia o arquivo para usar o conteúdo).',
         );
       }
@@ -692,46 +862,11 @@ abstract class CliAgentBackend extends AgentBackend {
     buffer.write(prompt);
     return buffer.toString();
   }
-
-  Future<void> _run(
-    List<String> args,
-    String stdinText,
-    void Function(Map<String, dynamic> event) onEvent,
-  ) async {
-    final process = _process = await _start(args);
-    final errors = StringBuffer();
-    final stderrDone = process.stderr
-        .transform(utf8.decoder)
-        .listen(errors.write)
-        .asFuture<void>();
-    process.stdin.add(utf8.encode(stdinText));
-    await process.stdin.close();
-    await for (final line
-        in process.stdout
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-      final trimmed = line.trim();
-      if (!trimmed.startsWith('{')) continue;
-      try {
-        onEvent(Map<String, dynamic>.from(jsonDecode(trimmed) as Map));
-      } on FormatException {
-        continue;
-      }
-    }
-    final code = await process.exitCode;
-    await stderrDone;
-    if (_process == null) throw AgentException('Cancelado.');
-    _process = null;
-    if (code != 0) {
-      final message = errors.toString().trim();
-      throw AgentException(
-        '${provider.cliName} terminou com código $code'
-        '${message.isEmpty ? '' : ':\n$message'}',
-      );
-    }
-  }
 }
 
+/// Claude Code em sessão contínua (`--input-format stream-json`), como a
+/// extensão do VS Code: um único processo atende a conversa inteira e o
+/// texto chega em pedaços (`--include-partial-messages`).
 class ClaudeCliBackend extends CliAgentBackend {
   ClaudeCliBackend({
     required super.mcp,
@@ -739,8 +874,32 @@ class ClaudeCliBackend extends CliAgentBackend {
     required super.model,
   }) : super(provider: AgentProvider.claude);
 
+  Process? _session;
+  String? _configPath;
+  Completer<void>? _turn;
+  AgentEventSink? _emit;
+  String? _turnError;
+  bool _cancelled = false;
+  bool _instructionsSent = false;
+  int _controlId = 0;
+  final _stderr = StringBuffer();
+
   @override
   String get label => 'Claude (assinatura via Claude Code)';
+
+  @override
+  bool get reportsTools => true;
+
+  /// No modo "Só o Gestor", os conectores da conta claude.ai ficam de fora.
+  @override
+  Map<String, String> get environment => {
+    'NO_COLOR': '1',
+    if (access == AgentAccess.gestor) 'ENABLE_CLAUDEAI_MCP_SERVERS': 'false',
+  };
+
+  @override
+  Future<String> workingDirectory() async =>
+      access == AgentAccess.gestor ? Directory.systemTemp.path : _userWorkDir();
 
   @override
   Future<bool> isLoggedIn() async {
@@ -758,28 +917,198 @@ class ClaudeCliBackend extends CliAgentBackend {
     }
   }
 
+  /// O Claude Code guarda as sessões em ~/.claude/projects e apaga as
+  /// antigas sozinho.
+  @override
+  Future<bool> canResume(String id) => CliAgentBackend._sessionFileExists(
+    p.join(Platform.environment['USERPROFILE'] ?? '', '.claude', 'projects'),
+    id,
+  );
+
   /// O Claude Code não tem comando para listar modelos; estes são os mesmos
   /// apelidos do seletor da extensão do VS Code, resolvidos pelo próprio CLI
   /// para a versão mais recente liberada na assinatura.
   @override
   Future<List<AgentModel>> listModels() async => const [
-    AgentModel('', 'Padrão (recomendado pelo Claude Code)', isDefault: true),
+    AgentModel('', 'Padrão (recomendado)', isDefault: true),
     AgentModel('opus', 'Opus'),
     AgentModel('sonnet', 'Sonnet'),
     AgentModel('haiku', 'Haiku'),
   ];
 
   Future<String> _mcpConfigFile() async {
+    final existing = _configPath;
+    if (existing != null && await File(existing).exists()) return existing;
     final dir = await Directory.systemTemp.createTemp('gestor_ufu_agent_');
     final file = File(p.join(dir.path, 'mcp.json'));
     await file.writeAsString(
       jsonEncode({
         'mcpServers': {
           AgentMcpServer.serverName: {'type': 'http', 'url': mcp.url},
+          if (access != AgentAccess.gestor && access != AgentAccess.bypass)
+            AgentMcpServer.permissionServerName: {
+              'type': 'http',
+              'url': mcp.permissionUrl,
+            },
         },
       }),
     );
-    return file.path;
+    return _configPath = file.path;
+  }
+
+  Future<Process> _ensureSession() async {
+    final running = _session;
+    if (running != null) return running;
+    final args = [
+      '-p',
+      '--input-format',
+      'stream-json',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--include-partial-messages',
+      '--mcp-config',
+      await _mcpConfigFile(),
+      ...switch (access) {
+        // Só a leitura de anexos entre as ferramentas nativas; o resto do
+        // acesso é pelas ferramentas do Gestor (MCP).
+        AgentAccess.gestor => [
+          '--strict-mcp-config',
+          '--tools',
+          'Read',
+          '--allowedTools',
+          'mcp__${AgentMcpServer.serverName}',
+          'Read',
+        ],
+        // Como no VS Code: leitura e web liberadas; o resto segue o modo
+        // escolhido e, quando precisa, pede aprovação no chat.
+        AgentAccess.bypass => [
+          '--permission-mode',
+          'bypassPermissions',
+          '--allowedTools',
+          'mcp__${AgentMcpServer.serverName}',
+        ],
+        _ => [
+          '--permission-mode',
+          access.claudeMode,
+          '--allowedTools',
+          'mcp__${AgentMcpServer.serverName}',
+          'Read',
+          'Glob',
+          'Grep',
+          'WebSearch',
+          'WebFetch',
+          'TodoWrite',
+          '--permission-prompt-tool',
+          AgentMcpServer.permissionToolId,
+        ],
+      },
+      if (model.isNotEmpty) ...['--model', model],
+      if (effort.isNotEmpty) ...['--effort', effort],
+      if (sessionId != null) ...['--resume', sessionId!],
+    ];
+    final process = await _start(args);
+    _session = process;
+    _instructionsSent = sessionId != null;
+    _stderr.clear();
+    process.stderr.transform(utf8.decoder).listen((chunk) {
+      if (_stderr.length < 20000) _stderr.write(chunk);
+    });
+    process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(_onLine);
+    unawaited(
+      process.exitCode.then((code) {
+        if (_session == process) _session = null;
+        final turn = _turn;
+        if (turn == null || turn.isCompleted) return;
+        final detail = _stderr.toString().trim();
+        _turnError ??= _cancelled
+            ? 'Cancelado.'
+            : 'O Claude Code terminou (código $code)'
+                  '${detail.isEmpty ? '' : ':\n$detail'}';
+        turn.complete();
+      }),
+    );
+    return process;
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('{')) return;
+    Map<String, dynamic> event;
+    try {
+      event = Map<String, dynamic>.from(jsonDecode(trimmed) as Map);
+    } on FormatException {
+      return;
+    }
+    final id = event['session_id'];
+    if (id is String && id.isNotEmpty) sessionId = id;
+    final emit = _emit;
+    if (event['type'] == 'system' && event['model'] is String) {
+      activeModel = event['model'] as String;
+    }
+    switch (event['type']) {
+      case 'stream_event':
+        // Só a conversa principal (subagentes têm parent_tool_use_id).
+        if (event['parent_tool_use_id'] != null || emit == null) return;
+        final inner = event['event'] as Map? ?? const {};
+        if (inner['type'] == 'content_block_delta') {
+          final delta = inner['delta'] as Map? ?? const {};
+          if (delta['type'] == 'text_delta') {
+            emit(AgentTextDeltaEvent('${delta['text'] ?? ''}'));
+          } else if (delta['type'] == 'thinking_delta') {
+            emit(const AgentThinkingEvent());
+          }
+        } else if (inner['type'] == 'content_block_start') {
+          final block = inner['content_block'] as Map? ?? const {};
+          if (block['type'] == 'thinking') emit(const AgentThinkingEvent());
+          if (block['type'] == 'text') emit(const AgentTextBreakEvent());
+        }
+      case 'assistant' when event['parent_tool_use_id'] == null:
+        final message = event['message'] as Map? ?? const {};
+        for (final block
+            in (message['content'] as List? ?? const []).whereType<Map>()) {
+          if (block['type'] != 'tool_use') continue;
+          emit?.call(
+            AgentToolEvent(
+              '${block['id']}',
+              '${block['name']}',
+              Map<String, dynamic>.from(block['input'] as Map? ?? const {}),
+            ),
+          );
+        }
+      case 'user':
+        final message = event['message'] as Map? ?? const {};
+        final content = message['content'];
+        if (content is! List) return;
+        for (final block in content.whereType<Map>()) {
+          if (block['type'] != 'tool_result') continue;
+          final raw = block['content'];
+          final text = raw is List
+              ? raw
+                    .whereType<Map>()
+                    .map((part) => '${part['text'] ?? ''}')
+                    .join('\n')
+              : '${raw ?? ''}';
+          emit?.call(
+            AgentToolResultEvent(
+              '${block['tool_use_id']}',
+              text,
+              isError: block['is_error'] == true,
+            ),
+          );
+        }
+      case 'result':
+        if (event['is_error'] == true) {
+          _turnError = _cancelled
+              ? 'Cancelado.'
+              : 'Claude Code: ${event['result'] ?? event['subtype']}';
+        }
+        final turn = _turn;
+        if (turn != null && !turn.isCompleted) turn.complete();
+    }
   }
 
   @override
@@ -788,60 +1117,109 @@ class ClaudeCliBackend extends CliAgentBackend {
     List<AgentAttachment> attachments,
     AgentEventSink emit,
   ) async {
-    final config = await _mcpConfigFile();
-    final args = [
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--mcp-config',
-      config,
-      '--strict-mcp-config',
-      // Só a leitura de anexos entre as ferramentas nativas; o resto do
-      // acesso é pelas ferramentas do Gestor (MCP).
-      '--tools',
-      'Read',
-      '--allowedTools',
-      'mcp__${AgentMcpServer.serverName}',
-      'Read',
-      if (model.isNotEmpty) ...['--model', model],
-      if (sessionId != null) ...['--resume', sessionId!],
-    ];
-    var isError = false;
-    String? errorText;
+    final process = await _ensureSession();
+    final images = {
+      for (final a in attachments)
+        if (a.isImage && a.bytes != null) a,
+    };
+    final text = await _composePrompt(
+      prompt,
+      attachments,
+      withInstructions: !_instructionsSent,
+      inline: images,
+    );
+    _instructionsSent = true;
+    final turn = _turn = Completer<void>();
+    _emit = emit;
+    _turnError = null;
+    _cancelled = false;
+    process.stdin.writeln(
+      jsonEncode({
+        'type': 'user',
+        'message': {
+          'role': 'user',
+          'content': [
+            for (final image in images)
+              {
+                'type': 'image',
+                'source': {
+                  'type': 'base64',
+                  'media_type': image.mimeType,
+                  'data': base64Encode(image.bytes!),
+                },
+              },
+            {'type': 'text', 'text': text},
+          ],
+        },
+      }),
+    );
+    await process.stdin.flush();
     try {
-      await _run(args, _composePrompt(prompt, attachments), (event) {
-        final id = event['session_id'];
-        if (id is String && id.isNotEmpty) sessionId = id;
-        switch (event['type']) {
-          case 'assistant':
-            final message = event['message'] as Map? ?? const {};
-            for (final block
-                in (message['content'] as List? ?? const []).whereType<Map>()) {
-              if (block['type'] == 'text') {
-                final text = '${block['text']}'.trim();
-                if (text.isNotEmpty) emit(AgentTextEvent(text));
-              }
-            }
-          case 'result':
-            isError = event['is_error'] == true;
-            if (isError) errorText = '${event['result'] ?? event['subtype']}';
-        }
-      });
+      await turn.future;
     } finally {
+      _emit = null;
+      _turn = null;
+    }
+    final error = _turnError;
+    if (error != null) throw AgentException(error);
+  }
+
+  /// Interrompe a resposta atual (como o botão Parar da extensão). Se o CLI
+  /// não atender, encerra o processo; a conversa continua com `--resume`.
+  @override
+  Future<void> cancel() async {
+    final process = _session;
+    final turn = _turn;
+    if (process == null || turn == null || turn.isCompleted) return;
+    _cancelled = true;
+    try {
+      process.stdin.writeln(
+        jsonEncode({
+          'type': 'control_request',
+          'request_id': 'gestor_${++_controlId}',
+          'request': {'subtype': 'interrupt'},
+        }),
+      );
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (_turn == turn && !turn.isCompleted) _closeSession();
+  }
+
+  void _closeSession() {
+    final process = _session;
+    _session = null;
+    process?.kill();
+  }
+
+  @override
+  void reset() {
+    _closeSession();
+    sessionId = null;
+    _instructionsSent = false;
+  }
+
+  /// Reinicia o processo com os novos argumentos e retoma a conversa.
+  @override
+  void refreshSession() {
+    _closeSession();
+    _configPath = null;
+  }
+
+  @override
+  Future<void> dispose() async {
+    _closeSession();
+    final config = _configPath;
+    if (config != null) {
       try {
         await File(config).parent.delete(recursive: true);
       } catch (_) {}
     }
-    if (isError) {
-      throw AgentException(
-        'Claude Code: ${errorText ?? 'erro desconhecido'}. Se for problema '
-        'de login, use "Entrar" nas configurações do agente.',
-      );
-    }
   }
 }
 
+/// Codex pelo `codex app-server` (o mesmo protocolo JSON-RPC usado pela
+/// extensão do VS Code): um processo por janela, conversas como "threads" e
+/// o texto chegando em pedaços.
 class CodexCliBackend extends CliAgentBackend {
   CodexCliBackend({
     required super.mcp,
@@ -849,8 +1227,27 @@ class CodexCliBackend extends CliAgentBackend {
     required super.model,
   }) : super(provider: AgentProvider.chatgpt);
 
+  Process? _server;
+  Future<Process>? _starting;
+  int _nextId = 1;
+  final _pending = <int, Completer<Map<String, dynamic>>>{};
+  String? _loadedThread;
+  String? _turnId;
+  Completer<void>? _turn;
+  AgentEventSink? _emit;
+  String? _failure;
+  bool _interrupted = false;
+  final _streamedItems = <String>{};
+
   @override
   String get label => 'ChatGPT (assinatura via Codex)';
+
+  @override
+  bool get reportsTools => true;
+
+  @override
+  Future<String> workingDirectory() async =>
+      access == AgentAccess.gestor ? Directory.systemTemp.path : _userWorkDir();
 
   @override
   Future<bool> isLoggedIn() async {
@@ -865,82 +1262,303 @@ class CodexCliBackend extends CliAgentBackend {
     }
   }
 
-  /// Pergunta ao `codex app-server` (o mesmo usado pela extensão do VS Code)
-  /// quais modelos a conta ChatGPT pode usar.
   @override
-  Future<List<AgentModel>> listModels() async {
-    final exe = await executable();
-    final process = await Process.start(
-      exe,
-      ['app-server'],
-      runInShell: exe.toLowerCase().endsWith('.cmd'),
-      workingDirectory: await workingDirectory(),
-    );
-    final completer = Completer<List<AgentModel>>();
-    final sub = process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          if (completer.isCompleted || !line.trim().startsWith('{')) return;
-          try {
-            final message = jsonDecode(line) as Map;
-            if (message['id'] != 2) return;
-            if (message['error'] != null) {
-              completer.completeError(
-                AgentException('${(message['error'] as Map)['message']}'),
-              );
-              return;
+  Future<bool> canResume(String id) => CliAgentBackend._sessionFileExists(
+    p.join(Platform.environment['USERPROFILE'] ?? '', '.codex', 'sessions'),
+    id,
+  );
+
+  Future<Process> _ensureServer() {
+    final running = _server;
+    if (running != null) return Future.value(running);
+    return _starting ??= () async {
+      try {
+        final process = await _start(['app-server']);
+        _server = process;
+        process.stderr.drain<void>();
+        process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen(_onLine);
+        unawaited(
+          process.exitCode.then((code) {
+            if (_server != process) return;
+            _server = null;
+            _loadedThread = null;
+            final error = AgentException('O Codex terminou (código $code).');
+            for (final pending in _pending.values) {
+              if (!pending.isCompleted) pending.completeError(error);
             }
-            final result = message['result'] as Map? ?? const {};
-            final raw =
-                (result['data'] ?? result['models'] ?? result['items'])
-                    as List? ??
-                const [];
-            completer.complete([
-              for (final item in raw.whereType<Map>())
-                if (item['hidden'] != true)
-                  AgentModel(
-                    '${item['model'] ?? item['id'] ?? item['slug']}',
-                    '${item['displayName'] ?? item['display_name'] ?? item['model'] ?? item['id']}',
-                    isDefault: item['isDefault'] == true,
-                  ),
-            ]);
-          } on FormatException {
-            return;
-          }
-        });
-    void send(Map<String, Object?> message) =>
-        process.stdin.writeln(jsonEncode(message));
-    try {
-      send({
-        'method': 'initialize',
-        'id': 1,
-        'params': {
+            _pending.clear();
+            final turn = _turn;
+            if (turn != null && !turn.isCompleted) {
+              _failure ??= error.message;
+              turn.complete();
+            }
+          }),
+        );
+        await _request('initialize', {
           'clientInfo': {
             'name': 'gestor_ufu',
             'title': 'Gestor UFU',
             'version': '1.0.0',
           },
-        },
-      });
-      send({'method': 'initialized'});
-      send({'method': 'model/list', 'id': 2, 'params': {}});
-      final models = await completer.future.timeout(
-        const Duration(seconds: 20),
-      );
-      if (models.isEmpty) throw AgentException('lista vazia');
-      return models;
-    } catch (_) {
-      // Versões antigas do Codex não têm model/list.
-      return const [
-        AgentModel('', 'Padrão (definido no Codex)', isDefault: true),
-        AgentModel('gpt-5', 'gpt-5'),
-        AgentModel('gpt-5-codex', 'gpt-5-codex'),
-      ];
-    } finally {
-      await sub.cancel();
-      process.kill();
+        });
+        _write({'method': 'initialized'});
+        return process;
+      } finally {
+        _starting = null;
+      }
+    }();
+  }
+
+  void _write(Map<String, Object?> message) =>
+      _server?.stdin.writeln(jsonEncode(message));
+
+  Future<Map<String, dynamic>> _request(
+    String method,
+    Map<String, Object?> params,
+  ) {
+    final id = _nextId++;
+    final completer = _pending[id] = Completer<Map<String, dynamic>>();
+    _write({'method': method, 'id': id, 'params': params});
+    return completer.future.timeout(
+      const Duration(minutes: 2),
+      onTimeout: () {
+        _pending.remove(id);
+        throw AgentException('O Codex não respondeu a "$method".');
+      },
+    );
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('{')) return;
+    Map<String, dynamic> message;
+    try {
+      message = Map<String, dynamic>.from(jsonDecode(trimmed) as Map);
+    } on FormatException {
+      return;
     }
+    final id = message['id'];
+    final method = message['method'] as String?;
+    if (method == null && id is int) {
+      final completer = _pending.remove(id);
+      if (completer == null) return;
+      final error = message['error'];
+      if (error is Map) {
+        completer.completeError(AgentException('${error['message']}'));
+      } else {
+        completer.complete(
+          Map<String, dynamic>.from(message['result'] as Map? ?? const {}),
+        );
+      }
+      return;
+    }
+    final params = Map<String, dynamic>.from(
+      message['params'] as Map? ?? const {},
+    );
+    if (method != null && id != null) {
+      unawaited(_answer(id, method, params));
+      return;
+    }
+    if (method != null) _onNotification(method, params);
+  }
+
+  /// Pedidos do Codex ao app. Comandos e edições de arquivo são recusados
+  /// (o agente só mexe nos dados pelas ferramentas do Gestor); pedidos de
+  /// confirmação das ferramentas do Gestor são aceitos.
+  Future<void> _answer(
+    Object id,
+    String method,
+    Map<String, dynamic> params,
+  ) async {
+    Future<bool> ask(String tool) async {
+      if (access == AgentAccess.bypass) return true;
+      if (access == AgentAccess.gestor) return false;
+      final handler = onPermission;
+      return handler != null && await handler(tool, params);
+    }
+
+    final result = switch (method) {
+      'mcpServer/elicitation/request' => {
+        'action': 'accept',
+        'content': <String, Object?>{},
+      },
+      'item/commandExecution/requestApproval' => {
+        'decision': await ask('Comando') ? 'accept' : 'decline',
+      },
+      'item/fileChange/requestApproval' => {
+        'decision': await ask('Editar arquivos') ? 'accept' : 'decline',
+      },
+      'execCommandApproval' || 'applyPatchApproval' => {
+        'decision': await ask('Comando') ? 'approved' : 'denied',
+      },
+      _ => null,
+    };
+    if (result == null) {
+      _write({
+        'id': id,
+        'error': {'code': -32601, 'message': 'Não suportado: $method'},
+      });
+    } else {
+      _write({'id': id, 'result': result});
+    }
+  }
+
+  void _onNotification(String method, Map<String, dynamic> params) {
+    final thread = params['threadId'];
+    if (thread != null && thread != _loadedThread) return;
+    final emit = _emit;
+    switch (method) {
+      case 'item/agentMessage/delta':
+        final item = '${params['itemId']}';
+        if (!_streamedItems.contains(item)) {
+          _streamedItems.add(item);
+          emit?.call(const AgentTextBreakEvent());
+        }
+        emit?.call(AgentTextDeltaEvent('${params['delta'] ?? ''}'));
+      case 'item/started':
+        final item = params['item'] as Map? ?? const {};
+        if (item['type'] == 'reasoning') emit?.call(const AgentThinkingEvent());
+        final tool = _toolOf(item);
+        if (tool != null) {
+          emit?.call(AgentToolEvent('${item['id']}', tool.$1, tool.$2));
+        }
+      case 'item/completed':
+        final item = params['item'] as Map? ?? const {};
+        if (item['type'] == 'agentMessage' &&
+            !_streamedItems.contains('${item['id']}')) {
+          final text = '${item['text'] ?? ''}'.trim();
+          if (text.isNotEmpty) emit?.call(AgentTextEvent(text));
+        }
+        if (_toolOf(item) != null) {
+          final result = _toolResult(item);
+          emit?.call(
+            AgentToolResultEvent(
+              '${item['id']}',
+              result.$1,
+              isError: result.$2,
+            ),
+          );
+        }
+      case 'error':
+        if (params['willRetry'] == true) return;
+        final error = params['error'];
+        _failure = error is Map ? '${error['message']}' : '$error';
+      case 'turn/completed':
+        final turn = params['turn'] as Map? ?? const {};
+        if (turn['status'] == 'failed') {
+          final error = turn['error'];
+          _failure ??= error is Map ? '${error['message']}' : 'falha no turno';
+        }
+        if (turn['status'] == 'interrupted') _interrupted = true;
+        final pending = _turn;
+        if (pending != null && !pending.isCompleted) pending.complete();
+    }
+  }
+
+  /// Nome e entrada exibidos para os itens que são ferramentas.
+  static (String, Map<String, dynamic>)? _toolOf(Map item) =>
+      switch (item['type']) {
+        'commandExecution' => ('Comando', {'command': item['command']}),
+        'webSearch' => ('Pesquisa na web', {'query': item['query']}),
+        'fileChange' => (
+          'Editar arquivos',
+          {
+            'arquivos': [
+              for (final change
+                  in (item['changes'] as List? ?? const []).whereType<Map>())
+                change['path'],
+            ],
+          },
+        ),
+        'mcpToolCall' => (
+          item['server'] == AgentMcpServer.serverName
+              ? '${item['tool']}'
+              : '${item['server']} · ${item['tool']}',
+          item['arguments'] is Map
+              ? Map<String, dynamic>.from(item['arguments'] as Map)
+              : <String, dynamic>{},
+        ),
+        'dynamicToolCall' => ('${item['tool']}', <String, dynamic>{}),
+        _ => null,
+      };
+
+  static (String, bool) _toolResult(Map item) {
+    final failed = item['status'] == 'failed' || item['status'] == 'declined';
+    switch (item['type']) {
+      case 'commandExecution':
+        return ('${item['aggregatedOutput'] ?? item['status'] ?? ''}', failed);
+      case 'mcpToolCall':
+        final error = item['error'];
+        if (error is Map) return ('${error['message']}', true);
+        final result = item['result'] as Map? ?? const {};
+        final text = (result['content'] as List? ?? const [])
+            .whereType<Map>()
+            .map((part) => '${part['text'] ?? ''}')
+            .join('\n');
+        return (text, failed);
+      default:
+        return ('${item['status'] ?? ''}', failed);
+    }
+  }
+
+  Future<Map<String, Object?>> _threadParams() async => {
+    'cwd': await workingDirectory(),
+    ...switch (access) {
+      AgentAccess.gestor => {'approvalPolicy': 'never', 'sandbox': 'read-only'},
+      AgentAccess.manual => {
+        'approvalPolicy': 'untrusted',
+        'sandbox': 'workspace-write',
+      },
+      AgentAccess.acceptEdits || AgentAccess.auto => {
+        'approvalPolicy': 'on-request',
+        'sandbox': 'workspace-write',
+      },
+      AgentAccess.plan => {
+        'approvalPolicy': 'on-request',
+        'sandbox': 'read-only',
+      },
+      AgentAccess.bypass => {
+        'approvalPolicy': 'never',
+        'sandbox': 'danger-full-access',
+      },
+    },
+    'developerInstructions': access == AgentAccess.plan
+        ? '$_instructions\nModo planejar: explore e apresente um plano; não '
+              'altere nada até o usuário aprovar.'
+        : _instructions,
+    if (model.isNotEmpty) 'model': model,
+    'config': {
+      'mcp_servers.${AgentMcpServer.serverName}.url': mcp.url,
+      if (access != AgentAccess.gestor) 'web_search': 'live',
+    },
+  };
+
+  Future<void> _ensureThread() async {
+    if (_loadedThread != null && _loadedThread == sessionId) return;
+    final params = await _threadParams();
+    if (sessionId != null) {
+      try {
+        final resumed = await _request('thread/resume', {
+          'threadId': sessionId,
+          ...params,
+        });
+        if (resumed['model'] is String) {
+          activeModel = resumed['model'] as String;
+        }
+        _loadedThread = sessionId;
+        return;
+      } on AgentException {
+        sessionId = null; // conversa não encontrada: começa outra
+      }
+    }
+    final result = await _request('thread/start', params);
+    if (result['model'] is String) activeModel = result['model'] as String;
+    final thread = result['thread'] as Map? ?? const {};
+    sessionId = '${thread['id']}';
+    _loadedThread = sessionId;
   }
 
   @override
@@ -949,42 +1567,46 @@ class CodexCliBackend extends CliAgentBackend {
     List<AgentAttachment> attachments,
     AgentEventSink emit,
   ) async {
-    final args = [
-      'exec',
-      '--json',
-      '--skip-git-repo-check',
-      '--sandbox',
-      'read-only',
-      '-c',
-      'mcp_servers.${AgentMcpServer.serverName}.url=${mcp.url}',
-      '-c',
-      'approval_policy=never',
-      if (model.isNotEmpty) ...['-m', model],
-      if (sessionId != null) ...['resume', sessionId!],
-      '-',
-    ];
-    String? failure;
-    await _run(args, _composePrompt(prompt, attachments), (event) {
-      switch (event['type']) {
-        case 'thread.started':
-          final id = event['thread_id'];
-          if (id is String) sessionId = id;
-        case 'item.completed':
-          final item = event['item'] as Map? ?? const {};
-          if (item['type'] == 'agent_message') {
-            final text = '${item['text'] ?? ''}'.trim();
-            if (text.isNotEmpty) emit(AgentTextEvent(text));
-          } else if (item['type'] == 'error') {
-            failure = '${item['message']}';
-          }
-        case 'turn.failed':
-        case 'error':
-          final error = event['error'];
-          failure = error is Map
-              ? '${error['message']}'
-              : '${event['message'] ?? error}';
-      }
-    });
+    await _ensureServer();
+    await _ensureThread();
+    final images = {
+      for (final a in attachments)
+        if (a.isImage && a.bytes != null) a,
+    };
+    final text = await _composePrompt(
+      prompt,
+      attachments,
+      withInstructions: false,
+      inline: images,
+    );
+    final turn = _turn = Completer<void>();
+    _emit = emit;
+    _failure = null;
+    _interrupted = false;
+    _streamedItems.clear();
+    try {
+      final result = await _request('turn/start', {
+        'threadId': sessionId,
+        if (effort.isNotEmpty) 'effort': effort == 'max' ? 'xhigh' : effort,
+        'input': [
+          {'type': 'text', 'text': text},
+          for (final image in images)
+            {
+              'type': 'image',
+              'url':
+                  'data:${image.mimeType};base64,${base64Encode(image.bytes!)}',
+            },
+        ],
+      });
+      _turnId = '${(result['turn'] as Map? ?? const {})['id']}';
+      await turn.future;
+    } finally {
+      _emit = null;
+      _turn = null;
+      _turnId = null;
+    }
+    if (_interrupted) throw AgentException('Cancelado.');
+    final failure = _failure;
     if (failure != null) {
       throw AgentException(
         'Codex: $failure. Se for problema de login, use "Entrar" nas '
@@ -992,8 +1614,71 @@ class CodexCliBackend extends CliAgentBackend {
       );
     }
   }
+
+  @override
+  Future<void> cancel() async {
+    final turnId = _turnId;
+    if (turnId == null || sessionId == null) return;
+    try {
+      await _request('turn/interrupt', {
+        'threadId': sessionId,
+        'turnId': turnId,
+      });
+    } catch (_) {
+      _server?.kill();
+    }
+  }
+
+  @override
+  void reset() {
+    sessionId = null;
+    _loadedThread = null;
+  }
+
+  /// Retoma a thread com as novas permissões no próximo envio.
+  @override
+  void refreshSession() => _loadedThread = null;
+
+  @override
+  Future<void> dispose() async {
+    final server = _server;
+    _server = null;
+    server?.kill();
+  }
+
+  /// Pergunta ao `codex app-server` quais modelos a conta ChatGPT pode usar.
+  @override
+  Future<List<AgentModel>> listModels() async {
+    try {
+      await _ensureServer();
+      final result = await _request('model/list', {});
+      final raw =
+          (result['data'] ?? result['models'] ?? result['items']) as List? ??
+          const [];
+      final models = [
+        for (final item in raw.whereType<Map>())
+          if (item['hidden'] != true)
+            AgentModel(
+              '${item['model'] ?? item['id'] ?? item['slug']}',
+              '${item['displayName'] ?? item['display_name'] ?? item['model'] ?? item['id']}',
+              isDefault: item['isDefault'] == true,
+            ),
+      ];
+      if (models.isEmpty) throw AgentException('lista vazia');
+      return models;
+    } catch (_) {
+      // Versões antigas do Codex não têm model/list.
+      return const [
+        AgentModel('', 'Padrão (definido no Codex)', isDefault: true),
+      ];
+    }
+  }
 }
 
+/// Gemini pelo Antigravity CLI (`agy`), o sucessor oficial do Gemini CLI
+/// para contas Google pessoais (Google AI Pro etc.). Sessão contínua com
+/// `--input-format stream-json`; as ferramentas do Gestor entram por um
+/// `.agents/mcp_config.json` na pasta de trabalho.
 class GeminiCliBackend extends CliAgentBackend {
   GeminiCliBackend({
     required super.mcp,
@@ -1001,82 +1686,309 @@ class GeminiCliBackend extends CliAgentBackend {
     required super.model,
   }) : super(provider: AgentProvider.gemini);
 
-  @override
-  String get label => 'Gemini (assinatura via Gemini CLI)';
+  Process? _session;
+  Completer<void>? _turn;
+  AgentEventSink? _emit;
+  String? _turnError;
+  bool _cancelled = false;
+  bool _instructionsSent = false;
+  int? _textStep;
+  final _stderr = StringBuffer();
 
-  /// Usa o login Google (Code Assist) e confia na pasta de trabalho, onde
-  /// fica a configuração do servidor MCP do Gestor.
   @override
-  Map<String, String> get environment => const {
-    'NO_COLOR': '1',
-    'GOOGLE_GENAI_USE_GCA': 'true',
-    'GEMINI_CLI_TRUST_WORKSPACE': 'true',
-  };
+  String get label => 'Gemini (assinatura via Antigravity CLI)';
+
+  @override
+  bool get reportsTools => true;
+
+  static String get _dataDir => p.join(
+    Platform.environment['USERPROFILE'] ?? '',
+    '.gemini',
+    'antigravity-cli',
+  );
 
   @override
   Future<bool> isLoggedIn() async {
-    final home = Platform.environment['USERPROFILE'] ?? '';
-    return File(p.join(home, '.gemini', 'oauth_creds.json')).exists();
+    try {
+      final process = await _start(['models']);
+      await process.stdin.close();
+      final out = await _merge(process)
+          .transform(utf8.decoder)
+          .join()
+          .timeout(
+            const Duration(seconds: 40),
+            onTimeout: () {
+              process.kill();
+              return '';
+            },
+          );
+      final code = await process.exitCode;
+      return code == 0 && !out.toLowerCase().contains('sign in');
+    } catch (_) {
+      return false;
+    }
   }
 
-  /// O login do Gemini CLI só existe no modo interativo: abre um terminal
-  /// com o CLI, que leva ao navegador. Espera até as credenciais existirem.
+  /// Instala pelo winget (pacote oficial do Google).
+  @override
+  Future<void> install(void Function(String line) onOutput) async {
+    final process = await Process.start('winget', [
+      'install',
+      '--id',
+      'Google.AntigravityCLI',
+      '-e',
+      '--accept-package-agreements',
+      '--accept-source-agreements',
+      '--silent',
+    ], runInShell: true);
+    final output = _merge(process)
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) {
+          if (line.trim().isNotEmpty) onOutput(line.trim());
+        });
+    final code = await process.exitCode;
+    await output.cancel();
+    _resolved = null;
+    if (code != 0) {
+      throw AgentException(
+        'Não foi possível instalar o Antigravity CLI (winget terminou com '
+        'código $code).',
+      );
+    }
+  }
+
+  /// O login do Antigravity é feito no modo interativo: abre um terminal
+  /// com o `agy`, que leva ao navegador, e espera a conta ficar disponível.
   @override
   Future<void> loginWithBrowser(void Function(String line) onOutput) async {
     await openLoginTerminal();
-    onOutput('Conclua o login no terminal/navegador que foi aberto.');
-    for (var i = 0; i < 180; i++) {
-      await Future<void>.delayed(const Duration(seconds: 2));
+    onOutput(
+      'Entre com sua conta Google no terminal/navegador que foi aberto e '
+      'feche o terminal ao terminar.',
+    );
+    for (var i = 0; i < 120; i++) {
+      await Future<void>.delayed(const Duration(seconds: 3));
       if (await isLoggedIn()) return;
     }
-    throw AgentException('Tempo esgotado aguardando o login do Gemini CLI.');
+    throw AgentException('Tempo esgotado aguardando o login no Antigravity.');
+  }
+
+  @override
+  Future<String> verify() async {
+    final exe = await executable();
+    final result = await Process.run(exe, ['--version']);
+    if (result.exitCode != 0) {
+      throw AgentException('Falha ao executar $exe: ${result.stderr}');
+    }
+    if (!await isLoggedIn()) {
+      throw AgentException(
+        'Entre com sua conta Google no Antigravity para usar o Gemini.',
+      );
+    }
+    return 'Antigravity CLI ${'${result.stdout}'.trim()} encontrado.';
   }
 
   @override
   Future<List<AgentModel>> listModels() async {
+    final models = <AgentModel>[
+      const AgentModel('', 'Padrão do Antigravity', isDefault: true),
+    ];
     try {
-      final process = await _start(['--list-models', '-o', 'json']);
+      final process = await _start(['models']);
       await process.stdin.close();
       final out = await process.stdout.transform(utf8.decoder).join();
       await process.exitCode;
-      final start = out.indexOf('[');
-      final list = jsonDecode(out.substring(start)) as List;
-      return [
-        for (final item in list.whereType<Map>())
-          AgentModel(
-            item['id'] == 'auto' ? '' : '${item['id'] ?? item['modelId']}',
-            '${item['displayName'] ?? item['id']}',
-            isDefault: item['id'] == 'auto',
-          ),
-      ];
-    } catch (_) {
-      return const [
-        AgentModel('', 'Auto (definido no Gemini CLI)', isDefault: true),
-        AgentModel('gemini-2.5-pro', 'gemini-2.5-pro'),
-      ];
-    }
+      for (final line in const LineSplitter().convert(out)) {
+        final parts = line.split('\t');
+        if (parts.length < 2 || parts.first.trim().isEmpty) continue;
+        models.add(AgentModel(parts.first.trim(), parts[1].trim()));
+      }
+    } catch (_) {}
+    return models;
   }
 
-  /// Pasta fixa: o Gemini CLI guarda as sessões por projeto, então ela
-  /// precisa ser a mesma para que `--resume` encontre a conversa.
+  @override
+  Future<bool> canResume(String id) =>
+      CliAgentBackend._sessionFileExists(p.join(_dataDir, 'conversations'), id);
+
+  /// Pasta de trabalho com o `.agents/mcp_config.json` do Gestor (só para
+  /// esta pasta; a configuração global do usuário não é alterada).
   @override
   Future<String> workingDirectory() async {
-    final dir = Directory(
-      p.join(Directory.systemTemp.path, 'gestor_ufu_gemini'),
-    );
-    final settings = File(p.join(dir.path, '.gemini', 'settings.json'));
-    await settings.parent.create(recursive: true);
-    // O servidor MCP local é "confiável": suas ferramentas rodam sem pedir
-    // confirmação. Ferramentas de shell e de arquivos ficam excluídas.
-    await settings.writeAsString(
+    final dir = access == AgentAccess.gestor
+        ? p.join(Directory.systemTemp.path, 'gestor_ufu_agy')
+        : await _userWorkDir();
+    await Directory(dir).create(recursive: true);
+    String? url;
+    try {
+      url = mcp.url;
+    } on StateError {
+      url = null; // verificação de login: o servidor MCP ainda não subiu
+    }
+    if (url != null) {
+      final config = File(p.join(dir, '.agents', 'mcp_config.json'));
+      await config.parent.create(recursive: true);
+      await config.writeAsString(
+        jsonEncode({
+          'mcpServers': {
+            AgentMcpServer.serverName: {'serverUrl': url},
+          },
+        }),
+      );
+    }
+    return dir;
+  }
+
+  Future<Process> _ensureSession() async {
+    final running = _session;
+    if (running != null) return running;
+    final args = [
+      '--input-format',
+      'stream-json',
+      '--output-format',
+      'stream-json',
+      '--settings',
       jsonEncode({
-        'mcpServers': {
-          AgentMcpServer.serverName: {'httpUrl': mcp.url, 'trust': true},
+        'permissions': {
+          'allow': ['mcp(${AgentMcpServer.serverName}/*)'],
         },
-        'excludeTools': ['run_shell_command', 'write_file', 'replace'],
+      }),
+      ...switch (access) {
+        AgentAccess.bypass => ['--dangerously-skip-permissions'],
+        AgentAccess.acceptEdits => ['--mode', 'accept-edits'],
+        AgentAccess.plan => ['--mode', 'plan'],
+        AgentAccess.auto => ['--mode', 'auto'],
+        _ => const <String>[],
+      },
+      if (model.isNotEmpty) ...['--model', model],
+      if (effort.isNotEmpty) ...['--effort', effort],
+      if (sessionId != null) ...['--conversation', sessionId!],
+      '-p=',
+    ];
+    final process = await _start(args);
+    _session = process;
+    _instructionsSent = sessionId != null;
+    _stderr.clear();
+    process.stderr.transform(utf8.decoder).listen((chunk) {
+      if (_stderr.length < 20000) _stderr.write(chunk);
+    });
+    process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen(_onLine);
+    unawaited(
+      process.exitCode.then((code) {
+        if (_session == process) _session = null;
+        final turn = _turn;
+        if (turn == null || turn.isCompleted) return;
+        final detail = _stderr.toString().trim();
+        _turnError ??= _cancelled
+            ? 'Cancelado.'
+            : 'O Antigravity terminou (código $code)'
+                  '${detail.isEmpty ? '' : ':\n$detail'}';
+        turn.complete();
       }),
     );
-    return dir.path;
+    return process;
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('{')) {
+      // Avisos do CLI (ex.: ação negada por falta de permissão).
+      if (trimmed.isNotEmpty && _emit != null && trimmed.contains('denied')) {
+        _emit!(AgentInfoEvent(trimmed));
+      }
+      return;
+    }
+    Map<String, dynamic> event;
+    try {
+      event = Map<String, dynamic>.from(jsonDecode(trimmed) as Map);
+    } on FormatException {
+      return;
+    }
+    final emit = _emit;
+    switch (event['event']) {
+      case 'init':
+        final id = event['conversation_id'];
+        if (id is String && id.isNotEmpty) sessionId = id;
+        final init = event['init'] as Map? ?? const {};
+        if (init['model'] is String) activeModel = init['model'] as String;
+      case 'step_update':
+        final step = event['step_update'] as Map? ?? const {};
+        final id = step['conversation_id'];
+        if (id is String && id.isNotEmpty) sessionId = id;
+        if (emit == null) return;
+        final index = step['step_index'] as int? ?? -1;
+        final state = '${step['state'] ?? ''}';
+        switch (step['step_type']) {
+          case 'agent_response':
+            final delta = step['text_delta'];
+            if (delta is String && delta.isNotEmpty) {
+              if (_textStep != index) {
+                _textStep = index;
+                emit(const AgentTextBreakEvent());
+              }
+              emit(AgentTextDeltaEvent(delta));
+            } else if (state == 'ACTIVE') {
+              emit(const AgentThinkingEvent());
+            }
+          case 'tool':
+            final info = step['tool_info'] as Map? ?? const {};
+            final params = Map<String, dynamic>.from(
+              info['parameters'] as Map? ?? const {},
+            );
+            final isMcp = step['tool_name'] == 'call_mcp_tool';
+            final name = isMcp
+                ? (params['ServerName'] == AgentMcpServer.serverName
+                      ? '${params['ToolName']}'
+                      : '${params['ServerName']} · ${params['ToolName']}')
+                : '${step['tool_name'] ?? info['name']}';
+            final input = isMcp
+                ? Map<String, dynamic>.from(params['Arguments'] as Map? ?? {})
+                : params;
+            final toolId = 'step$index';
+            if (state == 'ACTIVE') {
+              emit(AgentToolEvent(toolId, name, input));
+            } else {
+              final error = info['error'];
+              emit(
+                AgentToolResultEvent(
+                  toolId,
+                  error is Map
+                      ? '${error['message']}'
+                      : '${info['output'] ?? ''}',
+                  isError: state == 'ERROR',
+                ),
+              );
+            }
+          default:
+            if (state == 'ACTIVE') emit(const AgentThinkingEvent());
+        }
+      case 'result':
+        final result = event['result'] as Map? ?? const {};
+        final id = result['conversation_id'];
+        if (id is String && id.isNotEmpty) sessionId = id;
+        if (result['status'] == 'ERROR') {
+          _turnError = _cancelled
+              ? 'Cancelado.'
+              : 'Antigravity: ${result['error'] ?? 'erro desconhecido'}';
+        }
+        final denied = result['denied_actions'];
+        if (denied is List && denied.isNotEmpty && emit != null) {
+          emit(
+            AgentInfoEvent(
+              'Ações negadas neste modo: '
+              '${denied.whereType<Map>().map((d) => d['display_name'] ?? d['action']).join(', ')}. '
+              'Use "Ignorar permissões" ou "Editar automaticamente" para '
+              'liberá-las.',
+            ),
+          );
+        }
+        final turn = _turn;
+        if (turn != null && !turn.isCompleted) turn.complete();
+    }
   }
 
   @override
@@ -1085,56 +1997,518 @@ class GeminiCliBackend extends CliAgentBackend {
     List<AgentAttachment> attachments,
     AgentEventSink emit,
   ) async {
-    final args = [
-      '--output-format',
-      'stream-json',
-      '--allowed-mcp-server-names',
-      AgentMcpServer.serverName,
-      if (model.isNotEmpty) ...['-m', model],
-      // O Gemini CLI retoma por "latest" (a pasta de trabalho é exclusiva).
-      if (sessionId != null) ...['--resume', 'latest'],
-      // Modo headless: a mensagem vai pelo stdin e este texto é anexado.
-      '-p',
-      '.',
-    ];
-    final text = StringBuffer();
-    String? failure;
-    void flush() {
-      final value = text.toString().trim();
-      if (value.isNotEmpty) emit(AgentTextEvent(value));
-      text.clear();
+    final process = await _ensureSession();
+    final text = await _composePrompt(
+      prompt,
+      attachments,
+      withInstructions: !_instructionsSent,
+    );
+    _instructionsSent = true;
+    final turn = _turn = Completer<void>();
+    _emit = emit;
+    _turnError = null;
+    _cancelled = false;
+    _textStep = null;
+    process.stdin.writeln(
+      jsonEncode({
+        'event': 'user',
+        'message': {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': text},
+          ],
+        },
+      }),
+    );
+    await process.stdin.flush();
+    try {
+      await turn.future;
+    } finally {
+      _emit = null;
+      _turn = null;
+    }
+    final error = _turnError;
+    if (error != null) throw AgentException(error);
+  }
+
+  /// Interrompe encerrando o processo; a conversa continua com
+  /// `--conversation` na próxima mensagem.
+  @override
+  Future<void> cancel() async {
+    if (_turn == null) return;
+    _cancelled = true;
+    _closeSession();
+  }
+
+  void _closeSession() {
+    final process = _session;
+    _session = null;
+    process?.kill();
+  }
+
+  @override
+  void reset() {
+    _closeSession();
+    sessionId = null;
+    _instructionsSent = false;
+  }
+
+  @override
+  void refreshSession() => _closeSession();
+
+  @override
+  Future<void> dispose() async => _closeSession();
+}
+
+/// GitHub Copilot (assinatura Copilot Pro) pelo GitHub Copilot CLI no modo
+/// ACP (Agent Client Protocol): sessão contínua por JSON-RPC, texto em
+/// pedaços, ferramentas relatadas e pedidos de permissão respondidos no
+/// chat do Gestor.
+class CopilotCliBackend extends CliAgentBackend {
+  CopilotCliBackend({
+    required super.mcp,
+    required super.configuredPath,
+    required super.model,
+  }) : super(provider: AgentProvider.copilot);
+
+  Process? _server;
+  Future<Process>? _starting;
+  int _nextId = 1;
+  final _pending = <int, Completer<Map<String, dynamic>>>{};
+  String? _loadedSession;
+  AgentEventSink? _emit;
+  bool _cancelled = false;
+  bool _streaming = false;
+  Object? _messageId;
+  final _stderr = StringBuffer();
+  List<AgentModel>? _models;
+
+  @override
+  String get label => 'GitHub Copilot (assinatura via Copilot CLI)';
+
+  @override
+  bool get reportsTools => true;
+
+  @override
+  Future<String> workingDirectory() async =>
+      access == AgentAccess.gestor ? Directory.systemTemp.path : _userWorkDir();
+
+  /// Opções de inicialização conforme o modo de permissão.
+  List<String> get _args => [
+    '--acp',
+    '--no-auto-update',
+    '--allow-tool',
+    AgentMcpServer.serverName,
+    ...switch (access) {
+      AgentAccess.bypass => ['--allow-all'],
+      AgentAccess.acceptEdits => ['--allow-tool', 'write'],
+      AgentAccess.plan => ['--plan'],
+      AgentAccess.auto => ['--assisted-approval'],
+      _ => const <String>[],
+    },
+    if (model.isNotEmpty) ...['--model', model],
+    if (effort.isNotEmpty) ...['--reasoning-effort', effort],
+  ];
+
+  Future<Process> _ensureServer() {
+    final running = _server;
+    if (running != null) return Future.value(running);
+    return _starting ??= () async {
+      try {
+        final process = await _start(_args);
+        _server = process;
+        _stderr.clear();
+        process.stderr.transform(utf8.decoder).listen((chunk) {
+          if (_stderr.length < 20000) _stderr.write(chunk);
+        });
+        process.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .listen(_onLine);
+        unawaited(
+          process.exitCode.then((code) {
+            if (_server != process) return;
+            _server = null;
+            _loadedSession = null;
+            final detail = _stderr.toString().trim();
+            final error = AgentException(
+              _cancelled
+                  ? 'Cancelado.'
+                  : 'O Copilot terminou (código $code)'
+                        '${detail.isEmpty ? '' : ':\n$detail'}',
+            );
+            for (final pending in _pending.values) {
+              if (!pending.isCompleted) pending.completeError(error);
+            }
+            _pending.clear();
+          }),
+        );
+        await _request('initialize', {
+          'protocolVersion': 1,
+          'clientCapabilities': {
+            'fs': {'readTextFile': false, 'writeTextFile': false},
+            'terminal': false,
+          },
+        }, timeout: const Duration(minutes: 1));
+        return process;
+      } finally {
+        _starting = null;
+      }
+    }();
+  }
+
+  void _write(Map<String, Object?> message) =>
+      _server?.stdin.writeln(jsonEncode({'jsonrpc': '2.0', ...message}));
+
+  Future<Map<String, dynamic>> _request(
+    String method,
+    Map<String, Object?> params, {
+    Duration? timeout,
+  }) {
+    final id = _nextId++;
+    final completer = _pending[id] = Completer<Map<String, dynamic>>();
+    _write({'id': id, 'method': method, 'params': params});
+    final future = completer.future;
+    if (timeout == null) return future;
+    return future.timeout(
+      timeout,
+      onTimeout: () {
+        _pending.remove(id);
+        throw AgentException('O Copilot não respondeu a "$method".');
+      },
+    );
+  }
+
+  void _onLine(String line) {
+    final trimmed = line.trim();
+    if (!trimmed.startsWith('{')) return;
+    Map<String, dynamic> message;
+    try {
+      message = Map<String, dynamic>.from(jsonDecode(trimmed) as Map);
+    } on FormatException {
+      return;
+    }
+    final id = message['id'];
+    final method = message['method'] as String?;
+    if (method == null && id is int) {
+      final completer = _pending.remove(id);
+      if (completer == null) return;
+      final error = message['error'];
+      if (error is Map) {
+        completer.completeError(AgentException('${error['message']}'));
+      } else {
+        completer.complete(
+          Map<String, dynamic>.from(message['result'] as Map? ?? const {}),
+        );
+      }
+      return;
+    }
+    final params = Map<String, dynamic>.from(
+      message['params'] as Map? ?? const {},
+    );
+    if (method != null && id != null) {
+      unawaited(_answer(id, method, params));
+    } else if (method == 'session/update') {
+      _onUpdate(params);
+    }
+  }
+
+  /// Pedido de permissão do Copilot: vira o cartão Permitir/Negar no chat.
+  Future<void> _answer(
+    Object id,
+    String method,
+    Map<String, dynamic> params,
+  ) async {
+    if (method != 'session/request_permission') {
+      _write({
+        'id': id,
+        'error': {'code': -32601, 'message': 'Não suportado: $method'},
+      });
+      return;
+    }
+    final toolCall = params['toolCall'] as Map? ?? const {};
+    final options = (params['options'] as List? ?? const [])
+        .whereType<Map>()
+        .toList();
+    String? optionOf(String kind) {
+      for (final option in options) {
+        if (option['kind'] == kind) return '${option['optionId']}';
+      }
+      return null;
     }
 
-    await _run(args, _composePrompt(prompt, attachments), (event) {
-      final id = event['session_id'];
-      if (id is String && id.isNotEmpty) sessionId = id;
-      switch (event['type']) {
-        case 'message':
-          if (event['role'] == 'assistant') {
-            text.write('${event['content'] ?? ''}');
-            if (event['delta'] != true) flush();
-          }
-        case 'tool_use':
-          flush();
-        case 'error':
-          failure = '${event['message'] ?? event['error']}';
-        case 'result':
-          flush();
-          if (event['status'] == 'error') {
-            final error = event['error'];
-            failure = error is Map ? '${error['message']}' : '$error';
-          }
-      }
+    final input = toolCall['rawInput'] is Map
+        ? Map<String, dynamic>.from(toolCall['rawInput'] as Map)
+        : <String, dynamic>{'acao': '${toolCall['title'] ?? ''}'};
+    final title = '${toolCall['title'] ?? toolCall['kind'] ?? 'Ferramenta'}';
+    bool allowed;
+    if (access == AgentAccess.bypass) {
+      allowed = true;
+    } else if (access == AgentAccess.gestor) {
+      allowed = title.contains(AgentMcpServer.serverName);
+    } else {
+      final handler = onPermission;
+      allowed = handler != null && await handler(title, input);
+    }
+    final optionId = allowed
+        ? (optionOf('allow_once') ?? optionOf('allow_always'))
+        : (optionOf('reject_once') ?? optionOf('reject_always'));
+    _write({
+      'id': id,
+      'result': {
+        'outcome': optionId == null
+            ? {'outcome': 'cancelled'}
+            : {'outcome': 'selected', 'optionId': optionId},
+      },
     });
-    flush();
-    if (failure != null) {
+  }
+
+  static String _contentText(Object? content) {
+    if (content is Map) {
+      if (content['text'] != null) return '${content['text']}';
+      if (content['content'] != null) return _contentText(content['content']);
+      return '';
+    }
+    if (content is List) {
+      return content.map(_contentText).where((t) => t.isNotEmpty).join('\n');
+    }
+    return content == null ? '' : '$content';
+  }
+
+  void _onUpdate(Map<String, dynamic> params) {
+    if (params['sessionId'] != _loadedSession) return;
+    final emit = _emit;
+    if (emit == null) return; // replay do session/load
+    final update = params['update'] as Map? ?? const {};
+    switch (update['sessionUpdate']) {
+      case 'agent_message_chunk':
+        final text = _contentText(update['content']);
+        if (text.isEmpty) return;
+        final messageId = update['messageId'];
+        if (!_streaming || messageId != _messageId) {
+          _streaming = true;
+          _messageId = messageId;
+          emit(const AgentTextBreakEvent());
+        }
+        emit(AgentTextDeltaEvent(text));
+      case 'agent_thought_chunk':
+        emit(const AgentThinkingEvent());
+      case 'tool_call':
+        _streaming = false;
+        final raw = update['rawInput'];
+        emit(
+          AgentToolEvent(
+            '${update['toolCallId']}',
+            '${update['title'] ?? update['kind'] ?? 'Ferramenta'}',
+            raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{},
+          ),
+        );
+      case 'tool_call_update':
+        final status = update['status'];
+        if (status != 'completed' && status != 'failed') return;
+        final output = _contentText(update['content']);
+        emit(
+          AgentToolResultEvent(
+            '${update['toolCallId']}',
+            output.isNotEmpty ? output : '${update['rawOutput'] ?? ''}',
+            isError: status == 'failed',
+          ),
+        );
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _mcpServers() async => [
+    {
+      'type': 'http',
+      'name': AgentMcpServer.serverName,
+      'url': mcp.url,
+      'headers': <Object>[],
+    },
+  ];
+
+  void _readSessionInfo(Map<String, dynamic> result) {
+    final models = result['models'];
+    if (models is Map) {
+      final current = models['currentModelId'];
+      if (current is String) activeModel = current;
+      final seen = <String>{};
+      _models = [
+        for (final item
+            in (models['availableModels'] as List? ?? const [])
+                .whereType<Map>())
+          if (seen.add('${item['modelId']}'))
+            AgentModel(
+              '${item['modelId']}',
+              '${item['name'] ?? item['modelId']}',
+              isDefault: item['modelId'] == current,
+            ),
+      ];
+    }
+  }
+
+  Future<void> _ensureSession() async {
+    await _ensureServer();
+    if (_loadedSession != null && _loadedSession == sessionId) return;
+    final cwd = await workingDirectory();
+    if (sessionId != null) {
+      try {
+        final result = await _request('session/load', {
+          'sessionId': sessionId,
+          'cwd': cwd,
+          'mcpServers': await _mcpServers(),
+        }, timeout: const Duration(minutes: 2));
+        _loadedSession = sessionId;
+        _readSessionInfo(result);
+        return;
+      } on AgentException {
+        sessionId = null; // sessão não encontrada: começa outra
+      }
+    }
+    final result = await _request('session/new', {
+      'cwd': cwd,
+      'mcpServers': await _mcpServers(),
+    }, timeout: const Duration(minutes: 2));
+    sessionId = '${result['sessionId']}';
+    _loadedSession = sessionId;
+    _readSessionInfo(result);
+  }
+
+  /// Logado = o Copilot aceita abrir uma sessão (não gasta requisições).
+  @override
+  Future<bool> isLoggedIn() async {
+    final probe = CopilotCliBackend(
+      mcp: mcp,
+      configuredPath: configuredPath,
+      model: '',
+    )..access = AgentAccess.gestor;
+    try {
+      await probe._ensureServer();
+      await probe._request('session/new', {
+        'cwd': Directory.systemTemp.path,
+        'mcpServers': <Object>[],
+      }, timeout: const Duration(seconds: 40));
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      await probe.dispose();
+    }
+  }
+
+  @override
+  Future<String> verify() async {
+    final version = await super.verify();
+    if (!await isLoggedIn()) {
       throw AgentException(
-        'Gemini CLI: $failure. Contas Google pessoais não são mais aceitas '
-        'pelo Gemini CLI (o Google migrou o plano gratuito para o '
-        'Antigravity); use a chave de API do Google AI Studio.',
+        'Entre com sua conta GitHub (Copilot) para usar este agente.',
+      );
+    }
+    return version;
+  }
+
+  @override
+  Future<List<AgentModel>> listModels() async {
+    try {
+      await _ensureSession();
+    } catch (_) {}
+    final models = _models;
+    if (models != null && models.isNotEmpty) return models;
+    return const [
+      AgentModel('', 'Auto (definido pelo Copilot)', isDefault: true),
+    ];
+  }
+
+  @override
+  Future<bool> canResume(String id) => CliAgentBackend._sessionFileExists(
+    p.join(
+      Platform.environment['USERPROFILE'] ?? '',
+      '.copilot',
+      'session-state',
+    ),
+    id,
+  );
+
+  @override
+  Future<void> send(
+    String prompt,
+    List<AgentAttachment> attachments,
+    AgentEventSink emit,
+  ) async {
+    final withInstructions = sessionId == null || _loadedSession == null;
+    await _ensureSession();
+    final images = {
+      for (final a in attachments)
+        if (a.isImage && a.bytes != null) a,
+    };
+    final text = await _composePrompt(
+      prompt,
+      attachments,
+      withInstructions: withInstructions,
+      inline: images,
+    );
+    _emit = emit;
+    _cancelled = false;
+    _streaming = false;
+    Map<String, dynamic> result;
+    try {
+      result = await _request('session/prompt', {
+        'sessionId': sessionId,
+        'prompt': [
+          {'type': 'text', 'text': text},
+          for (final image in images)
+            {
+              'type': 'image',
+              'mimeType': image.mimeType,
+              'data': base64Encode(image.bytes!),
+            },
+        ],
+      });
+    } finally {
+      _emit = null;
+    }
+    final stop = result['stopReason'];
+    if (stop == 'cancelled' || _cancelled) throw AgentException('Cancelado.');
+    if (stop == 'refusal') {
+      throw AgentException('O Copilot recusou a solicitação.');
+    }
+    if (stop == 'max_tokens') {
+      emit(
+        const AgentInfoEvent('Resposta interrompida pelo limite de tokens.'),
       );
     }
   }
+
+  @override
+  Future<void> cancel() async {
+    final session = _loadedSession;
+    if (session == null || _emit == null) return;
+    _cancelled = true;
+    _write({
+      'method': 'session/cancel',
+      'params': {'sessionId': session},
+    });
+  }
+
+  void _closeServer() {
+    final server = _server;
+    _server = null;
+    _loadedSession = null;
+    server?.kill();
+  }
+
+  @override
+  void reset() {
+    sessionId = null;
+    _loadedSession = null;
+  }
+
+  /// Novas opções (modo/esforço) exigem reiniciar o Copilot; a conversa é
+  /// retomada com session/load.
+  @override
+  void refreshSession() => _closeServer();
+
+  @override
+  Future<void> dispose() async => _closeServer();
 }
 
 // ================================================================ Gemini API
@@ -1164,6 +2538,7 @@ class GeminiApiBackend extends AgentBackend {
 
   @override
   Future<String> verify() async {
+    activeModel = model;
     final models = await listModels();
     return 'Chave de API do Google AI Studio válida (${models.length} modelos).';
   }
@@ -1200,6 +2575,17 @@ class GeminiApiBackend extends AgentBackend {
 
   @override
   void reset() => _contents.clear();
+
+  @override
+  Map<String, dynamic> saveState() => {'contents': _contents};
+
+  @override
+  void restoreState(Map<String, dynamic> state) => _contents
+    ..clear()
+    ..addAll([
+      for (final m in (state['contents'] as List? ?? const []).whereType<Map>())
+        Map<String, dynamic>.from(m),
+    ]);
 
   @override
   Future<void> cancel() async {
@@ -1292,7 +2678,6 @@ class GeminiApiBackend extends AgentBackend {
           final call = part['functionCall'] as Map;
           final name = '${call['name']}';
           final input = Map<String, dynamic>.from(call['args'] as Map? ?? {});
-          emit(AgentToolEvent(name, input));
           final result = await callTool(name, input);
           Object? decoded;
           try {

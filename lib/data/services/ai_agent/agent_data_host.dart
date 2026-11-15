@@ -5,7 +5,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/data/services/ai_agent/agent_browser.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_templates.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 
@@ -62,10 +65,69 @@ class AgentDataHost {
           return _undo.length;
         case 'currentSkill':
           return AgentSkills.idForRoute(currentRoute?.call());
+        case 'historyList':
+          return _historyList();
+        case 'historyLoad':
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.reload();
+          return prefs.getString(_historyKey(args['id']));
+        case 'historySave':
+          return _historySave('${args['id']}', '${args['json']}');
+        case 'historyDelete':
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove(_historyKey(args['id']));
+          return true;
       }
       throw MissingPluginException('Método não reconhecido: ${call.method}');
     });
     _channel = channel;
+  }
+
+  // ------------------------------------------------- histórico do agente
+
+  /// As conversas ficam no banco do Gestor e, assim, são sincronizadas com
+  /// os outros computadores pelo arquivo compartilhado.
+  static String _historyKey(Object? id) => '${AgentHistory.keyPrefix}$id';
+
+  Future<List<String>> _historyList() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final result = <String>[];
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(AgentHistory.keyPrefix)) continue;
+      final raw = prefs.getString(key);
+      if (raw == null) continue;
+      try {
+        final json = Map<String, dynamic>.from(jsonDecode(raw) as Map)
+          ..['entries'] = const []
+          ..['state'] = const {};
+        result.add(jsonEncode(json));
+      } catch (_) {}
+    }
+    return result;
+  }
+
+  Future<bool> _historySave(String id, String json) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_historyKey(id), json);
+    // Mantém só as conversas mais recentes.
+    final all = <(String, String)>[];
+    for (final key in prefs.getKeys()) {
+      if (!key.startsWith(AgentHistory.keyPrefix)) continue;
+      try {
+        final data = jsonDecode(prefs.getString(key) ?? '{}') as Map;
+        all.add((key, '${data['updatedAt'] ?? ''}'));
+      } catch (_) {
+        all.add((key, ''));
+      }
+    }
+    if (all.length > AgentHistory.limit) {
+      all.sort((a, b) => b.$2.compareTo(a.$2));
+      for (final old in all.skip(AgentHistory.limit)) {
+        await prefs.remove(old.$1);
+      }
+    }
+    return true;
   }
 
   /// Executa uma ferramenta e devolve o resultado como texto JSON.
@@ -81,6 +143,40 @@ class AgentDataHost {
   }
 
   Future<Object?> _dispatch(String name, Map<String, dynamic> input) async {
+    // Navegador do agente: roda aqui, na janela principal, para continuar
+    // aberto em segundo plano mesmo com a janela do agente fechada.
+    if (name == 'list_templates') {
+      return {
+        'templates': [
+          for (final entry in AgentTemplates.all.entries)
+            {'id': entry.key, 'uso': entry.value},
+        ],
+      };
+    }
+    if (name == 'create_template') {
+      try {
+        return await AgentTemplates.create(
+          '${input['template'] ?? ''}',
+          rows: (input['rows'] as List?)
+              ?.whereType<List>()
+              .map((row) => row.cast<Object?>())
+              .toList(),
+          data: input['data'],
+          folder: input['folder'] as String?,
+          fileName: input['file_name'] as String?,
+          options: Map<String, dynamic>.from(input['options'] as Map? ?? {}),
+        );
+      } on StateError catch (error) {
+        throw _ToolError(error.message);
+      }
+    }
+    if (name.startsWith('browser_')) {
+      try {
+        return await AgentBrowser.instance.run(name, input);
+      } on StateError catch (error) {
+        throw _ToolError(error.message);
+      }
+    }
     final prefs = await SharedPreferences.getInstance();
     switch (name) {
       case 'get_app_context':
@@ -293,6 +389,7 @@ class AgentDataHost {
   static bool _isProtected(String key) {
     final lower = key.toLowerCase();
     return key.startsWith(SharedPreferencesSyncService.metadataPrefix) ||
+        key.startsWith(AgentHistory.keyPrefix) ||
         lower.contains('credential') ||
         lower.contains('password') ||
         lower.contains('senha') ||

@@ -170,7 +170,7 @@ class DiaryAutomationService {
         }
       } catch (error) {
         log?.call(
-          'NÃ£o consegui reconectar ao Edge jÃ¡ aberto; tentando iniciar uma nova sessÃ£o: $error',
+          'Não consegui reconectar ao Edge já aberto; tentando iniciar uma nova sessão: $error',
         );
         _browser = null;
         _page = null;
@@ -1011,7 +1011,7 @@ class DiaryAutomationService {
     try {
       await navigation;
     } on TimeoutException {
-      // Alguns formulÃ¡rios atualizam o conteÃºdo sem trocar a URL.
+      // Alguns formulários atualizam o conteúdo sem trocar a URL.
     }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     return true;

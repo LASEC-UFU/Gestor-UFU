@@ -1,130 +1,221 @@
 import 'package:excel/excel.dart';
 import 'package:gestor_ufu/core/utils/date_calculator.dart';
 
-/// Gera uma planilha-template de exemplo para importação.
+/// Gera a planilha-modelo do Config Moodle no MESMO formato que a importação
+/// lê (e que a exportação produz): "Inicio do Semestre:", "Disciplina:",
+/// "Moodle Course ID:" e o cabeçalho Ordem | Dias Início | … | Tipo …, além
+/// das abas `_Datas Especiais` e `_Trocas de Dia`.
+///
+/// Usado pelo botão "Baixar Planilha Modelo" e pela ferramenta
+/// `create_template` do Agente de IA.
 class TemplateGenerator {
-  static List<int> generateTemplate() {
+  static const headers = [
+    'Ordem',
+    'Dias Início',
+    'Hora Início',
+    'Dias Término',
+    'Hora Término',
+    'Nome',
+    'Tipo',
+    'Modalidade',
+    'Visível',
+    'Descrição Moodle',
+    'Moodle ID',
+    'Moodle Module Name',
+    'Dia Semana Esperado',
+  ];
+
+  /// Linhas de exemplo: uma seção por semana com atividades teóricas e
+  /// práticas, prazos com horário e macros de data.
+  static const exampleRows = <List<Object?>>[
+    [
+      1,
+      0,
+      '',
+      '',
+      '',
+      'Semana 1 - <DD/MM/YYYY> a <DD/MM/YYYY + 6>',
+      'Seção',
+      '',
+      'Sim',
+      'Apresentação da disciplina e do plano de ensino.',
+      '',
+      '',
+      '',
+    ],
+    [
+      '',
+      0,
+      '',
+      '',
+      '',
+      'Aula 1 - Introdução',
+      'Página',
+      'Teórica',
+      'Sim',
+      '',
+      '',
+      '',
+      '',
+    ],
+    [
+      '',
+      1,
+      '',
+      '',
+      '',
+      'Laboratório 1 - Instrumentação',
+      'Página',
+      'Prática',
+      'Sim',
+      '',
+      '',
+      '',
+      2,
+    ],
+    [
+      '',
+      2,
+      '08:00',
+      9,
+      '23:59',
+      'Lista 1 (entrega até <DD/MM/YYYY>AF)',
+      'Tarefa',
+      'Teórica',
+      'Sim',
+      '',
+      '',
+      '',
+      '',
+    ],
+    [
+      2,
+      7,
+      '',
+      '',
+      '',
+      'Semana 2 - <DD/MM/YYYY> a <DD/MM/YYYY + 6>',
+      'Seção',
+      '',
+      'Sim',
+      '',
+      '',
+      '',
+      '',
+    ],
+    [
+      '',
+      0,
+      '',
+      '',
+      '',
+      'Aula 2 - Circuitos de primeira ordem',
+      'Página',
+      'Teórica',
+      'Sim',
+      '',
+      '',
+      '',
+      '',
+    ],
+    [
+      '',
+      0,
+      '19:00',
+      0,
+      '21:00',
+      'Questionário 1',
+      'Questionário',
+      'Teórica',
+      'Não',
+      '',
+      '',
+      '',
+      '',
+    ],
+    [
+      '',
+      0,
+      '',
+      '',
+      '',
+      'Fórum de dúvidas',
+      'Fórum',
+      '',
+      'Stealth',
+      '',
+      '',
+      '',
+      '',
+    ],
+  ];
+
+  /// [rows] substitui os exemplos (cada linha na ordem de [headers]).
+  static List<int> generateTemplate({
+    String sheetName = 'Disciplina',
+    String courseName = 'NOME DA DISCIPLINA NO MOODLE',
+    Object? moodleCourseId,
+    DateTime? semesterStart,
+    List<List<Object?>>? rows,
+    List<DateTime> holidays = const [],
+    Map<DateTime, int> daySwaps = const {},
+  }) {
     final excel = Excel.createExcel();
-    final sheet = excel['Disciplina 2026_1'];
+    final name = sheetName.length > 31 ? sheetName.substring(0, 31) : sheetName;
+    final sheet = excel[name];
+    final start = semesterStart ?? DateTime(DateTime.now().year, 3, 9);
 
-    // Row 0: vazia
-    sheet.appendRow([TextCellValue('')]);
-
-    // Row 1: Inicio do Semestre
     sheet.appendRow([
       TextCellValue(''),
       TextCellValue('Inicio do Semestre:'),
       TextCellValue(''),
       TextCellValue(''),
-      DoubleCellValue(DateCalculator.toExcelSerial(DateTime(2026, 2, 16))),
+      DoubleCellValue(DateCalculator.toExcelSerial(start)),
     ]);
-
-    // Row 2: vazia
-    sheet.appendRow([TextCellValue('')]);
-
-    // Row 3: Dimensão
     sheet.appendRow([
+      TextCellValue('Disciplina:'),
+      TextCellValue(courseName),
       TextCellValue(''),
-      TextCellValue('Dimensão Teórica e Prática'),
+      TextCellValue('Moodle Course ID:'),
+      _cell(moodleCourseId),
     ]);
-
-    // Row 4: vazia
     sheet.appendRow([TextCellValue('')]);
-
-    // Row 5: Headers
-    sheet.appendRow([
-      TextCellValue('Semana'),
-      TextCellValue('Data'),
-      TextCellValue('Modalidade'),
-      TextCellValue('Turma'),
-      TextCellValue('Matéria Lecionada'),
-      TextCellValue(''),
-      TextCellValue('Descrição Moodle'),
-    ]);
-
-    // Dados de exemplo - 3 semanas
-    final baseDate = DateTime(2026, 2, 16);
-
-    // Semana 1
-    _addRow(
-        sheet,
-        '1',
-        baseDate,
-        'Prática',
-        'T',
-        'Aula 01 - Introdução ao Curso',
-        'SEMANA 01 (Inicia: 16/02/2026 e Termina: 23/02/2026).');
-    _addRow(
-        sheet,
-        '',
-        baseDate.add(const Duration(days: 1)),
-        'Teórica',
-        'T e Q',
-        'Plano de Ensino e Normas',
-        'Apresentação do Plano de Ensino (Realizar-se-á: 17/02/2026).');
-    _addRow(
-        sheet,
-        '',
-        baseDate.add(const Duration(days: 2)),
-        'Teórica',
-        'T e Q',
-        'Teoria 01 - Conceitos Básicos',
-        'AA - Questionário sobre Conceitos (inicia: 18/02/2026 e termina: 25/02/2026).');
-
-    // Semana 2
-    _addRow(
-        sheet,
-        '2',
-        baseDate.add(const Duration(days: 7)),
-        'Prática',
-        'T',
-        'Prática 01 - Exercícios Guiados',
-        'SEMANA 02 (Inicia: 23/02/2026 e Termina: 02/03/2026).');
-    _addRow(
-        sheet,
-        '',
-        baseDate.add(const Duration(days: 8)),
-        'Teórica',
-        'T e Q',
-        'Teoria 02 - Aprofundamento',
-        'AT - Avaliação Teórica 01 (Realizar-se-á: 24/02/2026).');
-
-    // Semana 3
-    _addRow(
-        sheet,
-        '3',
-        baseDate.add(const Duration(days: 14)),
-        'Prática',
-        'Q',
-        'Prática 02 - Projeto Integrador',
-        'SEMANA 03 (Inicia: 02/03/2026 e Termina: 09/03/2026).');
-    _addRow(
-        sheet,
-        '',
-        baseDate.add(const Duration(days: 15)),
-        'Teórica',
-        'T e Q',
-        'Teoria 03 - Revisão',
-        'AP - Entrega do Projeto (Realizar-se-á: 03/03/2026).');
-
-    // Remover sheet padrão
-    if (excel.tables.containsKey('Sheet1')) {
-      excel.delete('Sheet1');
+    sheet.appendRow(headers.map(TextCellValue.new).toList());
+    for (final row in rows ?? exampleRows) {
+      sheet.appendRow(row.map(_cell).toList());
     }
 
+    final holidaySheet = excel['_Datas Especiais'];
+    holidaySheet.appendRow([TextCellValue('Data')]);
+    for (final date in holidays) {
+      holidaySheet.appendRow([
+        DoubleCellValue(DateCalculator.toExcelSerial(date)),
+      ]);
+    }
+    final swapSheet = excel['_Trocas de Dia'];
+    swapSheet.appendRow([
+      TextCellValue('Data'),
+      TextCellValue('Dia Semana Efetivo'),
+    ]);
+    for (final entry in daySwaps.entries) {
+      swapSheet.appendRow([
+        DoubleCellValue(DateCalculator.toExcelSerial(entry.key)),
+        IntCellValue(entry.value),
+      ]);
+    }
+
+    if (excel.tables.containsKey('Sheet1') && name != 'Sheet1') {
+      excel.delete('Sheet1');
+    }
     return excel.encode()!;
   }
 
-  static void _addRow(Sheet sheet, String semana, DateTime date,
-      String modalidade, String turma, String materia, String descMoodle) {
-    sheet.appendRow([
-      TextCellValue(semana),
-      DoubleCellValue(DateCalculator.toExcelSerial(date)),
-      TextCellValue(modalidade),
-      TextCellValue(turma),
-      TextCellValue(materia),
-      TextCellValue(''),
-      TextCellValue(descMoodle),
-    ]);
-  }
+  static CellValue _cell(Object? value) => switch (value) {
+    null => TextCellValue(''),
+    final int v => IntCellValue(v),
+    final num v => DoubleCellValue(v.toDouble()),
+    final bool v => BoolCellValue(v),
+    final String v when v.isEmpty => TextCellValue(''),
+    _ => TextCellValue('$value'),
+  };
 }

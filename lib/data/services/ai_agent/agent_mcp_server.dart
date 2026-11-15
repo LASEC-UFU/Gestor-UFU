@@ -8,18 +8,33 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
 typedef AgentToolCaller =
     Future<String> Function(String name, Map<String, dynamic> input);
 
+/// Pergunta ao usuário se uma ferramenta do CLI pode rodar.
+typedef AgentPermissionHandler =
+    Future<bool> Function(String tool, Map<String, dynamic> input);
+
 /// Servidor MCP mínimo (Streamable HTTP, respostas JSON) que expõe as
 /// ferramentas do Gestor UFU para o Claude Code CLI e o Codex CLI. Escuta
 /// apenas em 127.0.0.1 e exige um token aleatório na URL.
 class AgentMcpServer {
-  AgentMcpServer(this._callTool, {this.onToolCall});
+  AgentMcpServer(this._callTool, {this.onPermission});
 
   final AgentToolCaller _callTool;
-  final void Function(String name, Map<String, dynamic> input)? onToolCall;
+
+  /// Usado pelo Claude Code (`--permission-prompt-tool`) para pedir
+  /// aprovação de comandos e edições no chat do Gestor.
+  AgentPermissionHandler? onPermission;
   HttpServer? _server;
   late final String _token = _randomToken();
 
   static const serverName = 'gestor_ufu';
+
+  /// Servidor separado que só expõe a ferramenta de aprovação.
+  static const permissionServerName = 'gestor_ufu_permissao';
+  static const permissionToolName = 'aprovar';
+  static String get permissionToolId =>
+      'mcp__${permissionServerName}__$permissionToolName';
+
+  String get permissionUrl => '$url/permissao';
 
   String get url {
     final server = _server;
@@ -42,7 +57,9 @@ class AgentMcpServer {
   Future<void> _handle(HttpRequest request) async {
     final response = request.response;
     try {
-      if (request.uri.path != '/mcp/$_token') {
+      final base = '/mcp/$_token';
+      final permission = request.uri.path == '$base/permissao';
+      if (request.uri.path != base && !permission) {
         response.statusCode = HttpStatus.notFound;
         return;
       }
@@ -55,7 +72,10 @@ class AgentMcpServer {
       final messages = decoded is List ? decoded : [decoded];
       final replies = <Map<String, dynamic>>[];
       for (final message in messages.whereType<Map>()) {
-        final reply = await _process(Map<String, dynamic>.from(message));
+        final reply = await _process(
+          Map<String, dynamic>.from(message),
+          permission: permission,
+        );
         if (reply != null) replies.add(reply);
       }
       if (replies.isEmpty) {
@@ -79,7 +99,10 @@ class AgentMcpServer {
     }
   }
 
-  Future<Map<String, dynamic>?> _process(Map<String, dynamic> message) async {
+  Future<Map<String, dynamic>?> _process(
+    Map<String, dynamic> message, {
+    bool permission = false,
+  }) async {
     final id = message['id'];
     final method = message['method'] as String?;
     if (id == null) return null; // notificação
@@ -94,10 +117,56 @@ class AgentMcpServer {
         return ok({
           'protocolVersion': params['protocolVersion'] ?? '2025-06-18',
           'capabilities': {'tools': {}},
-          'serverInfo': {'name': serverName, 'version': '1.0.0'},
+          'serverInfo': {
+            'name': permission ? permissionServerName : serverName,
+            'version': '1.0.0',
+          },
         });
       case 'ping':
+      case 'server/discover': // Antigravity pergunta antes do initialize
         return ok({});
+      case 'tools/list' when permission:
+        return ok({
+          'tools': [
+            {
+              'name': permissionToolName,
+              'description': 'Uso interno: aprovação de ferramentas.',
+              'inputSchema': {
+                'type': 'object',
+                'properties': {
+                  'tool_name': {'type': 'string'},
+                  'input': {'type': 'object'},
+                  'tool_use_id': {'type': 'string'},
+                },
+                'required': ['tool_name', 'input'],
+              },
+            },
+          ],
+        });
+      case 'tools/call' when permission:
+        final params = Map<String, dynamic>.from(message['params'] as Map);
+        final args = Map<String, dynamic>.from(
+          params['arguments'] as Map? ?? const {},
+        );
+        final input = Map<String, dynamic>.from(args['input'] as Map? ?? {});
+        final handler = onPermission;
+        final allowed =
+            handler != null && await handler('${args['tool_name']}', input);
+        return ok({
+          'content': [
+            {
+              'type': 'text',
+              'text': jsonEncode(
+                allowed
+                    ? {'behavior': 'allow', 'updatedInput': input}
+                    : {
+                        'behavior': 'deny',
+                        'message': 'O usuário negou esta ação.',
+                      },
+              ),
+            },
+          ],
+        });
       case 'tools/list':
         return ok({
           'tools': [
@@ -115,9 +184,23 @@ class AgentMcpServer {
         final input = Map<String, dynamic>.from(
           params['arguments'] as Map? ?? const {},
         );
-        onToolCall?.call(name, input);
         final result = await _callTool(name, input);
         final isError = result.startsWith('{"error"');
+        // Capturas de tela vão como imagem MCP (o agente "vê" a página).
+        if (result.contains('"image_base64"')) {
+          try {
+            final data = Map<String, dynamic>.from(jsonDecode(result) as Map);
+            final image = data.remove('image_base64');
+            final mime = data.remove('image_mime') ?? 'image/png';
+            return ok({
+              'content': [
+                {'type': 'image', 'data': image, 'mimeType': mime},
+                {'type': 'text', 'text': jsonEncode(data)},
+              ],
+              'isError': false,
+            });
+          } catch (_) {}
+        }
         return ok({
           'content': [
             {'type': 'text', 'text': result},

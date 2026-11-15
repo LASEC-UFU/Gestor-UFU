@@ -1,7 +1,7 @@
 name: gestor_ufu
 description: "Ferramentas acadêmicas UFU, incluindo gestão de disciplinas Moodle."
 publish_to: 'none'
-version: 1.1.40+41
+version: 1.1.41+42
 
 environment:
   sdk: ^3.11.3
@@ -31,6 +31,8 @@ dependencies:
   package_info_plus: ^9.0.1
   desktop_multi_window: 0.3.1
   window_manager: ^0.5.2
+  flutter_markdown_plus: ^1.0.12
+  pasteboard: ^0.5.0
 
 dev_dependencies:
   flutter_test:

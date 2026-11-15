@@ -46,8 +46,8 @@ class SharedPreferencesSyncService extends ChangeNotifier
   String get statusLabel => switch (_status) {
     SharedPreferencesSyncStatus.disconnected => 'Banco local',
     SharedPreferencesSyncStatus.connected => 'Banco compartilhado conectado',
-    SharedPreferencesSyncStatus.conflict => 'Conflito de sincronizaÃ§Ã£o',
-    SharedPreferencesSyncStatus.error => 'Erro de sincronizaÃ§Ã£o',
+    SharedPreferencesSyncStatus.conflict => 'Conflito de sincronização',
+    SharedPreferencesSyncStatus.error => 'Erro de sincronização',
   };
 
   SharedPreferencesSyncService() {
@@ -61,7 +61,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
     _password = await _secureStorage.read(key: _passwordKey);
     if (_password == null || _password!.isEmpty) {
       _setError(
-        'A chave local de criptografia nÃ£o foi encontrada. Reconecte o arquivo compartilhado.',
+        'A chave local de criptografia não foi encontrada. Reconecte o arquivo compartilhado.',
       );
       return;
     }
@@ -75,7 +75,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
         }
       });
     } catch (error) {
-      _setError('NÃ£o foi possÃ­vel sincronizar o banco compartilhado: $error');
+      _setError('Não foi possível sincronizar o banco compartilhado: $error');
     }
   }
 
@@ -90,7 +90,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
     final file = File(filePath);
     if (useSharedFile) {
       if (!await file.exists()) {
-        throw const FileSystemException('O arquivo selecionado nÃ£o existe.');
+        throw const FileSystemException('O arquivo selecionado não existe.');
       }
       final remote = await _readRemote(filePath, password);
       await _applyPreferences(remote.preferences);
@@ -160,7 +160,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
       _error = null;
       _setStatus(SharedPreferencesSyncStatus.connected);
     } catch (error) {
-      _setError('NÃ£o foi possÃ­vel resolver o conflito: $error');
+      _setError('Não foi possível resolver o conflito: $error');
     }
   }
 
@@ -261,7 +261,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
       _error = null;
       _setStatus(SharedPreferencesSyncStatus.connected);
     } catch (error) {
-      _setError('NÃ£o foi possÃ­vel sincronizar o banco compartilhado: $error');
+      _setError('Não foi possível sincronizar o banco compartilhado: $error');
     } finally {
       _busy = false;
     }
@@ -456,7 +456,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
             inner['version'] != _version ||
             inner['preferences'] is! Map) {
           throw const FormatException(
-            'Conte?do do banco compartilhado inv\u00e1lido.',
+            'Conteúdo do banco compartilhado inv\u00e1lido.',
           );
         }
         return _RemoteSnapshot(

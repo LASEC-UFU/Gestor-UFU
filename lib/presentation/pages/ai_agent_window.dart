@@ -1,20 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' show Excel;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pasteboard/pasteboard.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_mcp_server.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
+import 'package:gestor_ufu/presentation/pages/ai_agent_widgets.dart';
 
 /// Abre (ou traz para frente) a janela separada do Agente de IA. A janela é
 /// independente e pode ser arrastada para outro monitor.
@@ -22,8 +29,21 @@ class AiAgentLauncher {
   static WindowController? _controller;
   static bool _opening = false;
 
+  static bool _channelReady = false;
+
   static Future<void> open({String? route}) async {
     final skill = AgentSkills.idForRoute(route);
+    // A janela principal também se registra no canal da janela do agente
+    // (exigência dos canais bidirecionais) para enviar o foco do módulo.
+    if (!_channelReady) {
+      try {
+        await const WindowMethodChannel(
+          _windowChannel,
+          mode: ChannelMode.bidirectional,
+        ).setMethodCallHandler((call) async => null);
+        _channelReady = true;
+      } catch (_) {}
+    }
     final existing = _controller;
     if (existing != null) {
       final windows = await WindowController.getAll();
@@ -71,23 +91,63 @@ class AiAgentWindowApp extends StatelessWidget {
   final String initialSkill;
   final bool isLight;
 
+  ThemeData _theme(Brightness brightness) {
+    final vs = VsColors(brightness == Brightness.dark);
+    return ThemeData(
+      useMaterial3: true,
+      brightness: brightness,
+      fontFamily: 'Segoe UI',
+      colorSchemeSeed: vs.accent,
+      scaffoldBackgroundColor: vs.bg,
+      tooltipTheme: const TooltipThemeData(
+        waitDuration: Duration(milliseconds: 500),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
-    theme: AppTheme.light,
-    darkTheme: AppTheme.dark,
+    theme: _theme(Brightness.light),
+    darkTheme: _theme(Brightness.dark),
     themeMode: isLight ? ThemeMode.light : ThemeMode.dark,
     home: AiAgentPage(initialSkill: initialSkill),
   );
 }
 
-enum _Role { user, agent, tool, info, error }
+class _Approval {
+  _Approval(this.tool, this.input);
+  final String tool;
+  final Map<String, dynamic> input;
+  final completer = Completer<bool>();
+}
 
-class _ChatItem {
-  _ChatItem(this.role, this.text, {this.attachments = const []});
-  final _Role role;
-  final String text;
-  final List<String> attachments;
+/// Estado de um agente (aba). Cada aba roda de forma independente, então
+/// vários agentes podem trabalhar ao mesmo tempo, como no VS Code.
+class _Session {
+  _Session(this.provider, this.conv);
+
+  final AgentProvider provider;
+  AgentConversation conv;
+  AgentBackend? backend;
+  AgentMcpServer? mcp;
+  bool busy = false;
+  bool thinking = false;
+  bool allowAll = false;
+  DateTime? thinkStart;
+  String workWord = 'Pensando…';
+  String? pendingSkillNote;
+
+  /// Transcrição a enviar na próxima mensagem quando a sessão original não
+  /// pode ser retomada (conversa feita em outro computador, por exemplo).
+  String? pendingContext;
+
+  /// Bloco de texto que está recebendo o streaming.
+  AgentEntry? open;
+  final toolEntries = <String, AgentEntry>{};
+  final approvals = <_Approval>[];
+
+  List<AgentEntry> get entries => conv.entries;
 }
 
 class AiAgentPage extends StatefulWidget {
@@ -103,7 +163,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
-  final _items = <_ChatItem>[];
+  final _composerKey = GlobalKey();
   final _attachments = <AgentAttachment>[];
   final _host = const WindowMethodChannel(
     agentToolChannelName,
@@ -111,48 +171,102 @@ class _AiAgentPageState extends State<AiAgentPage> {
   );
 
   AgentSettings _settings = AgentSettings();
-  AgentBackend? _backend;
-  AgentMcpServer? _mcp;
   late String _skill = widget.initialSkill;
-  String? _pendingSkillNote;
   bool _manualSkill = false;
   bool _connecting = false;
-  bool _busy = false;
   int _undoCount = 0;
+
+  static const _workWords = [
+    'Pensando…',
+    'Analisando…',
+    'Ponderando…',
+    'Cozinhando…',
+    'Fervilhando…',
+    'Matutando…',
+    'Elaborando…',
+    'Tramando…',
+  ];
+
+  /// Uma sessão por agente (aba); a janela mostra a da aba selecionada.
+  final _sessions = <AgentProvider, _Session>{};
+  _Session get _s => _sessions.putIfAbsent(
+    _settings.provider,
+    () => _Session(_settings.provider, _newConv()),
+  );
+
+  AgentBackend? get _backend => _s.backend;
+  set _backend(AgentBackend? value) => _s.backend = value;
+  AgentConversation get _conv => _s.conv;
+  set _conv(AgentConversation value) => _s.conv = value;
+  bool get _busy => _s.busy;
+  bool get _thinking => _s.thinking;
+  String get _workWord => _s.workWord;
+  AgentEntry? get _open => _s.open;
+  Map<String, AgentEntry> get _toolEntries => _s.toolEntries;
+  List<_Approval> get _approvals => _s.approvals;
+  set _allowAll(bool value) => _s.allowAll = value;
+  set _pendingSkillNote(String? value) => _s.pendingSkillNote = value;
+
+  /// Histórico (lista "Chats").
+  List<AgentConversation> _recent = [];
+  bool _showHistory = false;
+  bool _showAllRecent = false;
+  final _historySearch = TextEditingController();
 
   /// Modelos da conta conectada, por provedor/modo (carregados após login).
   final _modelCache = <String, List<AgentModel>>{};
   bool _loadingModels = false;
 
-  // Tela de conexão (estilo VS Code).
+  // Tela de conexão.
   String? _loginStatus;
   final _loginLines = <String>[];
   bool _showApiKey = false;
   final _apiKeyInput = TextEditingController();
   bool _hasSavedKey = false;
+  bool _autoConnecting = false;
 
   String get _modelKey => '${_settings.provider.name}.${_settings.mode.name}';
+  List<AgentEntry> get _entries => _conv.entries;
+
+  AgentConversation _newConv() => AgentConversation(
+    id: const Uuid().v4(),
+    provider: _settings.provider.name,
+    mode: _settings.mode.name,
+    skill: _skill,
+  );
 
   @override
   void initState() {
     super.initState();
+    _input.addListener(_onInputChanged);
     unawaited(_init());
   }
 
   Future<void> _init() async {
+    // Canal bidirecional: as duas janelas precisam se registrar para que uma
+    // possa chamar a outra (ferramentas, histórico, navegador…).
+    try {
+      await _host.setMethodCallHandler((call) async => null);
+    } catch (error) {
+      debugPrint('Agente: não registrou o canal do Gestor: $error');
+    }
     await const WindowMethodChannel(
       _windowChannel,
       mode: ChannelMode.bidirectional,
     ).setMethodCallHandler((call) async {
       if (call.method == 'focusSkill' && call.arguments is String) {
-        _changeSkill(call.arguments as String, announce: false);
+        _changeSkill(call.arguments as String);
         return true;
       }
       return null;
     });
     final settings = await AgentSettings.load();
     if (!mounted) return;
-    setState(() => _settings = settings);
+    setState(() {
+      _settings = settings;
+      _conv = _newConv();
+    });
+    unawaited(_reloadRecent());
     await _refreshSavedKey();
     await _autoConnect();
     await _refreshUndo();
@@ -160,26 +274,114 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   @override
   void dispose() {
-    unawaited(_backend?.dispose());
-    unawaited(_mcp?.stop());
+    for (final session in _sessions.values) {
+      for (final approval in session.approvals) {
+        if (!approval.completer.isCompleted) {
+          approval.completer.complete(false);
+        }
+      }
+      unawaited(session.backend?.dispose());
+      unawaited(session.mcp?.stop());
+    }
     _input.dispose();
     _apiKeyInput.dispose();
+    _historySearch.dispose();
     _inputFocus.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  // ------------------------------------------------------------- conexão
+  // ------------------------------------------------------------- ferramentas
 
-  Future<String> _callTool(String name, Map<String, dynamic> input) async {
-    final result = await _host.invokeMethod<String>('tool', {
-      'name': name,
-      'input': jsonEncode(input),
-    });
+  /// Executa uma ferramenta do Gestor para a sessão [s]. Back-ends que não
+  /// relatam as ferramentas têm a chamada mostrada pela janela.
+  AgentToolCaller _toolCaller(_Session s) => (name, input) async {
+    final show = !(s.backend?.reportsTools ?? false);
+    AgentEntry? entry;
+    if (show && mounted) {
+      _closeOpen(s);
+      entry = AgentEntry(
+        AgentEntryKind.tool,
+        '',
+        toolName: name,
+        toolInput: input,
+        running: true,
+      );
+      setState(() => s.entries.add(entry!));
+      if (identical(s, _s)) _scrollToEnd();
+    }
+    String result;
+    try {
+      result =
+          await _host.invokeMethod<String>('tool', {
+            'name': name,
+            'input': jsonEncode(input),
+          }) ??
+          '{"error":"Sem resposta da janela principal."}';
+    } on Object catch (error) {
+      result = jsonEncode({'error': '$error'});
+    }
     if (agentTools.any((t) => t.name == name && t.mutates)) {
       unawaited(_refreshUndo());
     }
-    return result ?? '{"error":"Sem resposta da janela principal."}';
+    // A imagem (captura de tela) vai só para os CLIs, pelo MCP; no chat e
+    // nas APIs fica um resumo em texto.
+    final display = _withoutImage(result);
+    if (entry != null && mounted) {
+      setState(() {
+        entry!
+          ..running = false
+          ..toolResult = display
+          ..toolError = result.startsWith('{"error"');
+      });
+    }
+    return s.backend is CliAgentBackend ? result : display;
+  };
+
+  static String _withoutImage(String result) {
+    if (!result.contains('"image_base64"')) return result;
+    try {
+      final data = Map<String, dynamic>.from(jsonDecode(result) as Map)
+        ..remove('image_base64')
+        ..['image'] = '(captura de tela enviada ao agente)';
+      return jsonEncode(data);
+    } catch (_) {
+      return result;
+    }
+  }
+
+  /// Aprovação no chat (modos Manual, Editar automaticamente, Planejar…).
+  AgentPermissionHandler _permissionFor(_Session s) => (tool, input) async {
+    if (s.allowAll && tool != 'ExitPlanMode') return true;
+    if (!mounted) return false;
+    final approval = _Approval(tool, input);
+    setState(() {
+      _closeOpen(s);
+      s.approvals.add(approval);
+    });
+    if (identical(s, _s)) _scrollToEnd(force: true);
+    return approval.completer.future;
+  };
+
+  void _answer(_Approval approval, bool? allow) {
+    if (allow == null) _allowAll = true;
+    final allowed = allow ?? true;
+    setState(() {
+      _approvals.remove(approval);
+      _entries.add(
+        AgentEntry(
+          AgentEntryKind.info,
+          allowed
+              ? '${agentToolLabel(approval.tool)}: permitido.'
+              : '${agentToolLabel(approval.tool)}: negado.',
+        ),
+      );
+    });
+    if (!approval.completer.isCompleted) approval.completer.complete(allowed);
+    if (approval.tool == 'ExitPlanMode' && allowed) {
+      // Plano aprovado: sai do modo Planejar, como na extensão.
+      unawaited(_setAccess(AgentAccess.acceptEdits, announce: false));
+    }
   }
 
   Future<void> _refreshUndo() async {
@@ -189,10 +391,14 @@ class _AiAgentPageState extends State<AiAgentPage> {
     } catch (_) {}
   }
 
-  Future<AgentBackend> _buildBackend() async {
-    final provider = _settings.provider;
-    final mode = _settings.mode;
+  // ------------------------------------------------------------- conexão
+
+  Future<AgentBackend> _buildBackend(_Session s) async {
+    final provider = s.provider;
+    final mode = _settings.modeFor(provider);
     final model = _settings.modelFor(provider, mode);
+    final callTool = _toolCaller(s);
+    AgentBackend backend;
     if (mode == AgentAuthMode.apiKey) {
       final key = await AgentSettings.readApiKey(provider);
       if (key == null) {
@@ -200,69 +406,87 @@ class _AiAgentPageState extends State<AiAgentPage> {
           'Informe a chave de API do ${provider.label} nas configurações.',
         );
       }
-      return switch (provider) {
+      backend = switch (provider) {
         AgentProvider.claude => ClaudeApiBackend(
           apiKey: key,
           model: model,
-          callTool: _callTool,
+          callTool: callTool,
         ),
         AgentProvider.chatgpt => OpenAiApiBackend(
           apiKey: key,
           model: model,
-          callTool: _callTool,
+          callTool: callTool,
         ),
         AgentProvider.gemini => GeminiApiBackend(
           apiKey: key,
           model: model,
-          callTool: _callTool,
+          callTool: callTool,
+        ),
+        AgentProvider.copilot => throw AgentException(
+          'O GitHub Copilot funciona só com a assinatura (login GitHub).',
         ),
       };
+    } else {
+      // Servidor MCP próprio de cada aba: as ferramentas e aprovações vão
+      // para a conversa certa mesmo com agentes rodando em paralelo.
+      final mcp = s.mcp ??= AgentMcpServer(callTool);
+      mcp.onPermission = _permissionFor(s);
+      await mcp.start();
+      backend = cliBackendFor(
+        provider,
+        mcp: mcp,
+        path: _settings.cliPathFor(provider),
+        model: model,
+      );
     }
-    final mcp = _mcp ??= AgentMcpServer(
-      _callTool,
-      onToolCall: (name, input) {
-        if (mounted) _addTool(name, input);
-      },
-    );
-    await mcp.start();
-    return cliBackendFor(
-      provider,
-      mcp: mcp,
-      path: _settings.cliPathFor(provider),
-      model: model,
-    );
+    return backend
+      ..access = _settings.access
+      ..effort = _settings.effort
+      ..workDir = _settings.workDir
+      ..onPermission = _permissionFor(s)
+      ..systemPrompt = AgentSkills.systemPrompt(_skill);
   }
 
   Future<void> _connect({bool silent = false}) async {
     if (_connecting) return;
+    final s = _s;
     setState(() => _connecting = true);
     try {
-      await _backend?.cancel();
-      final backend = await _buildBackend();
-      final status = await backend.verify();
-      backend.systemPrompt = AgentSkills.systemPrompt(_skill);
-      _pendingSkillNote = null;
+      final previous = s.backend;
+      final state = previous?.saveState();
+      await previous?.cancel();
+      final backend = await _buildBackend(s);
+      await backend.verify();
+      s.pendingSkillNote = null;
+      // Mantém a conversa aberta (troca de modelo) ou retoma do histórico.
+      if (state != null && state.isNotEmpty) {
+        backend.restoreState(state);
+      } else if (s.conv.hasMessages) {
+        await _restoreInto(s, backend, s.conv);
+      }
       _settings.autoConnect = true;
       await _settings.save();
       if (!mounted) return;
-      setState(() => _backend = backend);
-      _info('Conectado: ${backend.label}. $status');
-      unawaited(_loadModels(backend));
+      setState(() {
+        s.backend = backend;
+        if (!s.conv.hasMessages) {
+          s.conv
+            ..provider = s.provider.name
+            ..mode = _settings.modeFor(s.provider).name;
+        }
+      });
+      unawaited(previous?.dispose());
+      if (identical(s, _s)) unawaited(_loadModels(backend));
     } on Object catch (error) {
       if (!mounted) return;
-      setState(() => _backend = null);
+      setState(() => s.backend = null);
       _loginLog('$error');
-      if (!silent || error is! AgentException) {
-        _error('$error');
-      } else {
-        _info('Não foi possível reconectar automaticamente: $error');
-      }
+      if (!silent || error is! AgentException) _error('$error');
     } finally {
       if (mounted) setState(() => _connecting = false);
     }
   }
 
-  /// Consulta os modelos disponíveis para a conta e habilita o seletor.
   Future<void> _loadModels(AgentBackend backend, {bool force = false}) async {
     final key = _modelKey;
     if (!force && _modelCache.containsKey(key)) return;
@@ -271,9 +495,6 @@ class _AiAgentPageState extends State<AiAgentPage> {
       final models = await backend.listModels();
       if (!mounted) return;
       setState(() => _modelCache[key] = models);
-      _info(
-        '${models.length} modelos disponíveis para ${_settings.provider.label}.',
-      );
     } on Object catch (error) {
       _error('Não foi possível listar os modelos: $error');
     } finally {
@@ -282,9 +503,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
   }
 
   /// Conecta sozinho quando o provedor já está logado (CLI) ou tem chave
-  /// salva, como a extensão do VS Code faz ao abrir.
-  bool _autoConnecting = false;
-
+  /// salva; se o CLI estiver instalado mas sem login, abre o navegador.
   Future<void> _autoConnect() async {
     if (!_settings.autoConnect || _backend != null || _connecting) return;
     final provider = _settings.provider;
@@ -295,19 +514,10 @@ class _AiAgentPageState extends State<AiAgentPage> {
       if (_settings.mode == AgentAuthMode.apiKey) {
         ready = await AgentSettings.readApiKey(provider) != null;
       } else {
-        final cli =
-            cliBackendFor(
-                  provider,
-                  mcp: AgentMcpServer((_, _) async => '{}'),
-                  path: _settings.cliPathFor(provider),
-                  model: '',
-                )
-                as CliAgentBackend;
+        final cli = _probe(provider);
         final installed = await cli.isInstalled();
         ready = installed && await cli.isLoggedIn();
-        // Instalado mas sem login: abre direto a tela de login no navegador.
-        // (O Gemini CLI não aceita mais contas pessoais; fica no botão.)
-        needsBrowser = installed && !ready && provider != AgentProvider.gemini;
+        needsBrowser = installed && !ready;
       }
       if (ready && mounted && _settings.provider == provider) {
         await _connect(silent: true);
@@ -319,6 +529,15 @@ class _AiAgentPageState extends State<AiAgentPage> {
       await _browserLogin();
     }
   }
+
+  CliAgentBackend _probe(AgentProvider provider) =>
+      cliBackendFor(
+            provider,
+            mcp: AgentMcpServer((_, _) async => '{}'),
+            path: _settings.cliPathFor(provider),
+            model: '',
+          )
+          as CliAgentBackend;
 
   Future<void> _refreshSavedKey() async {
     final key = await AgentSettings.readApiKey(_settings.provider);
@@ -333,8 +552,6 @@ class _AiAgentPageState extends State<AiAgentPage> {
     });
   }
 
-  /// Fluxo "Entrar com o navegador": instala o CLI se faltar, abre o login
-  /// no navegador quando necessário e conecta ao terminar.
   Future<void> _browserLogin() async {
     if (_connecting) return;
     final provider = _settings.provider;
@@ -345,14 +562,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
       _loginStatus = 'Verificando o ${provider.cliProductName}…';
     });
     await _settings.save();
-    final cli =
-        cliBackendFor(
-              provider,
-              mcp: AgentMcpServer((_, _) async => '{}'),
-              path: _settings.cliPathFor(provider),
-              model: '',
-            )
-            as CliAgentBackend;
+    final cli = _probe(provider);
     try {
       if (!await cli.isInstalled()) {
         setState(
@@ -373,10 +583,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
       await _connect();
     } on Object catch (error) {
       if (mounted) {
-        setState(() {
-          _connecting = false;
-          _loginStatus = null;
-        });
+        setState(() => _connecting = false);
         _loginLog('Erro: $error');
       }
     } finally {
@@ -395,48 +602,105 @@ class _AiAgentPageState extends State<AiAgentPage> {
     });
     await _settings.save();
     await _refreshSavedKey();
+    await _disposeBackend();
     await _connect();
   }
 
+  Future<void> _disposeBackend() async {
+    final backend = _backend;
+    _backend = null;
+    await backend?.cancel();
+    await backend?.dispose();
+  }
+
+  /// Troca de aba. Cada agente mantém a sua sessão (conectado, com a sua
+  /// conversa e até trabalhando), então voltar a ele é imediato.
   Future<void> _selectProvider(AgentProvider provider) async {
-    await _backend?.cancel();
+    if (provider == _settings.provider) {
+      if (_backend == null) await _autoConnect();
+      return;
+    }
+    await _saveConversation();
     setState(() {
       _settings.provider = provider;
-      _backend = null;
       _loginLines.clear();
       _showApiKey = false;
+      _showHistory = false;
     });
     await _settings.save();
     await _refreshSavedKey();
-    await _autoConnect();
+    if (_backend == null) {
+      await _autoConnect();
+    } else {
+      unawaited(_loadModels(_backend!));
+    }
+    _scrollToEnd(force: true);
   }
 
   Future<void> _disconnect() async {
-    await _backend?.cancel();
+    await _saveConversation();
+    await _disposeBackend();
     _settings.autoConnect = false;
     await _settings.save();
-    setState(() => _backend = null);
-    _info('Desconectado.');
+    if (mounted) setState(() {});
   }
 
-  void _changeSkill(String id, {bool announce = true}) {
+  void _changeSkill(String id) {
     if (id == _skill || AgentSkills.byId(id) == null) return;
-    setState(() => _skill = id);
+    setState(() {
+      _skill = id;
+      _conv.skill = id;
+    });
     final skill = AgentSkills.byId(id)!;
     if (_backend != null) {
       _pendingSkillNote =
           '<skill_ativa modulo="${skill.id}">\nO usuário mudou o foco para '
           '"${skill.title}".\n${skill.body}\n</skill_ativa>\n\n';
     }
-    if (announce || _backend != null) _info('Foco: ${skill.title}.');
+  }
+
+  Future<void> _setAccess(AgentAccess access, {bool announce = true}) async {
+    if (access == _settings.access) return;
+    setState(() => _settings.access = access);
+    await _settings.save();
+    for (final session in _sessions.values) {
+      session.backend
+        ?..access = access
+        ..refreshSession();
+    }
+    if (announce) _info('Modo: ${access.label}.');
+  }
+
+  void _cycleAccess() {
+    const order = [
+      AgentAccess.manual,
+      AgentAccess.acceptEdits,
+      AgentAccess.plan,
+      AgentAccess.auto,
+      AgentAccess.bypass,
+      AgentAccess.gestor,
+    ];
+    final next = order[(order.indexOf(_settings.access) + 1) % order.length];
+    unawaited(_setAccess(next));
+  }
+
+  Future<void> _setEffort(String effort) async {
+    setState(() => _settings.effort = effort);
+    await _settings.save();
+    for (final session in _sessions.values) {
+      session.backend
+        ?..effort = effort
+        ..refreshSession();
+    }
   }
 
   // ------------------------------------------------------------- conversa
 
   Future<void> _send() async {
-    final backend = _backend;
+    final s = _s;
+    final backend = s.backend;
     final text = _input.text.trim();
-    if (backend == null || _busy || (text.isEmpty && _attachments.isEmpty)) {
+    if (backend == null || s.busy || (text.isEmpty && _attachments.isEmpty)) {
       return;
     }
     final attachments = List<AgentAttachment>.of(_attachments);
@@ -444,46 +708,147 @@ class _AiAgentPageState extends State<AiAgentPage> {
         ? 'Analise os anexos e proponha como usá-los no Gestor UFU.'
         : text;
     setState(() {
-      _items.add(
-        _ChatItem(
-          _Role.user,
+      _showHistory = false;
+      if (s.conv.title.isEmpty) {
+        final line = prompt.split('\n').first.trim();
+        s.conv.title = line.length > 70 ? '${line.substring(0, 70)}…' : line;
+      }
+      s.entries.add(
+        AgentEntry(
+          AgentEntryKind.user,
           prompt,
-          attachments: attachments.map((a) => a.name).toList(),
+          attachments: [
+            for (final a in attachments)
+              a.dims == null ? a.name : '${a.name} ${a.dims}',
+          ],
         ),
       );
       _attachments.clear();
       _input.clear();
-      _busy = true;
+      s
+        ..busy = true
+        ..thinking = true
+        ..thinkStart = null
+        ..workWord =
+            _workWords[DateTime.now().millisecondsSinceEpoch %
+                _workWords.length];
     });
-    _scrollToEnd();
+    _scrollToEnd(force: true);
     await _followMainWindowModule();
-    final note = _pendingSkillNote;
-    _pendingSkillNote = null;
+    final note = s.pendingSkillNote;
+    final context = s.pendingContext;
+    s.pendingSkillNote = null;
+    s.pendingContext = null;
     try {
-      await backend.send('${note ?? ''}$prompt', attachments, (event) {
-        if (!mounted) return;
-        switch (event) {
-          case AgentTextEvent(:final text):
-            setState(() => _items.add(_ChatItem(_Role.agent, text)));
-          case AgentToolEvent(:final name, :final input):
-            _addTool(name, input);
-          case AgentInfoEvent(:final text):
-            _info(text);
-        }
-        _scrollToEnd();
-      });
+      await backend.send(
+        '${context ?? ''}${note ?? ''}$prompt',
+        attachments,
+        (event) => _onEvent(s, event),
+      );
     } on Object catch (error) {
-      _pendingSkillNote ??= note;
-      _error('$error');
+      s.pendingSkillNote ??= note;
+      s.pendingContext ??= context;
+      final message = '$error';
+      if (mounted) {
+        setState(
+          () => s.entries.add(
+            message == 'Cancelado.'
+                ? AgentEntry(AgentEntryKind.info, 'Interrompido.')
+                : AgentEntry(AgentEntryKind.error, message),
+          ),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      _closeOpen(s);
+      s.thinkStart = null;
+      for (final entry in s.toolEntries.values) {
+        entry.running = false;
+      }
+      s.toolEntries.clear();
+      if (mounted) {
+        setState(() {
+          s
+            ..busy = false
+            ..thinking = false;
+        });
+      }
+      await _rememberActiveModel(s);
+      await _saveConversation(s);
       await _refreshUndo();
-      _inputFocus.requestFocus();
+      if (identical(s, _s)) _inputFocus.requestFocus();
     }
   }
 
-  /// Acompanha o módulo aberto na janela principal, a menos que o usuário
-  /// tenha escolhido o foco manualmente.
+  void _onEvent(_Session s, AgentEvent event) {
+    if (!mounted) return;
+    setState(() {
+      switch (event) {
+        case AgentTextBreakEvent():
+          _closeOpen(s);
+        case AgentTextDeltaEvent(:final text):
+          _flushThought(s);
+          s.thinking = false;
+          var open = s.open;
+          if (open == null) {
+            open = s.open = AgentEntry(AgentEntryKind.agent, '', running: true);
+            s.entries.add(open);
+          }
+          open.buffer.write(text);
+        case AgentTextEvent(:final text):
+          _closeOpen(s);
+          _flushThought(s);
+          s.thinking = false;
+          s.entries.add(AgentEntry(AgentEntryKind.agent, text));
+        case AgentThinkingEvent():
+          s.thinkStart ??= DateTime.now();
+          if (s.open == null) s.thinking = true;
+        case AgentToolEvent(:final id, :final name, :final input):
+          _closeOpen(s);
+          _flushThought(s);
+          s.thinking = false;
+          final entry = AgentEntry(
+            AgentEntryKind.tool,
+            '',
+            toolName: name,
+            toolInput: input,
+            running: true,
+          );
+          s.toolEntries[id] = entry;
+          s.entries.add(entry);
+        case AgentToolResultEvent(:final id, :final result, :final isError):
+          final entry = s.toolEntries.remove(id);
+          if (entry != null) {
+            entry
+              ..running = false
+              ..toolResult = result
+              ..toolError = isError;
+          }
+          s.thinking = true;
+        case AgentInfoEvent(:final text):
+          s.entries.add(AgentEntry(AgentEntryKind.info, text));
+      }
+    });
+    if (identical(s, _s)) _scrollToEnd();
+  }
+
+  /// Registra "Pensou por Xs" quando o raciocínio termina.
+  void _flushThought(_Session s) {
+    final start = s.thinkStart;
+    if (start == null) return;
+    s.thinkStart = null;
+    final seconds = DateTime.now().difference(start).inSeconds;
+    if (seconds >= 1) {
+      s.entries.add(AgentEntry(AgentEntryKind.thought, '$seconds'));
+    }
+  }
+
+  void _closeOpen(_Session s) {
+    final open = s.open;
+    if (open == null) return;
+    open.running = false;
+    s.open = null;
+  }
+
   Future<void> _followMainWindowModule() async {
     if (_manualSkill) return;
     try {
@@ -493,18 +858,207 @@ class _AiAgentPageState extends State<AiAgentPage> {
   }
 
   Future<void> _stop() async {
+    for (final approval in List.of(_approvals)) {
+      if (!approval.completer.isCompleted) approval.completer.complete(false);
+    }
+    setState(_approvals.clear);
     await _backend?.cancel();
-    _info('Solicitação interrompida.');
   }
 
-  void _newConversation() {
+  Future<void> _saveConversation([_Session? session]) async {
+    final s = session ?? _s;
+    if (!s.conv.hasMessages) return;
+    final backend = s.backend;
+    s.conv
+      ..updatedAt = DateTime.now()
+      ..state = backend == null
+          ? s.conv.state
+          : {...backend.saveState(), 'machine': Platform.localHostname};
+    try {
+      await AgentHistory.save(s.conv);
+    } catch (_) {}
+    await _reloadRecent();
+  }
+
+  Future<void> _reloadRecent() async {
+    final list = await AgentHistory.list();
+    if (mounted) setState(() => _recent = list);
+  }
+
+  Future<void> _newConversation() async {
+    if (_busy) return;
+    await _saveConversation();
     _backend?.reset();
-    if (_backend != null) {
-      _backend!.systemPrompt = AgentSkills.systemPrompt(_skill);
+    _backend?.systemPrompt = AgentSkills.systemPrompt(_skill);
+    _s.pendingContext = null;
+    setState(() {
+      _pendingSkillNote = null;
+      _allowAll = false;
+      _approvals.clear();
+      _showHistory = false;
+      _conv = _newConv();
+    });
+    _inputFocus.requestFocus();
+  }
+
+  Future<void> _openConversation(AgentConversation summary) async {
+    if (_busy) return;
+    final loaded = await AgentHistory.load(summary.id);
+    if (loaded == null || !mounted) return;
+    await _saveConversation();
+    final provider = AgentProvider.values.firstWhere(
+      (p) => p.name == loaded.provider,
+      orElse: () => _settings.provider,
+    );
+    if (_sessions[provider]?.busy ?? false) {
+      _info('O ${provider.tabLabel} está trabalhando; aguarde ou pare antes.');
+      return;
     }
-    _pendingSkillNote = null;
-    setState(() => _items.clear());
-    _info('Nova conversa iniciada.');
+    if (provider != _settings.provider) await _selectProvider(provider);
+    if (!mounted) return;
+    setState(() {
+      _showHistory = false;
+      _allowAll = false;
+      _approvals.clear();
+      _conv = loaded;
+      _skill = AgentSkills.byId(loaded.skill) != null ? loaded.skill : _skill;
+    });
+    final backend = _backend;
+    if (backend != null) {
+      backend.systemPrompt = AgentSkills.systemPrompt(_skill);
+      await _restoreInto(_s, backend, loaded);
+    }
+    _scrollToEnd(force: true);
+  }
+
+  /// Retoma [conv] no [backend]: pela própria sessão do agente quando ela
+  /// existe neste computador; senão (outro computador, sessão expirada ou
+  /// outro modo de conexão) pela transcrição enviada na próxima mensagem.
+  Future<void> _restoreInto(
+    _Session s,
+    AgentBackend backend,
+    AgentConversation conv,
+  ) async {
+    backend.reset();
+    s.pendingContext = null;
+    final state = conv.state;
+    final machine = state['machine'];
+    final sameMode = conv.mode == _settings.modeFor(s.provider).name;
+    final sameMachine = machine == null || machine == Platform.localHostname;
+    var native = sameMode && state.keys.any((k) => k != 'machine');
+    if (native && backend is CliAgentBackend) {
+      final id = state['sessionId'];
+      native = sameMachine && id is String && await backend.canResume(id);
+    }
+    if (native) {
+      backend.restoreState(state);
+    } else if (conv.hasMessages) {
+      s.pendingContext =
+          '<historico_da_conversa>\n'
+          'Esta conversa começou antes (possivelmente em outro computador). '
+          'Continue a partir dela; o histórico é:\n'
+          '${conv.transcript()}\n'
+          '</historico_da_conversa>\n\n';
+    }
+  }
+
+  Future<void> _deleteConversation(AgentConversation conversation) async {
+    await AgentHistory.delete(conversation.id);
+    if (conversation.id == _conv.id) {
+      _backend?.reset();
+      setState(() => _conv = _newConv());
+    }
+    await _reloadRecent();
+  }
+
+  Future<void> _exportConversation() async {
+    if (!_conv.hasMessages) {
+      _info('A conversa está vazia.');
+      return;
+    }
+    final buffer = StringBuffer('# ${_conv.title}\n\n');
+    for (final entry in _entries) {
+      switch (entry.kind) {
+        case AgentEntryKind.user:
+          buffer.writeln('**Você:** ${entry.text}\n');
+        case AgentEntryKind.agent:
+          buffer.writeln('${entry.text}\n');
+        case AgentEntryKind.tool:
+          buffer.writeln(
+            '> ${agentToolLabel(entry.toolName ?? '')} '
+            '${agentToolSummary(entry.toolInput)}\n',
+          );
+        case AgentEntryKind.thought:
+          break;
+        case AgentEntryKind.info:
+        case AgentEntryKind.error:
+          buffer.writeln('_${entry.text}_\n');
+      }
+    }
+    final safe = _conv.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Exportar conversa',
+      fileName: '${safe.isEmpty ? 'conversa' : safe}.md',
+    );
+    if (path == null) return;
+    await File(path).writeAsString(buffer.toString());
+    _info('Conversa exportada para $path.');
+  }
+
+  // ------------------------------------------------------------- navegador
+
+  bool _browserRecording = false;
+
+  /// Chama uma ferramenta do navegador do agente (na janela principal).
+  Future<Map<String, dynamic>> _browserTool(
+    String name, [
+    Map<String, dynamic> input = const {},
+  ]) async {
+    try {
+      final raw = await _host.invokeMethod<String>('tool', {
+        'name': name,
+        'input': jsonEncode(input),
+      });
+      final result = Map<String, dynamic>.from(jsonDecode(raw ?? '{}') as Map);
+      if (result['error'] != null) _error('Navegador: ${result['error']}');
+      return result;
+    } on Object catch (error) {
+      _error('Navegador: $error');
+      return const {};
+    }
+  }
+
+  /// O usuário grava o que faz no navegador do agente; ao parar, a gravação
+  /// vira anexo da próxima mensagem (o agente pode reproduzir ou documentar).
+  Future<void> _toggleBrowserRecording() async {
+    if (!_browserRecording) {
+      await _browserTool('browser_open');
+      final result = await _browserTool('browser_record', {'action': 'start'});
+      if (result['recording'] == true) {
+        setState(() => _browserRecording = true);
+      }
+      return;
+    }
+    final result = await _browserTool('browser_record', {'action': 'stop'});
+    setState(() => _browserRecording = false);
+    final events = result['events'];
+    if (events is List && events.isNotEmpty) {
+      setState(
+        () => _attachments.add(
+          AgentAttachment(
+            name: 'gravacao_navegador.json',
+            mimeType: 'text/plain',
+            text: const JsonEncoder.withIndent('  ').convert(events),
+          ),
+        ),
+      );
+      if (_input.text.trim().isEmpty) {
+        _input.text = 'Esta é a gravação do que fiz no navegador. ';
+      }
+      _inputFocus.requestFocus();
+    } else {
+      _info('Nenhuma ação foi gravada no navegador.');
+    }
   }
 
   Future<void> _undo() async {
@@ -518,36 +1072,25 @@ class _AiAgentPageState extends State<AiAgentPage> {
     await _refreshUndo();
   }
 
-  void _addTool(String name, Map<String, dynamic> input) {
-    final key = input['key'] ?? input['module'] ?? input['prefix'] ?? '';
-    final ops = input['operations'] is List
-        ? ' · ${(input['operations'] as List).length} operação(ões)'
-        : '';
-    setState(() => _items.add(_ChatItem(_Role.tool, '$name  $key$ops')));
-    _scrollToEnd();
-  }
-
   void _info(String text) {
     if (!mounted) return;
-    setState(() => _items.add(_ChatItem(_Role.info, text)));
+    setState(() => _entries.add(AgentEntry(AgentEntryKind.info, text)));
     _scrollToEnd();
   }
 
   void _error(String text) {
     if (!mounted) return;
-    setState(() => _items.add(_ChatItem(_Role.error, text)));
+    setState(() => _entries.add(AgentEntry(AgentEntryKind.error, text)));
     _scrollToEnd();
   }
 
-  void _scrollToEnd() {
+  void _scrollToEnd({bool force = false}) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scroll.hasClients) return;
+      final position = _scroll.position;
+      // Só acompanha se o usuário já estava perto do fim.
+      if (!force && position.maxScrollExtent - position.pixels > 220) return;
+      _scroll.jumpTo(position.maxScrollExtent);
     });
   }
 
@@ -560,21 +1103,29 @@ class _AiAgentPageState extends State<AiAgentPage> {
     );
     if (result == null) return;
     for (final file in result.files) {
-      try {
-        final attachment = await _readAttachment(file);
-        setState(() => _attachments.add(attachment));
-      } on Object catch (error) {
-        _error('Não foi possível ler "${file.name}": $error');
-      }
+      await _addFile(file.name, file.path, file.bytes);
     }
   }
 
-  Future<AgentAttachment> _readAttachment(PlatformFile file) async {
+  Future<void> _addFile(String name, String? path, List<int>? bytes) async {
+    try {
+      final attachment = await _readAttachment(name, path, bytes);
+      setState(() => _attachments.add(attachment));
+      unawaited(_measure(attachment));
+    } on Object catch (error) {
+      _error('Não foi possível ler "$name": $error');
+    }
+  }
+
+  Future<AgentAttachment> _readAttachment(
+    String name,
+    String? path,
+    List<int>? data,
+  ) async {
     final bytes =
-        file.bytes ??
-        (file.path != null ? await File(file.path!).readAsBytes() : null);
+        data ?? (path != null ? await File(path).readAsBytes() : null);
     if (bytes == null) throw AgentException('arquivo vazio');
-    final ext = p.extension(file.name).toLowerCase();
+    final ext = p.extension(name).toLowerCase();
     const images = {
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
@@ -584,18 +1135,18 @@ class _AiAgentPageState extends State<AiAgentPage> {
     };
     if (images.containsKey(ext)) {
       return AgentAttachment(
-        name: file.name,
+        name: name,
         mimeType: images[ext]!,
         bytes: bytes,
-        localPath: file.path,
+        localPath: path,
       );
     }
     if (ext == '.pdf') {
       return AgentAttachment(
-        name: file.name,
+        name: name,
         mimeType: 'application/pdf',
         bytes: bytes,
-        localPath: file.path,
+        localPath: path,
       );
     }
     if (ext == '.xlsx') {
@@ -614,7 +1165,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
         }
       }
       return AgentAttachment(
-        name: file.name,
+        name: name,
         mimeType: 'text/plain',
         text: buffer.toString(),
       );
@@ -629,24 +1180,56 @@ class _AiAgentPageState extends State<AiAgentPage> {
       '.htm',
       '.xml',
       '.ics',
+      '.dart',
+      '.py',
+      '.js',
+      '.log',
     };
     if (textExtensions.contains(ext) || ext.isEmpty) {
       return AgentAttachment(
-        name: file.name,
+        name: name,
         mimeType: 'text/plain',
         text: utf8.decode(bytes, allowMalformed: true),
       );
     }
-    throw AgentException(
-      'formato não suportado (use xlsx, csv, txt, json, html, pdf ou imagens)',
+    // Outros formatos: o agente lê pelo caminho (fora do modo "Só o Gestor").
+    return AgentAttachment(
+      name: name,
+      mimeType: 'application/octet-stream',
+      bytes: bytes,
+      localPath: path,
     );
   }
 
-  Future<void> _pasteImageOrText() async {
+  /// Ctrl+V: imagem ou arquivos copiados viram anexos; texto vai para a
+  /// caixa (textos muito longos viram anexo).
+  Future<void> _paste() async {
+    try {
+      final files = await Pasteboard.files();
+      if (files.isNotEmpty) {
+        for (final path in files) {
+          if (await File(path).exists()) {
+            await _addFile(p.basename(path), path, null);
+          }
+        }
+        return;
+      }
+      final image = await Pasteboard.image;
+      if (image != null && image.isNotEmpty) {
+        final count = _attachments.where((a) => a.isImage).length + 1;
+        final attachment = AgentAttachment(
+          name: 'image${count == 1 ? '' : '_$count'}.png',
+          mimeType: 'image/png',
+          bytes: image,
+        );
+        setState(() => _attachments.add(attachment));
+        unawaited(_measure(attachment));
+        return;
+      }
+    } catch (_) {}
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text;
     if (text == null || text.isEmpty) return;
-    // Textos longos colados viram anexo para não poluir a caixa de mensagem.
     if (text.length > 4000) {
       setState(
         () => _attachments.add(
@@ -657,621 +1240,309 @@ class _AiAgentPageState extends State<AiAgentPage> {
           ),
         ),
       );
-    } else {
-      final selection = _input.selection;
-      final start = selection.isValid ? selection.start : _input.text.length;
-      final end = selection.isValid ? selection.end : _input.text.length;
-      _input.value = TextEditingValue(
-        text: _input.text.replaceRange(start, end, text),
-        selection: TextSelection.collapsed(offset: start + text.length),
-      );
+      return;
+    }
+    final selection = _input.selection;
+    final start = selection.isValid ? selection.start : _input.text.length;
+    final end = selection.isValid ? selection.end : _input.text.length;
+    _input.value = TextEditingValue(
+      text: _input.text.replaceRange(start, end, text),
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+  }
+
+  /// Microfone: abre o ditado por voz do Windows (Win+H), que escreve o
+  /// que for falado direto na caixa de mensagem.
+  Future<void> _dictate() async {
+    _inputFocus.requestFocus();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    try {
+      const vkLeftWin = 0x5B;
+      const vkH = 0x48;
+      const keyUp = 0x0002;
+      final user32 = ffi.DynamicLibrary.open('user32.dll');
+      final keybdEvent = user32
+          .lookupFunction<
+            ffi.Void Function(ffi.Uint8, ffi.Uint8, ffi.Uint32, ffi.UintPtr),
+            void Function(int, int, int, int)
+          >('keybd_event');
+      keybdEvent(vkLeftWin, 0, 0, 0);
+      keybdEvent(vkH, 0, 0, 0);
+      keybdEvent(vkH, 0, keyUp, 0);
+      keybdEvent(vkLeftWin, 0, keyUp, 0);
+    } catch (error) {
+      _error('Não foi possível abrir o ditado do Windows: $error');
     }
   }
 
-  // ------------------------------------------------------------- UI
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _toolbar(context),
-            const Divider(height: 1),
-            if (_backend == null)
-              Expanded(child: _connectPanel(context))
-            else ...[
-              Expanded(child: _chat(context)),
-              if (_busy) const LinearProgressIndicator(minHeight: 2),
-              _composer(context),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _toolbar(BuildContext context) {
-    final connected = _backend != null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      child: Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  gradient: AppTheme.primaryGradient,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.smart_toy_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                'Agente de IA',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-          SegmentedButton<AgentProvider>(
-            // Só o ícone de cada provedor; o nome aparece ao passar o mouse.
-            segments: [
-              for (final provider in AgentProvider.values)
-                ButtonSegment(
-                  value: provider,
-                  tooltip: provider.label,
-                  label: ProviderIcon(provider),
-                ),
-            ],
-            showSelectedIcon: false,
-            style: SegmentedButton.styleFrom(
-              minimumSize: const Size(52, 40),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-            ),
-            selected: {_settings.provider},
-            onSelectionChanged: _busy || _connecting
-                ? null
-                : (value) => _selectProvider(value.first),
-          ),
-          if (connected) ...[
-            _modelSelector(),
-            Tooltip(
-              message: '${_backend!.label}\nClique para desconectar.',
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : _disconnect,
-                icon: const Icon(
-                  Icons.check_circle,
-                  color: Colors.green,
-                  size: 18,
-                ),
-                label: Text(
-                  _settings.mode == AgentAuthMode.cli
-                      ? 'Conectado · assinatura'
-                      : 'Conectado · chave de API',
-                ),
-              ),
-            ),
-          ],
-          IconButton(
-            tooltip: 'Configurações do agente (chaves, modelos, login)',
-            onPressed: _busy ? null : _openSettings,
-            icon: const Icon(Icons.tune_rounded),
-          ),
-          const SizedBox(width: 6),
-          DropdownButton<String>(
-            value: _skill,
-            underline: const SizedBox.shrink(),
-            items: [
-              for (final skill in AgentSkills.all)
-                DropdownMenuItem(
-                  value: skill.id,
-                  child: Text('Foco: ${skill.title}'),
-                ),
-            ],
-            onChanged: _busy
-                ? null
-                : (value) {
-                    if (value == null) return;
-                    _manualSkill = true;
-                    _changeSkill(value);
-                  },
-          ),
-          IconButton(
-            tooltip: 'Nova conversa',
-            onPressed: _busy ? null : _newConversation,
-            icon: const Icon(Icons.add_comment_outlined),
-          ),
-          Badge(
-            isLabelVisible: _undoCount > 0,
-            label: Text('$_undoCount'),
-            child: IconButton(
-              tooltip: 'Desfazer a última alteração do agente',
-              onPressed: _busy || _undoCount == 0 ? null : _undo,
-              icon: const Icon(Icons.undo_rounded),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Tela exibida enquanto não há conexão: botão central para entrar pelo
-  /// navegador (como na extensão do VS Code) ou usar uma chave de API.
-  Widget _connectPanel(BuildContext context) {
-    final provider = _settings.provider;
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    if (_autoConnecting || (_connecting && _loginStatus == null)) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ProviderIcon(provider, size: 64),
-            const SizedBox(height: 18),
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(strokeWidth: 3),
-            ),
-            const SizedBox(height: 12),
-            Text('Conectando ao ${provider.label}…'),
-          ],
-        ),
-      );
+  /// "/" no início da caixa abre o menu de ações, como na extensão.
+  void _onInputChanged() {
+    if (_input.text == '/') {
+      _input.clear();
+      unawaited(_openActions());
     }
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ProviderIcon(provider, size: 64),
-              const SizedBox(height: 18),
-              Text(
-                'Agente de IA do Gestor UFU',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Entre com sua conta ${provider.label} para preencher, '
-                'corrigir e copiar dados das funcionalidades do Gestor.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 28),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: FilledButton.icon(
-                  onPressed: _connecting ? null : _browserLogin,
-                  icon: _connecting && _loginStatus != null
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.open_in_browser_rounded),
-                  label: Text('Entrar com ${provider.label} no navegador'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Usa sua assinatura pelo ${provider.cliProductName} '
-                '(instalado automaticamente se necessário).',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              if (provider == AgentProvider.gemini) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Atenção: o Gemini CLI não aceita mais contas Google pessoais '
-                  '(só Gemini Code Assist pago). Para contas pessoais, use a '
-                  'chave de API gratuita do Google AI Studio.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: AppTheme.warning,
-                  ),
-                ),
-              ],
-              if (_loginStatus != null) ...[
-                const SizedBox(height: 16),
-                Text(_loginStatus!, textAlign: TextAlign.center),
-              ],
-              if (_loginLines.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: SelectableText(
-                    _loginLines.join('\n'),
-                    style: const TextStyle(
-                      fontFamily: 'Consolas',
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'ou',
-                      style: TextStyle(color: scheme.onSurfaceVariant),
-                    ),
-                  ),
-                  const Expanded(child: Divider()),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (!_showApiKey)
-                TextButton.icon(
-                  onPressed: _connecting
-                      ? null
-                      : () => setState(() => _showApiKey = true),
-                  icon: const Icon(Icons.key_rounded),
-                  label: const Text('Usar chave de API'),
-                )
-              else ...[
-                TextField(
-                  controller: _apiKeyInput,
-                  obscureText: true,
-                  autofocus: true,
-                  decoration: InputDecoration(
-                    labelText: _hasSavedKey
-                        ? 'Chave de API (salva — preencha para trocar)'
-                        : 'Chave de API do ${provider.label}',
-                    helperText: provider.apiKeyHint,
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onSubmitted: (_) => _connectWithApiKey(),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _connecting ? null : _connectWithApiKey,
-                    icon: const Icon(Icons.login_rounded),
-                    label: Text(
-                      _hasSavedKey
-                          ? 'Conectar com a chave'
-                          : 'Salvar chave e conectar',
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
-  Widget _chat(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return ListView.builder(
-      controller: _scroll,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      itemCount: _items.length,
-      itemBuilder: (context, index) {
-        final item = _items[index];
-        switch (item.role) {
-          case _Role.tool:
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.build_circle_outlined,
-                    size: 16,
-                    color: scheme.primary,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      item.text,
-                      style: TextStyle(
-                        fontFamily: 'Consolas',
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          case _Role.info:
-          case _Role.error:
-            final isError = item.role == _Role.error;
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    isError ? Icons.error_outline : Icons.info_outline,
-                    size: 16,
-                    color: isError ? scheme.error : scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: SelectableText(
-                      item.text,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isError ? scheme.error : scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          case _Role.user:
-          case _Role.agent:
-            final isUser = item.role == _Role.user;
-            return Align(
-              alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 760),
-                margin: const EdgeInsets.symmetric(vertical: 6),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isUser
-                      ? scheme.primaryContainer
-                      : scheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (item.attachments.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Wrap(
-                          spacing: 6,
-                          children: [
-                            for (final name in item.attachments)
-                              Chip(
-                                visualDensity: VisualDensity.compact,
-                                avatar: const Icon(Icons.attach_file, size: 14),
-                                label: Text(name),
-                              ),
-                          ],
-                        ),
-                      ),
-                    SelectableText(item.text),
-                  ],
-                ),
-              ),
-            );
-        }
-      },
-    );
+  // ------------------------------------------------------------- menus
+
+  double get _paletteBottom {
+    final box = _composerKey.currentContext?.findRenderObject() as RenderBox?;
+    return (box?.size.height ?? 110) + 4;
   }
 
-  Widget _composer(BuildContext context) {
-    final enabled = _backend != null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_attachments.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final attachment in List.of(_attachments))
-                    InputChip(
-                      avatar: Icon(
-                        attachment.isImage
-                            ? Icons.image_outlined
-                            : attachment.isPdf
-                            ? Icons.picture_as_pdf_outlined
-                            : Icons.description_outlined,
-                        size: 16,
-                      ),
-                      label: Text(attachment.name),
-                      onDeleted: () =>
-                          setState(() => _attachments.remove(attachment)),
-                    ),
-                ],
-              ),
-            ),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              IconButton(
-                tooltip:
-                    'Anexar arquivos (xlsx, csv, txt, json, html, pdf, imagens)',
-                onPressed: enabled && !_busy ? _pickFiles : null,
-                icon: const Icon(Icons.attach_file_rounded),
-              ),
-              Expanded(
-                child: CallbackShortcuts(
-                  bindings: {
-                    const SingleActivator(LogicalKeyboardKey.enter): _send,
-                    const SingleActivator(
-                      LogicalKeyboardKey.keyV,
-                      control: true,
-                    ): _pasteImageOrText,
-                  },
-                  child: TextField(
-                    controller: _input,
-                    focusNode: _inputFocus,
-                    enabled: enabled,
-                    minLines: 1,
-                    maxLines: 8,
-                    keyboardType: TextInputType.multiline,
-                    decoration: InputDecoration(
-                      hintText: enabled
-                          ? 'Peça ao agente para preencher, corrigir ou copiar '
-                                'dados… (Enter envia, Shift+Enter quebra linha)'
-                          : 'Conecte-se ao Claude ou ao ChatGPT para começar.',
-                      border: const OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (_busy)
-                IconButton.filledTonal(
-                  tooltip: 'Interromper',
-                  onPressed: _stop,
-                  icon: const Icon(Icons.stop_rounded),
-                )
-              else
-                IconButton.filled(
-                  tooltip: 'Enviar',
-                  onPressed: enabled ? _send : null,
-                  icon: const Icon(Icons.send_rounded),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _modelLabel(String model) =>
-      model.isEmpty ? 'Modelo padrão do CLI' : model;
-
-  /// Seletor do modelo do provedor/modo atuais. Sugestões + "Outro modelo…"
-  /// para digitar qualquer nome (ex.: um modelo novo ainda não listado).
-  Widget _modelSelector() {
+  String get _modelLabel {
+    final active = _backend?.activeModel ?? _settings.models['seen.$_modelKey'];
+    if (active != null && active.isNotEmpty) return _prettyModel(active);
     final provider = _settings.provider;
-    final mode = _settings.mode;
-    final current = _settings.modelFor(provider, mode);
-    final backend = _backend;
-    final models = _modelCache[_modelKey];
-    final ready = backend != null && models != null;
-    const other = '\u0000outro';
-    const refresh = '\u0000atualizar';
-    String labelFor(String id) {
-      for (final model in models ?? const <AgentModel>[]) {
-        if (model.id == id) return model.label;
+    final current = _settings.modelFor(provider, _settings.mode);
+    for (final model in _modelCache[_modelKey] ?? const <AgentModel>[]) {
+      if (model.id == current) {
+        return model.label.split('  ·  ').first;
       }
-      return _modelLabel(id);
     }
+    return current.isEmpty ? 'Padrão' : current;
+  }
 
-    return PopupMenuButton<String>(
-      tooltip: ready
-          ? 'Modelo do ${provider.label}'
-          : 'Conecte para ver os modelos disponíveis na sua conta',
-      enabled: ready && !_busy && !_connecting,
-      onSelected: (value) async {
-        if (value == refresh) {
-          await _loadModels(backend!, force: true);
-          return;
-        }
-        if (value == other) {
-          final typed = await _askModelName(provider, current);
-          if (typed == null) return;
-          value = typed;
-        }
-        await _setModel(value);
-      },
-      itemBuilder: (context) => [
-        for (final model in models ?? const <AgentModel>[])
-          CheckedPopupMenuItem(
-            value: model.id,
-            checked: model.id == current,
-            child: Text(
-              model.isDefault && model.id.isNotEmpty
-                  ? '${model.label}  (padrão)'
-                  : model.label,
-            ),
-          ),
-        if (!(models ?? const <AgentModel>[]).any((m) => m.id == current))
-          CheckedPopupMenuItem(
-            value: current,
-            checked: true,
-            child: Text(_modelLabel(current)),
-          ),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: other,
-          child: Row(
-            children: [
-              Icon(Icons.edit_outlined, size: 18),
-              SizedBox(width: 10),
-              Text('Outro modelo…'),
-            ],
-          ),
+  /// "claude-opus-5-5" → "Opus 5.5"; outros pelo nome da lista de modelos.
+  String _prettyModel(String id) {
+    for (final model in _modelCache[_modelKey] ?? const <AgentModel>[]) {
+      if (model.id == id && id.isNotEmpty) {
+        return model.label.split('  ·  ').first;
+      }
+    }
+    final match = RegExp(
+      r'^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-|$)',
+    ).firstMatch(id);
+    if (match != null) {
+      final name = match[1]!;
+      return '${name[0].toUpperCase()}${name.substring(1)} ${match[2]}'
+          '${match[3] != null ? '.${match[3]}' : ''}';
+    }
+    return id;
+  }
+
+  /// Lembra o último modelo usado para mostrar o nome desde a abertura.
+  Future<void> _rememberActiveModel(_Session s) async {
+    final active = s.backend?.activeModel;
+    final key = 'seen.${s.provider.name}.${_settings.modeFor(s.provider).name}';
+    if (active == null || active.isEmpty || _settings.models[key] == active) {
+      return;
+    }
+    _settings.models[key] = active;
+    await _settings.save();
+  }
+
+  /// Lê as dimensões das imagens anexadas ("382×447").
+  Future<void> _measure(AgentAttachment attachment) async {
+    final bytes = attachment.bytes;
+    if (!attachment.isImage || bytes == null) return;
+    try {
+      final codec = await ui.instantiateImageCodec(Uint8List.fromList(bytes));
+      final frame = await codec.getNextFrame();
+      attachment.dims = '${frame.image.width}×${frame.image.height}';
+      frame.image.dispose();
+      if (mounted) setState(() {});
+    } catch (_) {}
+  }
+
+  Widget _effortItem(BuildContext context, VoidCallback refresh) => EffortRow(
+    value: _settings.effort,
+    icon: true,
+    onChanged: (value) async {
+      await _setEffort(value);
+      refresh();
+    },
+  );
+
+  Future<void> _openActions() => showPalette(
+    context,
+    bottom: _paletteBottom,
+    items: () {
+      final skill = AgentSkills.byId(_skill);
+      return [
+        PaletteItem(
+          section: 'Contexto',
+          label: 'Anexar arquivo…',
+          onSelect: _pickFiles,
         ),
-        const PopupMenuItem(
-          value: refresh,
-          child: Row(
-            children: [
-              Icon(Icons.refresh_rounded, size: 18),
-              SizedBox(width: 10),
-              Text('Atualizar lista'),
-            ],
+        PaletteItem(
+          section: 'Contexto',
+          label: 'Colar imagem ou arquivo copiado',
+          onSelect: _paste,
+        ),
+        PaletteItem(
+          section: 'Contexto',
+          label: 'Limpar conversa',
+          onSelect: _newConversation,
+        ),
+        PaletteItem(
+          section: 'Contexto',
+          label: 'Histórico de conversas',
+          trailing: '${_recent.length}',
+          onSelect: () => setState(() => _showHistory = true),
+        ),
+        PaletteItem(
+          section: 'Contexto',
+          label: 'Exportar conversa',
+          onSelect: _exportConversation,
+        ),
+        PaletteItem(
+          section: 'Modelo',
+          label: 'Trocar modelo…',
+          trailing: _modelLabel,
+          onSelect: _openModels,
+        ),
+        PaletteItem(section: 'Modelo', label: 'Esforço', builder: _effortItem),
+        PaletteItem(
+          section: 'Modo',
+          label: 'Modo de permissão…',
+          trailing: _settings.access.label,
+          onSelect: _openModes,
+        ),
+        PaletteItem(
+          section: 'Gestor UFU',
+          label: 'Foco do agente…',
+          trailing: skill?.title ?? '',
+          onSelect: _openSkills,
+        ),
+        PaletteItem(
+          section: 'Gestor UFU',
+          label: 'Desfazer a última alteração do agente',
+          trailing: _undoCount > 0 ? '$_undoCount' : 'nada',
+          onSelect: _undoCount > 0 ? _undo : null,
+        ),
+        PaletteItem(
+          section: 'Navegador',
+          label: 'Abrir navegador do agente',
+          onSelect: () => _browserTool('browser_open'),
+        ),
+        PaletteItem(
+          section: 'Navegador',
+          label: _browserRecording
+              ? 'Parar gravação e anexar as ações'
+              : 'Gravar minhas ações no navegador',
+          onSelect: _toggleBrowserRecording,
+        ),
+        PaletteItem(
+          section: 'Navegador',
+          label: 'Fechar navegador do agente',
+          onSelect: () => _browserTool('browser_close'),
+        ),
+        for (final provider in AgentProvider.values)
+          PaletteItem(
+            section: 'Agente',
+            label: provider.tabLabel,
+            checked: provider == _settings.provider,
+            onSelect: () => _selectProvider(provider),
           ),
+        PaletteItem(
+          section: 'Conta',
+          label: 'Configurações do agente…',
+          onSelect: _openSettings,
+        ),
+        if (_settings.provider != AgentProvider.copilot)
+          PaletteItem(
+            section: 'Conta',
+            label: _settings.mode == AgentAuthMode.cli
+                ? 'Usar chave de API'
+                : 'Usar assinatura (${_settings.provider.cliProductName})',
+            onSelect: () async {
+              if (_settings.mode == AgentAuthMode.cli) {
+                await _disconnect();
+                setState(() => _showApiKey = true);
+              } else {
+                await _disposeBackend();
+                await _browserLogin();
+              }
+            },
+          ),
+        PaletteItem(
+          section: 'Conta',
+          label: 'Desconectar',
+          onSelect: _disconnect,
+        ),
+      ];
+    },
+  );
+
+  Future<void> _openModes() => showPalette(
+    context,
+    bottom: _paletteBottom,
+    filter: false,
+    width: 360,
+    title: 'Modos',
+    hint: 'Shift + Tab para alternar',
+    items: () => [
+      for (final access in AgentAccess.values)
+        PaletteItem(
+          section: '',
+          label: access.label,
+          subtitle: access.description,
+          icon: access.icon,
+          checked: access == _settings.access,
+          onSelect: () => _setAccess(access),
+        ),
+      PaletteItem(section: ' ', label: 'Esforço', builder: _effortItem),
+    ],
+  );
+
+  Future<void> _openModels() async {
+    final backend = _backend;
+    if (backend == null) return;
+    if (!_modelCache.containsKey(_modelKey)) await _loadModels(backend);
+    if (!mounted) return;
+    final provider = _settings.provider;
+    final current = _settings.modelFor(provider, _settings.mode);
+    await showPalette(
+      context,
+      bottom: _paletteBottom,
+      width: 420,
+      items: () => [
+        for (final model in _modelCache[_modelKey] ?? const <AgentModel>[])
+          PaletteItem(
+            section: 'Modelos da sua conta',
+            label: model.label.split('  ·  ').first,
+            trailing: model.isDefault && model.id.isNotEmpty
+                ? 'padrão'
+                : (model.label.contains('  ·  ') ? model.id : null),
+            checked: model.id == current,
+            onSelect: () => _setModel(model.id),
+          ),
+        PaletteItem(section: 'Modelo', label: 'Esforço', builder: _effortItem),
+        PaletteItem(
+          section: 'Modelo',
+          label: 'Outro modelo…',
+          onSelect: () async {
+            final typed = await _askModelName(provider, current);
+            if (typed != null) await _setModel(typed);
+          },
+        ),
+        PaletteItem(
+          section: 'Modelo',
+          label: 'Atualizar lista',
+          onSelect: () => _loadModels(backend, force: true),
         ),
       ],
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_loadingModels)
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else
-              Icon(
-                Icons.memory_rounded,
-                size: 18,
-                color: ready ? null : Theme.of(context).disabledColor,
-              ),
-            const SizedBox(width: 6),
-            Text(
-              ready ? labelFor(current) : 'Modelo (conecte primeiro)',
-              style: ready
-                  ? null
-                  : TextStyle(color: Theme.of(context).disabledColor),
-            ),
-            const Icon(Icons.arrow_drop_down),
-          ],
-        ),
-      ),
     );
   }
+
+  Future<void> _openSkills() => showPalette(
+    context,
+    bottom: _paletteBottom,
+    width: 420,
+    items: () => [
+      for (final skill in AgentSkills.all)
+        PaletteItem(
+          section: 'Foco do agente no Gestor',
+          label: skill.title,
+          checked: skill.id == _skill,
+          onSelect: () {
+            _manualSkill = true;
+            _changeSkill(skill.id);
+          },
+        ),
+    ],
+  );
 
   Future<String?> _askModelName(AgentProvider provider, String current) async {
     final controller = TextEditingController(text: current);
@@ -1313,16 +1584,13 @@ class _AiAgentPageState extends State<AiAgentPage> {
     final provider = _settings.provider;
     final mode = _settings.mode;
     if (model == _settings.modelFor(provider, mode)) return;
-    setState(() => _settings.setModel(provider, mode, model));
+    setState(() {
+      _settings.setModel(provider, mode, model);
+      _settings.models.remove('seen.$_modelKey');
+    });
     await _settings.save();
-    _info(
-      'Modelo do ${provider.label}: ${_modelLabel(_settings.modelFor(provider, mode))}.',
-    );
-    // Reconecta para aplicar o modelo (inicia uma nova conversa).
-    if (_backend != null) {
-      setState(() => _backend = null);
-      await _connect();
-    }
+    // Recria o back-end com o novo modelo mantendo a conversa.
+    if (_backend != null) await _connect();
   }
 
   Future<void> _openSettings() async {
@@ -1332,9 +1600,745 @@ class _AiAgentPageState extends State<AiAgentPage> {
     );
     if (saved == true) {
       await _settings.save();
-      setState(() => _backend = null);
-      _info('Configurações salvas. Clique em Conectar.');
+      if (_backend != null) await _connect();
     }
+  }
+
+  // ------------------------------------------------------------- UI
+
+  @override
+  Widget build(BuildContext context) {
+    final vs = VsColors.of(context);
+    final connected = _backend != null;
+    return Scaffold(
+      backgroundColor: vs.bg,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _tabs(vs),
+            _header(vs),
+            Expanded(
+              child: _showHistory
+                  ? _historyView(vs)
+                  : !connected
+                  ? _connectPanel(context)
+                  : _entries.isEmpty && _approvals.isEmpty
+                  ? _emptyState(vs)
+                  : _chat(vs),
+            ),
+            if (connected) _composer(vs),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Abas no topo, como "Chat · Codex · Claude Code" do VS Code.
+  Widget _tabs(VsColors vs) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+    child: Row(
+      children: [
+        for (final provider in AgentProvider.values)
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(5),
+              onTap: _connecting ? null : () => _selectProvider(provider),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: provider == _settings.provider ? vs.tab : null,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      provider.tabLabel,
+                      style: TextStyle(fontSize: 13, color: vs.text),
+                    ),
+                    // Agente trabalhando em segundo plano nesta aba.
+                    if (_sessions[provider]?.busy ?? false) ...[
+                      const SizedBox(width: 6),
+                      const PulsingDot(color: Color(0xFFD97757)),
+                    ] else if ((_sessions[provider]?.approvals.isNotEmpty ??
+                        false)) ...[
+                      const SizedBox(width: 6),
+                      TimelineDot(vs.accent),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        const Spacer(),
+        if (_undoCount > 0)
+          Badge(
+            label: Text('$_undoCount'),
+            child: VsIconButton(
+              icon: Icons.undo_rounded,
+              tooltip: 'Desfazer a última alteração do agente no Gestor',
+              onPressed: _busy ? null : _undo,
+            ),
+          ),
+        VsIconButton(
+          icon: Icons.settings_outlined,
+          tooltip: 'Configurações do agente',
+          onPressed: _busy ? null : _openSettings,
+        ),
+      ],
+    ),
+  );
+
+  Widget _header(VsColors vs) {
+    final title = _showHistory
+        ? 'Histórico'
+        : _conv.title.isNotEmpty
+        ? _conv.title
+        : 'Agente de IA no GestorUFU';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 10, 6),
+      child: Row(
+        children: [
+          if (_showHistory)
+            VsIconButton(
+              icon: Icons.arrow_back_rounded,
+              tooltip: 'Voltar',
+              onPressed: () => setState(() => _showHistory = false),
+            ),
+          Expanded(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: vs.text,
+              ),
+            ),
+          ),
+          VsIconButton(
+            icon: Icons.access_time_rounded,
+            tooltip: 'Histórico de conversas',
+            onPressed: () => setState(() => _showHistory = !_showHistory),
+          ),
+          VsIconButton(
+            icon: Icons.add_circle_outline_rounded,
+            tooltip: 'Nova conversa',
+            onPressed: _busy ? null : _newConversation,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Tela inicial (sem mensagens): lista "Chats" e o logo esmaecido.
+  Widget _emptyState(VsColors vs) {
+    final shown = _showAllRecent ? _recent : _recent.take(3).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_recent.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
+            child: Text(
+              'Chats',
+              style: TextStyle(fontSize: 12, color: vs.muted),
+            ),
+          ),
+          Flexible(
+            flex: _showAllRecent ? 3 : 0,
+            child: ListView(
+              shrinkWrap: true,
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              children: [
+                for (final c in shown)
+                  ConversationTile(
+                    conversation: c,
+                    onOpen: () => _openConversation(c),
+                    onDelete: () => _deleteConversation(c),
+                  ),
+                if (_recent.length > 3)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                    child: InkWell(
+                      onTap: () =>
+                          setState(() => _showAllRecent = !_showAllRecent),
+                      child: Text(
+                        _showAllRecent
+                            ? 'Mostrar menos'
+                            : 'Exibir tudo (${_recent.length})',
+                        style: TextStyle(fontSize: 11.5, color: vs.muted),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        Expanded(
+          flex: 4,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Opacity(
+                  opacity: 0.35,
+                  child: ProviderIcon(_settings.provider, size: 46),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Peça para preencher, corrigir ou copiar dados do Gestor,\n'
+                  'pesquisar na web ou analisar arquivos anexados.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12.5, color: vs.muted),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Digite / para ver as ações.',
+                  style: TextStyle(fontSize: 12, color: vs.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _historyView(VsColors vs) {
+    final query = _historySearch.text.trim().toLowerCase();
+    final list = [
+      for (final c in _recent)
+        if (query.isEmpty || c.title.toLowerCase().contains(query)) c,
+    ];
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: TextField(
+            controller: _historySearch,
+            autofocus: true,
+            onChanged: (_) => setState(() {}),
+            style: TextStyle(fontSize: 13, color: vs.text),
+            decoration: InputDecoration(
+              hintText: 'Pesquisar conversas…',
+              isDense: true,
+              prefixIcon: Icon(Icons.search, size: 18, color: vs.muted),
+              filled: true,
+              fillColor: vs.card,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: vs.border),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(6),
+                borderSide: BorderSide(color: vs.border),
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: list.isEmpty
+              ? Center(
+                  child: Text(
+                    'Nenhuma conversa.',
+                    style: TextStyle(color: vs.muted),
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  children: [
+                    for (final c in list)
+                      ConversationTile(
+                        conversation: c,
+                        active: c.id == _conv.id,
+                        onOpen: () => _openConversation(c),
+                        onDelete: () => _deleteConversation(c),
+                      ),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _chat(VsColors vs) {
+    final showThinking =
+        _busy &&
+        _approvals.isEmpty &&
+        (_thinking ||
+            (_open == null && !_toolEntries.values.any((e) => e.running)));
+    final count = _entries.length + _approvals.length + (showThinking ? 1 : 0);
+    bool isUser(int index) =>
+        index < _entries.length && _entries[index].kind == AgentEntryKind.user;
+    return SelectionArea(
+      child: ListView.builder(
+        controller: _scroll,
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+        itemCount: count,
+        itemBuilder: (context, index) {
+          if (isUser(index)) return UserBubble(_entries[index]);
+          final above = index > 0 && !isUser(index - 1);
+          final below = index < count - 1 && !isUser(index + 1);
+          Widget item(Widget dot, Widget child) => TimelineItem(
+            dot: dot,
+            lineAbove: above,
+            lineBelow: below,
+            dotTop: 10,
+            child: child,
+          );
+          if (index < _entries.length) {
+            final entry = _entries[index];
+            return switch (entry.kind) {
+              AgentEntryKind.user => UserBubble(entry),
+              AgentEntryKind.agent => item(
+                TimelineDot(vs.text.withValues(alpha: 0.55)),
+                AgentMessage(entry),
+              ),
+              AgentEntryKind.tool => item(
+                entry.running
+                    ? PulsingDot(color: vs.muted)
+                    : TimelineDot(entry.toolError ? vs.error : vs.success),
+                ToolRow(entry),
+              ),
+              AgentEntryKind.thought => item(
+                TimelineDot(vs.muted.withValues(alpha: 0.7)),
+                Text(
+                  'Pensou por ${entry.text}s',
+                  style: TextStyle(fontSize: 13, color: vs.muted),
+                ),
+              ),
+              AgentEntryKind.info => item(
+                TimelineDot(vs.muted.withValues(alpha: 0.5)),
+                Text(
+                  entry.text,
+                  style: TextStyle(fontSize: 12.5, color: vs.muted),
+                ),
+              ),
+              AgentEntryKind.error => item(
+                TimelineDot(vs.error),
+                Text(
+                  entry.text,
+                  style: TextStyle(fontSize: 12.5, color: vs.error),
+                ),
+              ),
+            };
+          }
+          final approvalIndex = index - _entries.length;
+          if (approvalIndex < _approvals.length) {
+            final approval = _approvals[approvalIndex];
+            return item(
+              PulsingDot(color: vs.accent),
+              ApprovalCard(
+                tool: approval.tool,
+                input: approval.input,
+                onAnswer: (allow) => _answer(approval, allow),
+              ),
+            );
+          }
+          return item(
+            const PulsingDot(color: Color(0xFFD97757)),
+            ThinkingIndicator(label: _workWord),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Caixa de mensagem no estilo da extensão: texto, anexos e a barra com
+  /// +, /, modelo, modo e enviar.
+  Widget _composer(VsColors vs) {
+    final provider = _settings.provider;
+    final skill = AgentSkills.byId(_skill);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: Container(
+          key: _composerKey,
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+          decoration: BoxDecoration(
+            color: vs.card,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: vs.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: vs.dark ? 0.35 : 0.08),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_attachments.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final attachment in List.of(_attachments))
+                        AttachmentPill(
+                          name: attachment.name,
+                          detail: attachment.dims,
+                          onRemove: () =>
+                              setState(() => _attachments.remove(attachment)),
+                        ),
+                    ],
+                  ),
+                ),
+              CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.enter): _send,
+                  const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+                      _paste,
+                  const SingleActivator(LogicalKeyboardKey.tab, shift: true):
+                      _cycleAccess,
+                  const SingleActivator(LogicalKeyboardKey.escape): () {
+                    if (_busy) unawaited(_stop());
+                  },
+                },
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _input,
+                        focusNode: _inputFocus,
+                        autofocus: true,
+                        minLines: 1,
+                        maxLines: 10,
+                        keyboardType: TextInputType.multiline,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: vs.text,
+                          height: 1.4,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Peça qualquer coisa',
+                          hintStyle: TextStyle(color: vs.muted),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.fromLTRB(
+                            12,
+                            12,
+                            12,
+                            8,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 5, 6, 0),
+                      child: VsIconButton(
+                        icon: Icons.mic_none_rounded,
+                        tooltip: 'Ditado por voz (Win+H)',
+                        onPressed: _dictate,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: vs.border.withValues(alpha: 0.6)),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
+                child: Row(
+                  children: [
+                    VsIconButton(
+                      icon: Icons.add_rounded,
+                      tooltip: 'Anexar arquivo (ou cole com Ctrl+V)',
+                      onPressed: _busy ? null : _pickFiles,
+                    ),
+                    Tooltip(
+                      message: 'Ações (/)',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: _openActions,
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Container(
+                            width: 15,
+                            height: 15,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: vs.text.withValues(alpha: 0.85),
+                                width: 1.3,
+                              ),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                            child: Text(
+                              '/',
+                              style: TextStyle(
+                                fontSize: 10,
+                                height: 1,
+                                fontWeight: FontWeight.w700,
+                                color: vs.text.withValues(alpha: 0.85),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Chips do meio ocupam o espaço livre e encolhem com
+                    // reticências; modo e enviar ficam sempre colados à
+                    // direita.
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: ComposerChip(
+                              label: _loadingModels
+                                  ? 'Carregando modelos…'
+                                  : '$_modelLabel'
+                                        '${_settings.effort.isEmpty ? '' : ' ${AgentSettings.effortLabel(_settings.effort)}'}',
+                              filled: true,
+                              tooltip: 'Modelo e esforço',
+                              onTap: _busy ? null : _openModels,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          if (skill != null)
+                            Flexible(
+                              child: ComposerChip(
+                                label: skill.title.split(' (').first,
+                                icon: Icons.center_focus_strong_outlined,
+                                tooltip: 'Foco do agente: ${skill.title}',
+                                onTap: _openSkills,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    if (_browserRecording) ...[
+                      ComposerChip(
+                        label: 'Gravando',
+                        icon: Icons.fiber_manual_record_rounded,
+                        iconColor: const Color(0xFFE5484D),
+                        tooltip: 'Parar a gravação do navegador e anexar',
+                        onTap: _toggleBrowserRecording,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    ComposerChip(
+                      label: _settings.access.label,
+                      icon: _settings.access.icon,
+                      tooltip: 'Modo de permissão (Shift+Tab alterna)',
+                      onTap: _openModes,
+                    ),
+                    const SizedBox(width: 6),
+                    Tooltip(
+                      message: _busy ? 'Parar (Esc)' : 'Enviar (Enter)',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(5),
+                        onTap: _busy ? _stop : _send,
+                        child: Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: provider.sendColor,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Icon(
+                            _busy
+                                ? Icons.stop_rounded
+                                : Icons.arrow_upward_rounded,
+                            size: 17,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Tela exibida enquanto não há conexão: botão central para entrar pelo
+  /// navegador (como na extensão do VS Code) ou usar uma chave de API.
+  Widget _connectPanel(BuildContext context) {
+    final provider = _settings.provider;
+    final vs = VsColors.of(context);
+    if (_autoConnecting || (_connecting && _loginStatus == null)) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ProviderIcon(provider, size: 52),
+            const SizedBox(height: 18),
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Conectando ao ${provider.tabLabel}…',
+              style: TextStyle(color: vs.muted),
+            ),
+          ],
+        ),
+      );
+    }
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ProviderIcon(provider, size: 52),
+              const SizedBox(height: 16),
+              Text(
+                provider.tabLabel,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                  color: vs.text,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Entre com sua conta ${provider.label} para usar o agente no '
+                'Gestor UFU.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: vs.muted),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 40,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: provider.sendColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  onPressed: _connecting ? null : _browserLogin,
+                  icon: _connecting && _loginStatus != null
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.open_in_browser_rounded, size: 18),
+                  label: Text('Entrar com ${provider.label} no navegador'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Usa sua assinatura pelo ${provider.cliProductName} '
+                '(instalado automaticamente se necessário).',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11.5, color: vs.muted),
+              ),
+              if (provider == AgentProvider.gemini) ...[
+                const SizedBox(height: 8),
+                Text(
+                  'Usa o Antigravity CLI do Google, que aceita contas pessoais '
+                  '(Google AI Pro e gratuitas).',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11.5, color: vs.muted),
+                ),
+              ],
+              if (_loginStatus != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  _loginStatus!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: vs.text),
+                ),
+              ],
+              if (_loginLines.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: vs.card,
+                    border: Border.all(color: vs.border),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: SelectableText(
+                    _loginLines.join('\n'),
+                    style: TextStyle(
+                      fontFamily: 'Consolas',
+                      fontSize: 12,
+                      color: vs.text,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              if (provider == AgentProvider.copilot)
+                const SizedBox.shrink()
+              else if (!_showApiKey)
+                TextButton.icon(
+                  onPressed: _connecting
+                      ? null
+                      : () => setState(() => _showApiKey = true),
+                  icon: const Icon(Icons.key_rounded, size: 18),
+                  label: const Text('Usar chave de API'),
+                )
+              else ...[
+                TextField(
+                  controller: _apiKeyInput,
+                  obscureText: true,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    labelText: _hasSavedKey
+                        ? 'Chave de API (salva — preencha para trocar)'
+                        : 'Chave de API do ${provider.label}',
+                    helperText: provider.apiKeyHint,
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (_) => _connectWithApiKey(),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _connecting ? null : _connectWithApiKey,
+                    icon: const Icon(Icons.login_rounded, size: 18),
+                    label: Text(
+                      _hasSavedKey
+                          ? 'Conectar com a chave'
+                          : 'Salvar chave e conectar',
+                    ),
+                  ),
+                ),
+              ],
+              if (_entries.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                for (final entry in _entries.where(
+                  (e) => e.kind == AgentEntryKind.error,
+                ))
+                  Text(
+                    entry.text,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: vs.error),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1363,6 +2367,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
     for (final p in AgentProvider.values)
       p: TextEditingController(text: widget.settings.cliPathFor(p)),
   };
+  late final _workDir = TextEditingController(text: widget.settings.workDir);
   String? _message;
 
   @override
@@ -1377,7 +2382,12 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
 
   @override
   void dispose() {
-    for (final c in [..._keys.values, ..._models.values, ..._paths.values]) {
+    for (final c in [
+      ..._keys.values,
+      ..._models.values,
+      ..._paths.values,
+      _workDir,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -1396,6 +2406,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
         );
       }
     }
+    widget.settings.workDir = _workDir.text.trim();
     if (mounted) Navigator.pop(context, true);
   }
 
@@ -1424,7 +2435,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
             ProviderIcon(provider),
             const SizedBox(width: 8),
             Text(
-              provider.label,
+              provider.tabLabel,
               style: Theme.of(
                 context,
               ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -1432,12 +2443,6 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
           ],
         ),
         const SizedBox(height: 8),
-        Text(
-          'Assinatura: usa o ${provider.cliProductName} '
-          'instalado neste computador, com o login da sua conta.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 6),
         Row(
           children: [
             Expanded(
@@ -1462,7 +2467,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
         TextField(
           controller: _models[(provider, AgentAuthMode.cli)],
           decoration: const InputDecoration(
-            labelText: 'Modelo no CLI (opcional)',
+            labelText: 'Modelo na assinatura (opcional)',
             isDense: true,
           ),
         ),
@@ -1511,7 +2516,21 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
           children: [
             const Text(
               'As chaves e preferências ficam no cofre seguro do Windows deste '
-              'computador e não vão para o banco compartilhado.',
+              'computador e não vão para o banco compartilhado. O histórico de '
+              'conversas fica só neste computador.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _workDir,
+              decoration: const InputDecoration(
+                labelText:
+                    'Pasta de trabalho do agente (vazio = '
+                    'Documentos\\GestorUFU Agente)',
+                helperText:
+                    'Onde o agente cria e lê arquivos fora do modo "Só o '
+                    'Gestor".',
+                isDense: true,
+              ),
             ),
             const SizedBox(height: 16),
             for (final provider in AgentProvider.values) ...[
@@ -1562,10 +2581,14 @@ AgentBackend cliBackendFor(
     configuredPath: path,
     model: model,
   ),
+  AgentProvider.copilot => CopilotCliBackend(
+    mcp: mcp,
+    configuredPath: path,
+    model: model,
+  ),
 };
 
-/// Ícone de cada provedor (selo colorido). Para usar os logotipos oficiais,
-/// basta trocar o conteúdo por imagens em assets.
+/// Ícone de cada provedor (selo colorido).
 class ProviderIcon extends StatelessWidget {
   const ProviderIcon(this.provider, {super.key, this.size = 22});
 
@@ -1574,23 +2597,43 @@ class ProviderIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (IconData icon, List<Color> colors) = switch (provider) {
-      AgentProvider.claude => (
-        Icons.brightness_7_rounded,
-        const [Color(0xFFE08B6D), Color(0xFFC96442)],
+    final List<Color> colors = switch (provider) {
+      AgentProvider.claude => const [Color(0xFFE08B6D), Color(0xFFC96442)],
+      AgentProvider.chatgpt => const [Color(0xFF3A3A3A), Color(0xFF111111)],
+      AgentProvider.gemini => const [Color(0xFF4796E3), Color(0xFF9177C7)],
+      AgentProvider.copilot => const [Color(0xFF8250DF), Color(0xFF24292F)],
+    };
+    final Widget glyph = switch (provider) {
+      // Asterisco do Claude.
+      AgentProvider.claude => Text(
+        '✻',
+        style: TextStyle(
+          fontSize: size * 0.72,
+          height: 1,
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+        ),
       ),
-      AgentProvider.chatgpt => (
-        Icons.hub_rounded,
-        const [Color(0xFF19C37D), Color(0xFF0E8A5F)],
+      AgentProvider.chatgpt => Icon(
+        Icons.terminal_rounded,
+        size: size * 0.6,
+        color: Colors.white,
       ),
-      AgentProvider.gemini => (
+      AgentProvider.gemini => Icon(
         Icons.auto_awesome,
-        const [Color(0xFF4796E3), Color(0xFF9177C7)],
+        size: size * 0.6,
+        color: Colors.white,
+      ),
+      AgentProvider.copilot => Icon(
+        Icons.flight_rounded,
+        size: size * 0.6,
+        color: Colors.white,
       ),
     };
     return Container(
       width: size,
       height: size,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: LinearGradient(
@@ -1599,7 +2642,7 @@ class ProviderIcon extends StatelessWidget {
           end: Alignment.bottomRight,
         ),
       ),
-      child: Icon(icon, size: size * 0.64, color: Colors.white),
+      child: glyph,
     );
   }
 }

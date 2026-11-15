@@ -299,7 +299,7 @@ class _GestorUfuAppState extends State<GestorUfuApp> {
                 const SizedBox(height: 16),
                 const Text(
                   'Seus dados e o caminho do banco compartilhado são mantidos '
-                  'nas prefer?ncias locais e permanecem configurados.',
+                  'nas preferências locais e permanecem configurados.',
                 ),
                 if (release.notes.isNotEmpty) ...[
                   const SizedBox(height: 16),
