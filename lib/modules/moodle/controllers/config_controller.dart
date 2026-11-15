@@ -1,20 +1,19 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/utils/date_calculator.dart';
 import 'package:gestor_ufu/platform/services/academic_term_service.dart';
-import 'package:gestor_ufu/domain/entities/academic_term.dart';
+import 'package:gestor_ufu/platform/services/key_value_store.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/modules/moodle/domain/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
-  static const _termKey = 'ajusta_horarios_periodo_letivo';
-  static const _termsKey = 'ajusta_horarios_periodos_letivos';
   final IConfigRepository _repo;
+  final AcademicTermService _termService;
   final _uuid = const Uuid();
 
-  ConfigController(this._repo);
+  ConfigController(this._repo, {AcademicTermService? terms})
+    : _termService = terms ?? AcademicTermService(KeyValueStore());
 
   List<CourseConfig> _configs = [];
   CourseConfig? _current;
@@ -37,19 +36,9 @@ class ConfigController extends ChangeNotifier {
     _loading = true;
     notifyListeners();
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _terms = AcademicTerm.newestFirst(
-        (prefs.getStringList(_termsKey) ?? const <String>[])
-            .map((term) => term.trim())
-            .where((term) => term.isNotEmpty),
-      );
-      if (_terms.isEmpty) _terms = [AcademicTermService.defaultTermName];
-      final storedTerm = prefs.getString(_termKey)?.trim();
-      _activeTerm = storedTerm != null && _terms.contains(storedTerm)
-          ? storedTerm
-          : _terms.first;
-      await prefs.setStringList(_termsKey, _terms);
-      await prefs.setString(_termKey, _activeTerm);
+      await _termService.load();
+      _terms = _termService.terms;
+      _activeTerm = _termService.active;
 
       final allConfigs = await _repo.getAll();
       final normalized = <CourseConfig>[];
@@ -78,32 +67,16 @@ class ConfigController extends ChangeNotifier {
 
   Future<void> setActiveTerm(String term) async {
     if (!_terms.contains(term) || term == _activeTerm) return;
-    final prefs = await SharedPreferences.getInstance();
+    await _termService.setActive(term);
     _activeTerm = term;
-    await prefs.setString(_termKey, term);
     notifyListeners();
     await loadAll();
   }
 
   Future<void> createTerm(String name) async {
-    final requested = name.trim();
-    if (requested.isEmpty) return;
-    final canonical = AcademicTerm.parse(requested)?.key ?? requested;
-    final existing =
-        AcademicTerm.findEquivalent(_terms, canonical) ??
-        _terms.cast<String?>().firstWhere(
-          (item) => item?.toLowerCase() == canonical.toLowerCase(),
-          orElse: () => null,
-        );
-    if (existing != null) {
-      await setActiveTerm(existing);
-      return;
-    }
-    _terms = AcademicTerm.newestFirst([..._terms, canonical]);
-    _activeTerm = canonical;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_termsKey, _terms);
-    await prefs.setString(_termKey, canonical);
+    if (name.trim().isEmpty) return;
+    _activeTerm = await _termService.create(name);
+    _terms = _termService.terms;
     notifyListeners();
     await loadAll();
   }

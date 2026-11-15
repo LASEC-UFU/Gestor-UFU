@@ -59,8 +59,10 @@ class DiarioModule extends GestorModule {
     GoRoute(
       path: route,
       // Planejamento do Config Moodle via contrato (opcional).
-      builder: (context, state) =>
-          PreencheDiariosPage(moodle: _services?.contract<MoodlePlanning>()),
+      builder: (context, state) => PreencheDiariosPage(
+        moodle: _services?.contract<MoodlePlanning>(),
+        terms: _services?.terms,
+      ),
     ),
   ];
 

@@ -23,14 +23,13 @@ import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
 import 'package:gestor_ufu/modules/diario/application/diario_lancamentos.dart';
 import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
 import 'package:gestor_ufu/platform/services/academic_term_service.dart';
+import 'package:gestor_ufu/platform/services/key_value_store.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
-const _diaryPeriodsKey = 'ajusta_horarios_periodos_letivos';
-const _activeDiaryPeriodKey = 'ajusta_horarios_periodo_letivo';
 const _diaryPeriodDataPrefix = 'preenche_diarios_period_data_v1_';
 const _diaryDataMigrationKey = 'preenche_diarios_period_data_migrated_v1';
 const _portalCredentialsKey = 'portal_docente_credentials_v1';
@@ -38,7 +37,10 @@ const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
 const _portalAddressKey = 'portal_docente_url';
 
 class PreencheDiariosPage extends StatefulWidget {
-  const PreencheDiariosPage({this.moodle, super.key});
+  const PreencheDiariosPage({this.moodle, this.terms, super.key});
+
+  /// Períodos letivos compartilhados (padrão: lidos do banco local).
+  final AcademicTermService? terms;
 
   /// Planejamento do Config Moodle (contrato; ausente se o módulo não estiver
   /// instalado).
@@ -49,6 +51,8 @@ class PreencheDiariosPage extends StatefulWidget {
 }
 
 class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
+  late final AcademicTermService _termService =
+      widget.terms ?? AcademicTermService(KeyValueStore());
   final _urlController = TextEditingController(text: _portalDefaultUrl);
   final Map<String, String> _entries = {};
   final List<String> _logs = [];
@@ -126,20 +130,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   Future<void> _loadSavedEntries() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      _terms = AcademicTerm.newestFirst(
-        (prefs.getStringList(_diaryPeriodsKey) ?? const <String>[])
-            .map((term) => term.trim())
-            .where((term) => term.isNotEmpty),
-      );
-      if (_terms.isEmpty) _terms = [AcademicTermService.defaultTermName];
-      final savedTerm = prefs.getString(_activeDiaryPeriodKey)?.trim();
-      _term = savedTerm != null && _terms.contains(savedTerm)
-          ? savedTerm
-          : _terms.first;
-      if (savedTerm == null || !_terms.contains(savedTerm)) {
-        await prefs.setString(_activeDiaryPeriodKey, _term);
-      }
-      await prefs.setStringList(_diaryPeriodsKey, _terms);
+      await _termService.load();
+      _terms = _termService.terms;
+      _term = _termService.active;
       final migrateLegacy = prefs.getBool(_diaryDataMigrationKey) != true;
       await _loadPeriodWorkspace(
         _term,
@@ -422,7 +415,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     if (term == null || term == _term) return;
     await _persist();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_activeDiaryPeriodKey, term);
+    await _termService.setActive(term);
     setState(() => _term = term);
     await _loadPeriodWorkspace(term, prefs: prefs);
     _log('Periodo letivo alterado para ${AcademicTerm.displayName(term)}.');
@@ -430,12 +423,12 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
 
   Future<void> _createTerm() async {
     final value = await AcademicTermDialog.show(context);
-    final name = value?.trim() ?? '';
-    if (name.isEmpty) return;
+    final requested = value?.trim() ?? '';
+    if (requested.isEmpty) return;
     final existing =
-        AcademicTerm.findEquivalent(_terms, name) ??
+        AcademicTerm.findEquivalent(_terms, requested) ??
         _terms.cast<String?>().firstWhere(
-          (term) => term?.toLowerCase() == name.toLowerCase(),
+          (term) => term?.toLowerCase() == requested.toLowerCase(),
           orElse: () => null,
         );
     if (existing != null) {
@@ -443,12 +436,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       return;
     }
     await _persist();
-    final prefs = await SharedPreferences.getInstance();
-    final updated = AcademicTerm.newestFirst([..._terms, name]);
-    await prefs.setStringList(_diaryPeriodsKey, updated);
-    await prefs.setString(_activeDiaryPeriodKey, name);
+    final name = await _termService.create(requested);
     setState(() {
-      _terms = updated;
+      _terms = _termService.terms;
       _term = name;
       _entries.clear();
       _sourceLabel = null;
