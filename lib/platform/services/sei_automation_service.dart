@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
-typedef PlanoTrabalhoLog = void Function(String message);
+import 'package:gestor_ufu/platform/services/browser_service.dart';
+
+typedef SeiLog = void Function(String message);
 
 /// Um arquivo a ser incluído como documento externo no SEI.
 class SeiDocumentoExterno {
@@ -35,9 +37,10 @@ class SeiLoteResultado {
 /// Extensões aceitas no envio de documento externo.
 const extensoesDocumentoExterno = {'.pdf', '.jpg', '.jpeg', '.png'};
 
-/// Cadastro de documentos externos no SEI (Plano, Comprovante...), controlado
+/// Automação do SEI compartilhada pelos módulos (documentos externos: Plano de
+/// Trabalho, comprovantes da Progressão...), controlada
 /// pelo Puppeteer/Dart.
-class PlanoTrabalhoAutomationService {
+class SeiAutomationService {
   Browser? _browser;
   Page? _page;
   bool get isConnected =>
@@ -49,21 +52,10 @@ class PlanoTrabalhoAutomationService {
       await _page!.bringToFront();
       return _page!.url ?? url;
     }
-    final edge = await _findEdge();
-    if (edge == null) throw StateError('Microsoft Edge não foi encontrado.');
-    final profile = _profileDirectory();
-    await Directory(profile).create(recursive: true);
-    _browser = await puppeteer.launch(
-      executablePath: edge,
-      headless: false,
-      defaultViewport: null,
-      userDataDir: profile,
-      args: const ['--start-maximized'],
-      timeout: const Duration(seconds: 45),
-      waitForInitialPage: true,
+    _browser = await BrowserService.open(
+      profileDir: BrowserService.localProfile('EdgePlanoTrabalhoProfile'),
     );
-    final pages = await _browser!.pages;
-    _page = pages.isEmpty ? await _browser!.newPage() : pages.first;
+    _page = await BrowserService.firstPage(_browser!);
     await _page!.goto(url, wait: Until.domContentLoaded);
     await _page!.bringToFront();
     return _page!.url ?? url;
@@ -78,7 +70,7 @@ class PlanoTrabalhoAutomationService {
     required String numero,
     required String nomeArvore,
     required String interessado,
-    required PlanoTrabalhoLog log,
+    required SeiLog log,
   }) async {
     if (p.extension(pdfPath).toLowerCase() != '.pdf') {
       throw StateError('Selecione um arquivo PDF existente.');
@@ -138,7 +130,7 @@ class PlanoTrabalhoAutomationService {
     required String numero,
     required String nomeArvore,
     String interessado = '',
-    required PlanoTrabalhoLog log,
+    required SeiLog log,
   }) async {
     _checkReady();
     final browser = _browser!;
@@ -244,7 +236,7 @@ class PlanoTrabalhoAutomationService {
   Future<SeiLoteResultado> insertExternalBatch({
     required List<SeiDocumentoExterno> documentos,
     required String serie,
-    required PlanoTrabalhoLog log,
+    required SeiLog log,
     bool Function()? cancelado,
   }) async {
     _checkReady();
@@ -483,30 +475,6 @@ class PlanoTrabalhoAutomationService {
       .map((c) => _accents[c] ?? c)
       .join()
       .replaceAll(RegExp(r'[^a-z0-9]'), '');
-
-  Future<String?> _findEdge() async {
-    final candidates = <String>[
-      r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-      r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-      if (Platform.environment['PROGRAMFILES(X86)'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      if (Platform.environment['PROGRAMFILES'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    ];
-    for (final path in candidates) {
-      if (await File(path).exists()) return path;
-    }
-    return null;
-  }
-
-  String _profileDirectory() {
-    final local = Platform.environment['LOCALAPPDATA'];
-    return p.join(
-      local ?? Directory.systemTemp.path,
-      'GestorUFU',
-      'EdgePlanoTrabalhoProfile',
-    );
-  }
 
   Future<void> close() async {
     final browser = _browser;

@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gestor_ufu/data/services/progressao_comprovantes_service.dart';
-import 'package:gestor_ufu/domain/entities/progressao.dart';
-import 'package:gestor_ufu/domain/progressao/comprovantes.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
+import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
+import 'package:gestor_ufu/modules/progressao/domain/comprovantes.dart';
 import 'package:path/path.dart' as p;
 
 void main() {

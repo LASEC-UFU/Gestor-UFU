@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import 'package:gestor_ufu/domain/entities/progressao.dart';
-import 'package:gestor_ufu/domain/progressao/comprovantes.dart';
+import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
+import 'package:gestor_ufu/modules/progressao/domain/comprovantes.dart';
 
 /// Copia os comprovantes para a pasta do processo, em subpastas por tabela do
 /// Anexo 1 e com nomes padronizados, prontos para o envio ao SEI.

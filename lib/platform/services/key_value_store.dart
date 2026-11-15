@@ -28,7 +28,8 @@ class KeyValueStore {
   Future<void> writeJson(String key, Object? value) async =>
       (await _open()).setString(key, jsonEncode(value));
 
-  Future<String?> readString(String key) async => (await _open()).getString(key);
+  Future<String?> readString(String key) async =>
+      (await _open()).getString(key);
 
   Future<void> writeString(String key, String value) async =>
       (await _open()).setString(key, value);

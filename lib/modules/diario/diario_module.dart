@@ -33,9 +33,9 @@ class DiarioModule extends GestorModule {
 
   @override
   List<RouteBase> get routes => [
-      GoRoute(
-        path: '/diario',
-        builder: (context, state) => const PreencheDiariosPage(),
-      ),
+    GoRoute(
+      path: '/diario',
+      builder: (context, state) => const PreencheDiariosPage(),
+    ),
   ];
 }

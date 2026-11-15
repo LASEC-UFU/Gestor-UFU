@@ -1,5 +1,4 @@
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
-import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 
 /// Conhecimento entregue ao Agente de IA sobre cada funcionalidade do
@@ -100,26 +99,6 @@ entrar no próprio navegador e avise quando terminar.
       '`term_storage_key(prefix: "$prefix", term: <período>)`. O período ativo '
       'vem de `get_app_context` (ex.: "2º semestre de 2026").';
 
-  static String get _anexo1 {
-    final buffer = StringBuffer();
-    TabelaAnexo1? tabela;
-    for (final item in anexo1) {
-      if (item.tabela != tabela) {
-        tabela = item.tabela;
-        buffer.writeln(
-          '\n### ${tabela.codigo} ${tabela.titulo} (${tabela.faixa})',
-        );
-      }
-      var descricao = item.descricao.replaceAll(RegExp(r'\s+'), ' ').trim();
-      if (descricao.length > 170) {
-        descricao = '${descricao.substring(0, 170)}…';
-      }
-      buffer.writeln('- ${item.numero}: $descricao — ${item.regra}');
-    }
-    return buffer.toString();
-  }
-
-  /// Skills que ainda não migraram para o seu módulo.
   static final List<AgentSkill> _legacy = [
     AgentSkill(
       id: general,
@@ -503,52 +482,6 @@ spreadsheetData: { version: 1, origin: nome do arquivo, fields: [ { section,
 sheet, cell (ex. "B7"), label, type ("texto"|"numero"|"data"), value } ],
 ignoredFormulas: [...] } | null }.
 Para mudar um valor, altere `value` do campo (section + cell) com patch_json.
-''',
-    ),
-    AgentSkill(
-      id: 'progressao',
-      title: 'Progressão / Promoção',
-      summary: 'Processo de progressão docente (Anexo 1, Res. 03/2017 CONDIR).',
-      body:
-          '''
-## Para que serve
-Monta o processo de progressão/promoção docente: dados do requerimento,
-lançamentos de atividades pontuadas pelo Anexo 1 da Resolução 03/2017 do
-CONDIR (com as alterações da Res. 05/2018), comprovantes organizados em
-pastas, PDF final e envio dos comprovantes ao SEI.
-
-## Onde fica cada ação (tela Progressão / Promoção)
-- Lista de processos: "Novo processo", "Duplicar", "Excluir processo".
-- No processo: docente, SIAPE, lotação, destinatário, cidade, carreira,
-  regime, titulação, posição alvo, interstício e período do relatório ("Fim =
-  início + 24 meses"), textos de assiduidade/avaliação didática/conclusão,
-  "Escolher logotipo" (PNG/JPG do cabeçalho do PDF).
-- Lançamentos: "Adicionar item" / "Escolher item do Anexo 1", "Linha",
-  quantidade, período, início/fim, descrição; comprovante (PDF/JPG/PNG) é
-  copiado e renomeado para a pasta do processo ("Abrir pasta", "Atualizar
-  nomes dos arquivos", "Abrir comprovante", "Remover comprovante").
-- "Gerar PDF" (relatório com pontuação) e "Enviar comprovantes ao SEI".
-O app calcula a pontuação; você ajuda a escolher o item certo, a quantidade
-(horas, meses, alunos, trabalhos, dias…) e a descrição a partir dos
-comprovantes que o usuário anexar.
-
-## Banco
-Chave: `progressao_docente.v1` — lista de processos: { id, docente, siape,
-lotacao, destinatario, cidade, dataDocumento (ISO), carreira
-("magisterioSuperior"|"ebtt"), regime ("de"|"h40"|"h20"), titulacao
-("graduacao"|"mestrado"|"doutorado"), alvoId ("<carreira>|<classe>|<nivel>"),
-intersticioInicio/Fim, relatorioInicio/Fim (ISO), semestres,
-textoAssiduidade, textoAvaliacaoDidatica, avaliacoesDidaticas [texto],
-textoAvaliacaoConclusao, logoPath, pastaComprovantes, tipoDocumentoSei,
-lancamentos: [ { id, item (número do Anexo 1), periodo (ex. "2023/01"),
-descricao, comprovante (caminho relativo à pasta, ex.
-"A1.1_Ensino/arquivo.pdf", ou texto), quantidade (número), inicio/fim (ISO
-ou null) } ], atualizadoEm }.
-Use SOMENTE números de item do catálogo abaixo. Não apague comprovantes nem
-altere `pastaComprovantes`/`logoPath` (caminhos locais).
-
-## Catálogo do Anexo 1 (item: descrição — regra de pontuação)
-$_anexo1
 ''',
     ),
     const AgentSkill(

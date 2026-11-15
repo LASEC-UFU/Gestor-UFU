@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
+
+import 'package:gestor_ufu/platform/services/browser_service.dart';
 import 'package:gestor_ufu/data/services/sei_plano_html_merger.dart';
 
 typedef PlanoEnsinoLog = void Function(String message);
@@ -24,21 +24,10 @@ class PlanosEnsinoAutomationService {
       await _page!.bringToFront();
       return _page!.url ?? url;
     }
-    final edge = await _findEdge();
-    if (edge == null) throw StateError('Microsoft Edge não foi encontrado.');
-    final profile = _profileDirectory();
-    await Directory(profile).create(recursive: true);
-    _browser = await puppeteer.launch(
-      executablePath: edge,
-      headless: false,
-      defaultViewport: null,
-      userDataDir: profile,
-      args: const ['--start-maximized'],
-      timeout: const Duration(seconds: 45),
-      waitForInitialPage: true,
+    _browser = await BrowserService.open(
+      profileDir: BrowserService.localProfile('EdgePlanosEnsinoProfile'),
     );
-    final pages = await _browser!.pages;
-    _page = pages.isEmpty ? await _browser!.newPage() : pages.first;
+    _page = await BrowserService.firstPage(_browser!);
     await _page!.goto(url, wait: Until.domContentLoaded);
     await _page!.bringToFront();
     return _page!.url ?? url;
@@ -193,33 +182,6 @@ class PlanosEnsinoAutomationService {
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     throw TimeoutException('Tempo esgotado aguardando o formulário do SEI.');
-  }
-
-  Future<String?> _findEdge() async {
-    final candidates = <String>[
-      r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-      r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-      if (Platform.environment['PROGRAMFILES(X86)'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      if (Platform.environment['PROGRAMFILES'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    ];
-    for (final path in candidates) {
-      if (await File(path).exists()) return path;
-    }
-    return null;
-  }
-
-  String _profileDirectory() {
-    final local = Platform.environment['LOCALAPPDATA'];
-    if (local == null || local.isEmpty) {
-      return p.join(
-        Directory.systemTemp.path,
-        'GestorUFU',
-        'EdgePlanosEnsinoProfile',
-      );
-    }
-    return p.join(local, 'GestorUFU', 'EdgePlanosEnsinoProfile');
   }
 
   Future<void> close() async {

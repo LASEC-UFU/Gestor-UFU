@@ -32,9 +32,9 @@ class PlanosTrabalhoModule extends GestorModule {
 
   @override
   List<RouteBase> get routes => [
-      GoRoute(
-        path: '/planos-trabalho',
-        builder: (context, state) => const PlanosTrabalhoPage(),
-      ),
+    GoRoute(
+      path: '/planos-trabalho',
+      builder: (context, state) => const PlanosTrabalhoPage(),
+    ),
   ];
 }

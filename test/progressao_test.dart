@@ -1,9 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gestor_ufu/data/services/progressao_pdf_service.dart';
-import 'package:gestor_ufu/domain/entities/progressao.dart';
-import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_pdf_service.dart';
+import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
+import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
 ProgressaoDocente exemploModelo() {
   var seq = 0;

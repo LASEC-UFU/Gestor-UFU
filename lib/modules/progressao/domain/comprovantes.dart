@@ -1,5 +1,5 @@
-import 'package:gestor_ufu/domain/entities/progressao.dart';
-import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
+import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
+import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
 /// Limite do campo "Nome na Árvore" do SEI.
 const limiteNomeArvoreSei = 50;

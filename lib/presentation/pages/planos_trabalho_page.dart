@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/data/services/plano_trabalho_automation_service.dart';
+import 'package:gestor_ufu/platform/services/sei_automation_service.dart';
 import 'package:gestor_ufu/data/services/planilha_trabalho_service.dart';
 import 'package:gestor_ufu/data/services/planos_trabalho_store.dart';
 import 'package:gestor_ufu/domain/entities/plano_trabalho.dart';
@@ -21,7 +21,7 @@ class PlanosTrabalhoPage extends StatefulWidget {
 class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
   static const _urlKey = 'planos_trabalho_sei_url';
   final _store = PlanosTrabalhoStore();
-  final _automation = PlanoTrabalhoAutomationService();
+  final _automation = SeiAutomationService();
   final _urlController = TextEditingController(text: 'https://sei.ufu.br');
   final List<String> _logs = [];
   List<PlanoTrabalho> _plans = [];

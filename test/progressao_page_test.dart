@@ -3,11 +3,23 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:gestor_ufu/data/services/progressao_store.dart';
-import 'package:gestor_ufu/presentation/pages/progressao_page.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_service.dart';
+import 'package:gestor_ufu/modules/progressao/data/progressao_store.dart';
+import 'package:gestor_ufu/modules/progressao/pages/progressao_page.dart';
+import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'progressao_test.dart' show exemploModelo;
+
+/// A tela de módulo usa o cabeçalho da plataforma (ThemeSelector) e recebe o
+/// serviço do módulo.
+Widget _app() => ChangeNotifierProvider(
+  create: (_) => ThemeController(isLight: false),
+  child: MaterialApp(
+    home: ProgressaoPage(service: ProgressaoService(ProgressaoStore())),
+  ),
+);
 
 void main() {
   testWidgets('abre processo e percorre todas as abas sem erros', (
@@ -19,7 +31,7 @@ void main() {
     SharedPreferences.setMockInitialValues({
       ProgressaoStore.key: jsonEncode([exemploModelo().toJson()]),
     });
-    await tester.pumpWidget(const MaterialApp(home: ProgressaoPage()));
+    await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
     expect(find.textContaining('Josué Silva de Morais'), findsWidgets);
 
@@ -51,7 +63,7 @@ void main() {
     addTearDown(tester.view.reset);
     FilePicker.platform = _FakeFilePicker(null);
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const MaterialApp(home: ProgressaoPage()));
+    await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
     await tester.tap(find.text('Novo processo'));
     await tester.pumpAndSettle();
@@ -66,7 +78,7 @@ void main() {
     final picker = _FakeFilePicker(r'C:\Comprovantes\Progressao');
     FilePicker.platform = picker;
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const MaterialApp(home: ProgressaoPage()));
+    await tester.pumpWidget(_app());
     await tester.pumpAndSettle();
     await tester.tap(find.text('Novo processo'));
     await tester.pumpAndSettle();

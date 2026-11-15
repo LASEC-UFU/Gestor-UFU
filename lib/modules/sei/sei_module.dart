@@ -32,6 +32,6 @@ class SeiModule extends GestorModule {
 
   @override
   List<RouteBase> get routes => [
-      GoRoute(path: '/sei', builder: (context, state) => const SeiTreePage()),
+    GoRoute(path: '/sei', builder: (context, state) => const SeiTreePage()),
   ];
 }

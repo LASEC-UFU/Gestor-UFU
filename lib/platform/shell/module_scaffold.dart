@@ -118,8 +118,10 @@ class ModuleHeader extends StatelessWidget {
             child: Icon(icon, color: accent, size: 24),
           ),
           const SizedBox(width: 12),
+          // Título e ações dividem o espaço: em janelas estreitas o título
+          // encolhe (reticências) e as ações quebram linha — nunca estoura.
           Flexible(
-            flex: 0,
+            flex: 2,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -147,6 +149,7 @@ class ModuleHeader extends StatelessWidget {
           ),
           const SizedBox(width: 16),
           Expanded(
+            flex: 3,
             child: Wrap(
               spacing: 8,
               runSpacing: 8,

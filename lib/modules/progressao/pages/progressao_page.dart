@@ -3,18 +3,17 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
-import 'package:gestor_ufu/data/services/plano_trabalho_automation_service.dart';
-import 'package:gestor_ufu/data/services/progressao_comprovantes_service.dart';
-import 'package:gestor_ufu/data/services/progressao_pdf_service.dart';
-import 'package:gestor_ufu/data/services/progressao_store.dart';
-import 'package:gestor_ufu/domain/entities/progressao.dart';
-import 'package:gestor_ufu/domain/progressao/comprovantes.dart';
-import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_pdf_service.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_service.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
+import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
+import 'package:gestor_ufu/modules/progressao/domain/comprovantes.dart';
+import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
 const _uuid = Uuid();
 const _comprovantes = ProgressaoComprovantesService();
@@ -36,33 +35,6 @@ void _avisar(BuildContext context, String texto) {
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
 }
 
-/// Estado do envio ao SEI, mantido pela página para sobreviver à troca de
-/// abas (o Edge controlado e o log continuam disponíveis).
-class _EnvioSei extends ChangeNotifier {
-  final automation = PlanoTrabalhoAutomationService();
-  final logs = <String>[];
-  String url = 'https://sei.ufu.br';
-  bool enviando = false;
-  bool cancelar = false;
-
-  void log(String mensagem) {
-    final t = TimeOfDay.now();
-    final hora =
-        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-    logs.insert(0, '$hora  $mensagem');
-    if (logs.length > 300) logs.removeLast();
-    notifyListeners();
-  }
-
-  void atualizar() => notifyListeners();
-
-  @override
-  void dispose() {
-    automation.close();
-    super.dispose();
-  }
-}
-
 String _fmtData(DateTime? d) => d == null ? '' : ProgressaoPdfService.data(d);
 
 double _parseNumero(String text) =>
@@ -71,61 +43,51 @@ double _parseNumero(String text) =>
 /// Progressão / Promoção docente — Resolução 03/2017 CONDIR (com alterações
 /// da Resolução SEI 05/2018).
 class ProgressaoPage extends StatefulWidget {
-  const ProgressaoPage({super.key});
+  const ProgressaoPage({required this.service, super.key});
+
+  final ProgressaoService service;
 
   @override
   State<ProgressaoPage> createState() => _ProgressaoPageState();
 }
 
 class _ProgressaoPageState extends State<ProgressaoPage> {
-  final _store = ProgressaoStore();
-  List<ProgressaoDocente> _items = [];
   String? _abertoId;
   bool _busy = true;
-  Timer? _saveTimer;
-  final _envio = _EnvioSei();
+
+  ProgressaoService get _service => widget.service;
+  List<ProgressaoDocente> get _items => _service.items;
+  ProgressaoEnvioSei get _envio => _service.envio;
 
   @override
   void initState() {
     super.initState();
+    _service.addListener(_onChanged);
     _load();
   }
 
   @override
   void dispose() {
-    if (_saveTimer?.isActive ?? false) {
-      _saveTimer!.cancel();
-      _store.saveAll(_items);
-    }
-    _envio.dispose();
+    _service.removeListener(_onChanged);
+    unawaited(_service.flush());
     super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load() async {
     try {
-      _items = await _store.list();
+      await _service.load();
     } on Object catch (error) {
       _message('Não foi possível ler os processos salvos: $error');
     }
     if (mounted) setState(() => _busy = false);
   }
 
-  void _update(ProgressaoDocente p) {
-    final updated = p.copyWith(atualizadoEm: DateTime.now());
-    setState(() {
-      final i = _items.indexWhere((e) => e.id == p.id);
-      if (i >= 0) {
-        _items[i] = updated;
-      } else {
-        _items.insert(0, updated);
-      }
-    });
-    _saveTimer?.cancel();
-    _saveTimer = Timer(
-      const Duration(milliseconds: 500),
-      () => _store.saveAll(_items),
-    );
-  }
+  void _update(ProgressaoDocente p) =>
+      unawaited(_service.save(p, debounce: true));
 
   Future<void> _novo() async {
     final pasta = await _escolherPasta(
@@ -137,21 +99,12 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
       );
       return;
     }
-    final p = ProgressaoDocente(
-      id: _uuid.v4(),
-      dataDocumento: DateTime.now(),
-      pastaComprovantes: pasta,
-    );
-    _update(p);
-    setState(() => _abertoId = p.id);
+    final p = await _service.create(pastaComprovantes: pasta);
+    if (mounted) setState(() => _abertoId = p.id);
   }
 
-  void _duplicar(ProgressaoDocente origem) {
-    final json = origem.toJson()
-      ..['id'] = _uuid.v4()
-      ..['atualizadoEm'] = null;
-    _update(ProgressaoDocente.fromJson(json));
-  }
+  void _duplicar(ProgressaoDocente origem) =>
+      unawaited(_service.duplicate(origem.id));
 
   Future<void> _excluir(ProgressaoDocente p) async {
     final ok = await showDialog<bool>(
@@ -175,32 +128,22 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
       ),
     );
     if (ok != true) return;
-    setState(() => _items.removeWhere((e) => e.id == p.id));
-    await _store.saveAll(_items);
+    await _service.remove(p.id);
   }
 
   Future<void> _gerarPdf(ProgressaoDocente p) async {
     try {
-      final nome = p.docente.trim().isEmpty
-          ? 'docente'
-          : p.docente.trim().replaceAll(RegExp(r'[<>:"/\\|?*]'), '');
-      final alvo = p.alvo.denominacao(p.titulacao).replaceAll(' ', '');
       final path = await FilePicker.platform.saveFile(
         dialogTitle: 'Salvar requerimento e relatório em PDF',
-        fileName:
-            'Progressao_${alvo}_${nome.replaceAll(RegExp(r'\s+'), '')}.pdf',
+        fileName: ProgressaoService.pdfFileName(p),
         type: FileType.custom,
         allowedExtensions: const ['pdf'],
       );
       if (path == null) return;
-      final bytes = await ProgressaoPdfService().gerar(p);
-      final file = File(
-        path.toLowerCase().endsWith('.pdf') ? path : '$path.pdf',
-      );
-      await file.writeAsBytes(bytes, flush: true);
-      _message('PDF gerado: ${file.path}');
+      final saved = await _service.exportPdf(p.id, path);
+      _message('PDF gerado: $saved');
       if (Platform.isWindows) {
-        await Process.run('cmd', ['/c', 'start', '', file.path]);
+        await Process.run('cmd', ['/c', 'start', '', saved]);
       }
     } on Object catch (error) {
       _message('Não foi possível gerar o PDF: $error');
@@ -229,96 +172,34 @@ class _ProgressaoPageState extends State<ProgressaoPage> {
         onClose: () => setState(() => _abertoId = null),
         onPdf: () => _gerarPdf(aberto),
         envio: _envio,
+        service: _service,
       );
     }
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
-        child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1440),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              IconButton(
-                                onPressed: () => context.go('/'),
-                                icon: const Icon(Icons.arrow_back),
-                              ),
-                              const Icon(
-                                Icons.trending_up_rounded,
-                                color: AppTheme.accent,
-                                size: 30,
-                              ),
-                              const SizedBox(width: 6),
-                              SizedBox(
-                                width: 560,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Progressão / Promoção Docente',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                    ),
-                                    Text(
-                                      'Relatório de atividades conforme a Resolução 03/2017 CONDIR '
-                                      '(com alterações da Res. SEI 05/2018)',
-                                      style: TextStyle(
-                                        color: AppTheme.textSecondary,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              IntrinsicWidth(
-                                child: FilledButton.icon(
-                                  onPressed: _novo,
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('Novo processo'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const ThemeSelector(compact: true),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    Expanded(
-                      child: _busy
-                          ? const Center(child: CircularProgressIndicator())
-                          : _items.isEmpty
-                          ? _vazio()
-                          : ListView.separated(
-                              itemCount: _items.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (_, i) => _tile(_items[i]),
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
+    return ModuleScaffold(
+      moduleId: 'progressao',
+      title: 'Progressão / Promoção Docente',
+      subtitle:
+          'Relatório de atividades conforme a Resolução 03/2017 CONDIR '
+          '(com alterações da Res. SEI 05/2018)',
+      maxWidth: 1440,
+      actions: [
+        FilledButton.icon(
+          onPressed: _novo,
+          icon: const Icon(Icons.add),
+          label: const Text('Novo processo'),
         ),
+      ],
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        child: _busy
+            ? const Center(child: CircularProgressIndicator())
+            : _items.isEmpty
+            ? _vazio()
+            : ListView.separated(
+                itemCount: _items.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                itemBuilder: (_, i) => _tile(_items[i]),
+              ),
       ),
     );
   }
@@ -412,13 +293,15 @@ class _Editor extends StatelessWidget {
     required this.onClose,
     required this.onPdf,
     required this.envio,
+    required this.service,
   });
 
   final ProgressaoDocente processo;
   final ValueChanged<ProgressaoDocente> onChanged;
   final VoidCallback onClose;
   final VoidCallback onPdf;
-  final _EnvioSei envio;
+  final ProgressaoEnvioSei envio;
+  final ProgressaoService service;
 
   static const _abas = {
     TabelaAnexo1.ensino: 'A1.1 Ensino',
@@ -538,6 +421,7 @@ class _Editor extends StatelessWidget {
                         processo: p,
                         onChanged: onChanged,
                         envio: envio,
+                        service: service,
                       ),
                       _ResumoTab(processo: p),
                     ],
@@ -1679,11 +1563,13 @@ class _ComprovantesTab extends StatefulWidget {
     required this.processo,
     required this.onChanged,
     required this.envio,
+    required this.service,
   });
 
   final ProgressaoDocente processo;
   final ValueChanged<ProgressaoDocente> onChanged;
-  final _EnvioSei envio;
+  final ProgressaoEnvioSei envio;
+  final ProgressaoService service;
 
   @override
   State<_ComprovantesTab> createState() => _ComprovantesTabState();
@@ -1694,7 +1580,7 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
   bool _ocupado = false;
 
   ProgressaoDocente get p => widget.processo;
-  _EnvioSei get envio => widget.envio;
+  ProgressaoEnvioSei get envio => widget.envio;
 
   @override
   void dispose() {
@@ -1753,10 +1639,8 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
       _avisar(context, 'Informe um endereço válido do SEI.');
       return;
     }
-    envio.url = uri.toString();
     try {
-      final aberto = await envio.automation.openBrowser(uri.toString());
-      envio.log('Edge pronto em $aberto. Entre no SEI e abra o processo.');
+      await widget.service.abrirSei(uri.toString());
     } on Object catch (error) {
       envio.log('Falha ao abrir o Edge: $error');
     }
@@ -1802,38 +1686,11 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
       ),
     );
     if (confirmar != true) return;
-    envio
-      ..enviando = true
-      ..cancelar = false
-      ..atualizar();
     try {
-      final r = await envio.automation.insertExternalBatch(
-        documentos: [
-          for (final l in lista)
-            SeiDocumentoExterno(
-              caminho: _comprovantes.caminhoAbsoluto(p, l)!,
-              nomeArvore: l.rotuloComprovante,
-            ),
-        ],
-        serie: p.tipoDocumentoSei.trim().isEmpty
-            ? ProgressaoDocente.tipoDocumentoSeiPadrao
-            : p.tipoDocumentoSei.trim(),
-        log: envio.log,
-        cancelado: () => envio.cancelar,
-      );
-      for (final e in r.erros) {
-        envio.log('ERRO: $e');
-      }
-      envio.log(
-        'Concluído: ${r.criados.length} incluído(s), '
-        '${r.existentes.length} já existente(s), ${r.erros.length} erro(s).',
-      );
+      // Mesma regra do comando progressao.enviarComprovantesSei.
+      await widget.service.enviarComprovantes(p.id);
     } on Object catch (error) {
       envio.log('Falha no envio: $error');
-    } finally {
-      envio
-        ..enviando = false
-        ..atualizar();
     }
   }
 

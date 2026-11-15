@@ -38,18 +38,18 @@ class MoodleModule extends GestorModule {
 
   @override
   List<RouteBase> get routes => [
-      GoRoute(path: '/moodle', builder: (context, state) => const HomePage()),
-      GoRoute(
-        path: '/editor/:id',
-        builder: (context, state) => TableEditorPage(
-          courseConfigId: state.pathParameters['id']!,
-          autoEvaluate: state.uri.queryParameters['reeval'] == '1',
-        ),
+    GoRoute(path: '/moodle', builder: (context, state) => const HomePage()),
+    GoRoute(
+      path: '/editor/:id',
+      builder: (context, state) => TableEditorPage(
+        courseConfigId: state.pathParameters['id']!,
+        autoEvaluate: state.uri.queryParameters['reeval'] == '1',
       ),
-      GoRoute(
-        path: '/sync/:id',
-        builder: (context, state) =>
-            SyncPreviewPage(courseConfigId: state.pathParameters['id']!),
-      ),
+    ),
+    GoRoute(
+      path: '/sync/:id',
+      builder: (context, state) =>
+          SyncPreviewPage(courseConfigId: state.pathParameters['id']!),
+    ),
   ];
 }

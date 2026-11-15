@@ -1,4 +1,4 @@
-import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
+import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
 /// Uma linha do relatório: atividade comprovada e pontuada por um item do
 /// Anexo 1 da Resolução 03/2017.

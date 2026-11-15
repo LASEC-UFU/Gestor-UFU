@@ -32,9 +32,9 @@ class PlanosEnsinoModule extends GestorModule {
 
   @override
   List<RouteBase> get routes => [
-      GoRoute(
-        path: '/planos-ensino',
-        builder: (context, state) => const PlanosEnsinoPage(),
-      ),
+    GoRoute(
+      path: '/planos-ensino',
+      builder: (context, state) => const PlanosEnsinoPage(),
+    ),
   ];
 }

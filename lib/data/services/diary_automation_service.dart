@@ -8,6 +8,8 @@ import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
+import 'package:gestor_ufu/platform/services/browser_service.dart';
+
 typedef DiaryAutomationLog = void Function(String message);
 
 class DiaryFillResult {
@@ -135,58 +137,11 @@ class DiaryAutomationService {
       return existingPage.url ?? url;
     }
 
-    final edgePath = await _findEdgeExecutable();
-    if (edgePath == null) {
-      throw StateError(
-        'Não encontrei o Microsoft Edge. Instale o Edge ou confira os caminhos em Program Files.',
-      );
-    }
-
-    final profileDir = _profileDirectory();
-    await Directory(profileDir).create(recursive: true);
-    final activePortFile = File(p.join(profileDir, 'DevToolsActivePort'));
-    if (await activePortFile.exists()) {
-      try {
-        final activePort = (await activePortFile.readAsLines()).first.trim();
-        if (int.tryParse(activePort) != null) {
-          _browser = await puppeteer.connect(
-            browserUrl: 'http://127.0.0.1:$activePort',
-            defaultViewport: null,
-          );
-          final existingPages = await _browser!.pages;
-          _page = existingPages.isEmpty
-              ? await _browser!.newPage()
-              : existingPages.first;
-          await _page!.goto(url, wait: Until.domContentLoaded);
-          await _tryPortalLogin(
-            _page!,
-            username: username,
-            password: password,
-            log: log,
-          );
-          await _page!.bringToFront();
-          await _startDebugBridge(log);
-          return _page!.url ?? url;
-        }
-      } catch (error) {
-        log?.call(
-          'Não consegui reconectar ao Edge já aberto; tentando iniciar uma nova sessão: $error',
-        );
-        _browser = null;
-        _page = null;
-      }
-    }
-    _browser = await puppeteer.launch(
-      executablePath: edgePath,
-      headless: false,
-      defaultViewport: null,
-      userDataDir: profileDir,
-      args: const ['--start-maximized'],
-      timeout: const Duration(seconds: 45),
-      waitForInitialPage: true,
+    // Abre o Edge do perfil do Portal ou reconecta ao que já está aberto.
+    _browser = await BrowserService.open(
+      profileDir: BrowserService.localProfile('EdgeDiarioProfile'),
     );
-    final pages = await _browser!.pages;
-    _page = pages.isEmpty ? await _browser!.newPage() : pages.first;
+    _page = await BrowserService.firstPage(_browser!);
     await _page!.goto(url, wait: Until.domContentLoaded);
     await _tryPortalLogin(
       _page!,
@@ -1068,30 +1023,6 @@ class DiaryAutomationService {
     _browser = null;
     _page = null;
     if (browser?.isConnected == true) await browser!.close();
-  }
-
-  Future<String?> _findEdgeExecutable() async {
-    final candidates = <String>[
-      r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-      r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
-      if (Platform.environment['PROGRAMFILES(X86)'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      if (Platform.environment['PROGRAMFILES'] case final path?)
-        p.join(path, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    ];
-    for (final candidate in candidates) {
-      if (await File(candidate).exists()) return candidate;
-    }
-    return null;
-  }
-
-  String _profileDirectory() {
-    final localAppData = Platform.environment['LOCALAPPDATA'];
-    const profileName = 'EdgeDiarioProfile';
-    if (localAppData == null || localAppData.isEmpty) {
-      return p.join(Directory.systemTemp.path, 'GestorUFU', profileName);
-    }
-    return p.join(localAppData, 'GestorUFU', profileName);
   }
 }
 

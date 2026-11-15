@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
+import 'package:gestor_ufu/platform/services/browser_service.dart';
+
 /// Navegador controlado pelo Agente de IA (puppeteer sobre Edge/Chrome).
 ///
 /// Roda na janela principal, então continua aberto em segundo plano mesmo
@@ -87,15 +89,8 @@ class AgentBrowser {
   Future<Map<String, Object?>> _open(Map<String, dynamic> input) async {
     final url = '${input['url'] ?? ''}'.trim();
     if (!isOpen) {
-      final exe = await _findBrowser();
-      if (exe == null) {
-        throw StateError('Não encontrei o Microsoft Edge nem o Google Chrome.');
-      }
-      final profile = _profileDirectory();
-      await Directory(profile).create(recursive: true);
-      final browser = await _connectOrStart(
-        exe,
-        profile,
+      final browser = await BrowserService.open(
+        profileDir: _profileDirectory(),
         headless: input['headless'] == true,
       );
       _browser = browser;
@@ -121,61 +116,6 @@ class AgentBrowser {
     return _pageInfo(_page!, extra: {'ok': true});
   }
 
-  /// O Edge passa a execução para outro processo e o puppeteer não consegue
-  /// ler o endereço de depuração pelo processo que lançou. Por isso o
-  /// navegador é iniciado aqui e a conexão usa o arquivo DevToolsActivePort
-  /// do perfil. Se ele já estiver aberto (ex.: o Gestor foi reiniciado),
-  /// apenas reconecta.
-  static Future<Browser> _connectOrStart(
-    String exe,
-    String profile, {
-    required bool headless,
-  }) async {
-    final portFile = File(p.join(profile, 'DevToolsActivePort'));
-    final existing = await _tryConnect(portFile);
-    if (existing != null) return existing;
-    try {
-      if (await portFile.exists()) await portFile.delete();
-    } catch (_) {}
-    await Process.start(exe, [
-      '--remote-debugging-port=0',
-      '--user-data-dir=$profile',
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--start-maximized',
-      if (headless) '--headless=new',
-      'about:blank',
-    ], mode: ProcessStartMode.detached);
-    for (var i = 0; i < 60; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      final browser = await _tryConnect(portFile);
-      if (browser != null) return browser;
-    }
-    throw StateError(
-      'O navegador abriu, mas não liberou a conexão de automação. Feche '
-      'as janelas do navegador do agente e tente de novo.',
-    );
-  }
-
-  static Future<Browser?> _tryConnect(File portFile) async {
-    try {
-      if (!await portFile.exists()) return null;
-      final lines = await portFile.readAsLines();
-      if (lines.length < 2 || int.tryParse(lines.first.trim()) == null) {
-        return null;
-      }
-      return await puppeteer
-          .connect(
-            browserWsEndpoint:
-                'ws://127.0.0.1:${lines.first.trim()}${lines[1].trim()}',
-            defaultViewport: null,
-          )
-          .timeout(const Duration(seconds: 5));
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> close() async {
     final browser = _browser;
     _reset();
@@ -197,23 +137,6 @@ class AgentBrowser {
   static String _profileDirectory() {
     final base = Platform.environment['APPDATA'] ?? Directory.systemTemp.path;
     return p.join(base, 'GestorUFU', 'agente', 'navegador');
-  }
-
-  static Future<String?> _findBrowser() async {
-    final programFiles = Platform.environment['PROGRAMFILES'] ?? '';
-    final programFilesX86 = Platform.environment['PROGRAMFILES(X86)'] ?? '';
-    final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
-    final candidates = [
-      p.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      p.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-      p.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      p.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      p.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-    ];
-    for (final candidate in candidates) {
-      if (await File(candidate).exists()) return candidate;
-    }
-    return null;
   }
 
   // ------------------------------------------------------------ monitoramento
