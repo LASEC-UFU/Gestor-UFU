@@ -218,29 +218,6 @@ Cursos: `ajusta_horarios_cursos` ({"<program>": "nome"}).
 Leia registros existentes antes de criar novos e siga o mesmo padrão.
 ''',
     ),
-    const AgentSkill(
-      id: 'sei',
-      title: 'Extrair Árvore de Processo (SEI)',
-      summary: 'Inventário de documentos de processos do SEI.',
-      body: '''
-## Para que serve
-Lê a árvore de um processo aberto no SEI (no Edge controlado pelo app) e
-monta o inventário dos documentos: código SEI, tipo/número, nome na árvore e
-data, com resumo.
-
-## Onde fica cada ação
-Informe o endereço/processo e use "Consultar" ("Extrair árvore do
-processo?"); depois "Copiar relatório" (formato para parecer) ou "Exportar
-.txt". O login no SEI é feito pelo usuário no navegador.
-
-## Banco
-Guarda poucos dados (ex.: `sei_tree_address_url`). Ajude o usuário a
-interpretar, filtrar e organizar inventários colados no chat (ex.: listar só
-os comprovantes, conferir numeração, montar parecer); só grave algo se ele
-pedir explicitamente. Para navegar no SEI você também pode usar o navegador
-do agente (browser_*), com o usuário fazendo o login.
-''',
-    ),
   ];
 
   /// Geral + skills declaradas pelos módulos instalados (as que ainda não

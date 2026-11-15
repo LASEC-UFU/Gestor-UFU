@@ -476,6 +476,28 @@ class SeiAutomationService {
       .join()
       .replaceAll(RegExp(r'[^a-z0-9]'), '');
 
+  /// Endereço da aba do SEI controlada pelo app.
+  String? get currentUrl => isConnected ? _page!.url : null;
+
+  /// Documentos da árvore do processo aberto (abre todas as pastas antes).
+  /// Cada item: `text` (nome na árvore) e `href` (endereço absoluto).
+  Future<List<({String text, String href})>> treeDocuments() async {
+    await _openAllFolders();
+    final nodes = await _anyFrame<List<dynamic>>(_treeDocumentsScript) ?? [];
+    return [
+      for (final node in nodes.whereType<Map>())
+        (text: '${node['text'] ?? ''}', href: '${node['href'] ?? ''}'),
+    ];
+  }
+
+  /// Texto visível de um documento da árvore, buscado com a sessão do SEI
+  /// (sem clicar nem trocar o documento exibido). Vazio para PDFs e
+  /// documentos sem texto.
+  Future<String> documentText(String href) async {
+    final text = await _anyFrame<String>(_documentTextScript, args: [href]);
+    return text ?? '';
+  }
+
   Future<void> close() async {
     final browser = _browser;
     _browser = null;
@@ -524,3 +546,10 @@ const _foldersStateScript = r'''() => {
 }''';
 const _openAllFoldersScript =
     r'''() => {const a=document.querySelector('a[id^="anchorAP"]');if(!a)return null;a.click();return true;}''';
+const _treeDocumentsScript =
+    r'''() => {const norm=s=>(s||'').replace(/\s+/g,' ').trim();const anchors=[...document.querySelectorAll('a[href]')].filter(a=>/id_documento=\d+/i.test(a.getAttribute('href')||''));if(!anchors.length)return null;const seen=new Set(),out=[];for(const a of anchors){const id=(a.href.match(/id_documento=(\d+)/i)||[])[1];const text=norm(a.textContent||a.title);if(!text||seen.has(id))continue;seen.add(id);out.push({text,href:a.href});}return out.length?out:null;}''';
+const _documentTextScript = r'''async (href) => {
+ const get=async u=>{const r=await fetch(u,{credentials:'include'});const type=(r.headers.get('content-type')||'').toLowerCase();if(!type.includes('html'))return null;return new DOMParser().parseFromString(await r.text(),'text/html');};
+ const text=d=>{d.querySelectorAll('script,style,noscript').forEach(e=>e.remove());d.querySelectorAll('p,div,br,li,tr,h1,h2,h3,h4,h5,td').forEach(e=>e.append('\n'));return (d.body?.textContent||'').trim();};
+ try{const page=await get(href);if(!page)return '';const frame=page.querySelector('#ifrArvoreHtml,iframe[src*="documento_visualizar"],iframe[src*="documento_consultar"]');if(frame){const src=new URL(frame.getAttribute('src'),href).href;const inner=await get(src);return inner?text(inner):'';}return text(page);}catch(e){return '';}
+}''';

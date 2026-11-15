@@ -1,271 +1,83 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:provider/provider.dart';
+import 'package:gestor_ufu/modules/sei/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class SeiTreePage extends StatefulWidget {
-  const SeiTreePage({super.key});
+  const SeiTreePage({required this.service, super.key});
+
+  final SeiArvoreService service;
 
   @override
   State<SeiTreePage> createState() => _SeiTreePageState();
 }
 
 class _SeiTreePageState extends State<SeiTreePage> {
-  static const _addressKey = 'sei_tree_address_url';
-  final _urlController = TextEditingController(text: 'https://sei.ufu.br');
+  final _urlController = TextEditingController(
+    text: SeiArvoreService.defaultAddress,
+  );
   final _documentTableScroll = ScrollController();
-  final List<_SeiDocument> _documents = [];
-  final List<String> _logs = [];
-  Process? _bridge;
-  StreamSubscription<String>? _stdoutSubscription;
-  String _status = 'Navegador não conectado';
   String? _error;
-  String _progressLabel = '';
-  int _progress = 0;
-  int _progressTotal = 0;
   bool _openingBrowser = false;
-  bool _browserReady = false;
-  bool _extracting = false;
 
-  bool get _browserOpened => _bridge != null && _browserReady;
+  SeiArvoreService get _service => widget.service;
+  bool get _extracting => _service.extraindo;
+  bool get _browserOpened => _service.conectado;
 
   @override
   void initState() {
     super.initState();
-    _loadAddress();
+    _service.addListener(_refresh);
+    _service.enderecoSalvo().then((url) {
+      if (mounted) _urlController.text = url;
+    });
   }
 
-  Future<void> _loadAddress() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString(_addressKey);
-    if (mounted && saved != null && saved.trim().isNotEmpty) {
-      _urlController.text = saved;
-    }
-  }
-
-  Future<void> _saveAddress(String value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_addressKey, value.trim());
+  void _refresh() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _service.removeListener(_refresh);
     _urlController.dispose();
     _documentTableScroll.dispose();
-    _stdoutSubscription?.cancel();
-    final process = _bridge;
-    if (process != null) {
-      try {
-        process.stdin.writeln(jsonEncode({'command': 'shutdown'}));
-        Future<void>.delayed(const Duration(seconds: 2), () {
-          try {
-            process.kill();
-          } catch (_) {}
-        });
-      } catch (_) {}
-    }
     super.dispose();
   }
 
-  Future<void> _openBrowser() async {
-    final url = _urlController.text.trim();
-    final uri = Uri.tryParse(url);
-    if (uri == null ||
-        !{'http', 'https'}.contains(uri.scheme) ||
-        uri.host.isEmpty) {
-      setState(
-        () => _error =
-            'Informe um endereço válido iniciado por http:// ou https://.',
-      );
-      return;
-    }
+  String get _status {
+    if (_openingBrowser) return 'Abrindo o Edge…';
+    if (_extracting) return 'Consultando documentos do processo';
+    if (_browserOpened) return 'Edge conectado';
+    return 'Navegador não conectado';
+  }
 
+  String _message(Object error) =>
+      error is CommandException ? error.message : '$error';
+
+  Future<void> _openBrowser() async {
     setState(() {
       _error = null;
       _openingBrowser = true;
-      _browserReady = false;
-      _status = 'Iniciando Edge e automação…';
     });
-    await _saveAddress(uri.toString());
-    _addLog(
-      'Abrindo o SEI no Edge. Faça login e navegue até o processo desejado.',
-    );
-
     try {
-      final process = await _startBridge();
-      if (!mounted) return;
-      _bridge = process;
-      _stdoutSubscription = process.stdout
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen(
-            _handleBridgeEvent,
-            onError: (Object error) {
-              if (mounted) {
-                setState(() {
-                  _error = 'Falha na comunicação com a automação: $error';
-                });
-              }
-            },
-            onDone: () {
-              if (mounted && !_extracting) {
-                setState(() {
-                  _bridge = null;
-                  _openingBrowser = false;
-                  _browserReady = false;
-                  _status = 'Automação encerrada';
-                });
-              }
-            },
-          );
-      process.stderr
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())
-          .listen((line) => _addLog('Automação: $line'));
-      process.stdin.writeln(
-        jsonEncode({'command': 'open_browser', 'url': url}),
-      );
+      await _service.abrir(_urlController.text);
     } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _openingBrowser = false;
-        _status = 'Não foi possível iniciar';
-        _error = error.toString();
-      });
-      _addLog('Erro ao iniciar a automação: $error');
+      _service.log('Erro ao abrir o Edge: ${_message(error)}');
+      if (mounted) setState(() => _error = _message(error));
+    } finally {
+      if (mounted) setState(() => _openingBrowser = false);
     }
-  }
-
-  Future<Process> _startBridge() async {
-    final script = File(
-      'automation${Platform.pathSeparator}sei_tree_bridge.py',
-    );
-    if (!await script.exists()) {
-      throw StateError(
-        'Arquivo da automação não encontrado: ${script.absolute.path}. '
-        'Inicie o aplicativo a partir da pasta do projeto.',
-      );
-    }
-
-    final candidates = <String?>[
-      Platform.environment['PREENCHE_DIARIO_PYTHON'],
-      r'C:\SourceCode\PreencheDiario-UFU\.venv\Scripts\python.exe',
-    ].whereType<String>().where((path) => path.trim().isNotEmpty);
-    String? python;
-    for (final candidate in candidates) {
-      if (await File(candidate).exists()) {
-        python = candidate;
-        break;
-      }
-    }
-    python ??= 'python';
-
-    final env = Map<String, String>.from(Platform.environment)
-      ..['PYTHONIOENCODING'] = 'utf-8';
-    final projectRoot = Directory.current.parent;
-    final siblingLegacyProject = Directory(
-      '${projectRoot.path}${Platform.pathSeparator}PreencheDiario-UFU',
-    );
-    if (await siblingLegacyProject.exists()) {
-      env['PREENCHE_DIARIO_ROOT'] = siblingLegacyProject.path;
-    }
-    return Process.start(
-      python,
-      ['-u', script.absolute.path],
-      environment: env,
-      runInShell: true,
-    );
-  }
-
-  void _handleBridgeEvent(String line) {
-    Map<String, dynamic> event;
-    try {
-      event = jsonDecode(line) as Map<String, dynamic>;
-    } catch (_) {
-      _addLog(line);
-      return;
-    }
-    final type = event['type'];
-    if (type == 'log') {
-      _addLog(event['message']?.toString() ?? '');
-      return;
-    }
-    if (!mounted) return;
-
-    switch (type) {
-      case 'browser_opened':
-        setState(() {
-          _openingBrowser = false;
-          _browserReady = true;
-          _status = 'Edge aberto · faça login e abra um processo';
-        });
-        _addLog('Edge pronto em ${event['url'] ?? _urlController.text}.');
-      case 'started':
-        setState(() {
-          _extracting = true;
-          _error = null;
-          _documents.clear();
-          _progress = 0;
-          _progressTotal = 0;
-          _progressLabel = 'Preparando a leitura da árvore…';
-          _status = 'Consultando documentos do processo';
-        });
-      case 'progress':
-        setState(() {
-          _progress = (event['current'] as num?)?.toInt() ?? 0;
-          _progressTotal = (event['total'] as num?)?.toInt() ?? 0;
-          _progressLabel = event['name']?.toString() ?? '';
-        });
-        _addLog('Documento $_progress/$_progressTotal: $_progressLabel');
-      case 'result':
-        final rows = (event['documents'] as List<dynamic>? ?? const [])
-            .whereType<Map<String, dynamic>>()
-            .map(_SeiDocument.fromJson)
-            .toList();
-        setState(() {
-          _documents
-            ..clear()
-            ..addAll(rows);
-          _extracting = false;
-          _progressLabel = '';
-          _status = 'Consulta concluída';
-        });
-        _addLog('${rows.length} documento(s) encontrados na árvore.');
-      case 'error':
-      case 'fatal':
-        final message = event['message']?.toString() ?? 'Erro desconhecido.';
-        setState(() {
-          _error = message;
-          if (_openingBrowser || type == 'fatal') _browserReady = false;
-          _openingBrowser = false;
-          _extracting = false;
-          _status = 'A consulta precisa de atenção';
-        });
-        _addLog('Erro: $message');
-      case 'stopping':
-        _addLog('Encerrando automação.');
-    }
-  }
-
-  void _addLog(String message) {
-    if (message.trim().isEmpty || !mounted) return;
-    setState(() {
-      _logs.add(message.trim());
-      if (_logs.length > 250) _logs.removeAt(0);
-    });
   }
 
   Future<void> _extractTree() async {
-    if (_bridge == null || !_browserOpened) {
+    if (!_browserOpened) {
       setState(
         () =>
             _error = 'Abra o Edge pelo aplicativo antes de consultar a árvore.',
@@ -277,7 +89,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Extrair árvore do processo?'),
         content: const Text(
-          'A consulta abrirá cada documento para tentar identificar tipo e número, '
+          'A consulta lê cada documento para tentar identificar tipo e número, '
           'código SEI, data e um resumo. Confirme que o Edge está no processo correto. '
           'Esses campos são extraídos do texto visível e precisam ser revisados.',
         ),
@@ -295,22 +107,17 @@ class _SeiTreePageState extends State<SeiTreePage> {
       ),
     );
     if (confirmed != true || !mounted) return;
-
-    setState(() {
-      _error = null;
-      _extracting = true;
-      _documents.clear();
-      _progress = 0;
-      _progressTotal = 0;
-      _progressLabel = 'Iniciando leitura da árvore…';
-      _status = 'Consultando documentos do processo';
-    });
-    _addLog('Iniciando consulta da árvore do processo atual.');
-    _bridge!.stdin.writeln(jsonEncode({'command': 'extract_tree'}));
+    setState(() => _error = null);
+    try {
+      await _service.extrair();
+    } catch (error) {
+      _service.log('Erro na consulta: ${_message(error)}');
+      if (mounted) setState(() => _error = _message(error));
+    }
   }
 
   Future<void> _saveReport() async {
-    if (_documents.isEmpty) return;
+    if (_service.documentos.isEmpty) return;
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Salvar inventário da árvore do processo',
       fileName: 'relatorio_arvore_sei.txt',
@@ -318,14 +125,12 @@ class _SeiTreePageState extends State<SeiTreePage> {
       allowedExtensions: const ['txt'],
     );
     if (path == null || path.isEmpty) return;
-
     try {
-      await File(path).writeAsString(_formatReport(), encoding: utf8);
+      await _service.salvarRelatorio(path);
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Inventário salvo em $path')));
-      _addLog('Inventário salvo em $path');
     } catch (error) {
       if (!mounted) return;
       setState(() => _error = 'Não foi possível salvar o inventário: $error');
@@ -333,8 +138,8 @@ class _SeiTreePageState extends State<SeiTreePage> {
   }
 
   Future<void> _copyReport() async {
-    if (_documents.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: _formatReport()));
+    if (_service.documentos.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: _service.relatorio()));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -342,18 +147,6 @@ class _SeiTreePageState extends State<SeiTreePage> {
       ),
     );
   }
-
-  String _formatReport() => _documents
-      .map((doc) {
-        final identification = doc.typeNumber.isNotEmpty
-            ? doc.typeNumber
-            : doc.treeName;
-        final code = doc.seiCode.isNotEmpty ? ' (${doc.seiCode})' : '';
-        final date = doc.date.isNotEmpty ? ', de ${doc.date}' : '';
-        final summary = doc.summary.isNotEmpty ? ' – ${doc.summary}' : '';
-        return '${doc.order}. $identification$code$date$summary';
-      })
-      .join('\n');
 
   @override
   Widget build(BuildContext context) {
@@ -386,7 +179,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                           const SizedBox(height: 16),
                           _buildProgressCard(),
                         ],
-                        if (_documents.isNotEmpty) ...[
+                        if (_service.documentos.isNotEmpty) ...[
                           const SizedBox(height: 20),
                           _buildResults(),
                         ],
@@ -406,54 +199,14 @@ class _SeiTreePageState extends State<SeiTreePage> {
 
   Widget _buildHeader(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 14, 28, 8),
-    child: Row(
-      children: [
-        IconButton(
-          tooltip: 'Voltar ao painel de funcionalidades',
-          onPressed: () => context.go('/'),
-          icon: Icon(Icons.arrow_back_rounded),
-          color: AppTheme.textSecondary,
-        ),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFB454).withAlpha(35),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(
-            Icons.account_tree_rounded,
-            color: Color(0xFFFFB454),
-            size: 21,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'SEI',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              'EXTRAIR ÁRVORE DE PROCESSO',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 9,
-                letterSpacing: 1.1,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const Spacer(),
+    child: ModuleHeader(
+      title: 'SEI',
+      subtitle: 'Extrair árvore de processo',
+      icon: Icons.account_tree_rounded,
+      accent: const Color(0xFFFFB454),
+      onBack: () => context.go('/'),
+      actions: [
         _StatusPill(label: _status, busy: _openingBrowser || _extracting),
-        const SizedBox(width: 10),
-        const ThemeSelector(compact: true),
       ],
     ),
   );
@@ -498,7 +251,6 @@ class _SeiTreePageState extends State<SeiTreePage> {
             final address = TextField(
               controller: _urlController,
               keyboardType: TextInputType.url,
-              onChanged: _saveAddress,
               enabled: !_openingBrowser && !_extracting,
               decoration: const InputDecoration(
                 labelText: 'Endereço do SEI',
@@ -516,7 +268,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.open_in_browser_rounded),
-              label: Text(_bridge == null ? 'Abrir Edge' : 'Ir para o SEI'),
+              label: Text(!_browserOpened ? 'Abrir Edge' : 'Ir para o SEI'),
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFFB87524),
                 foregroundColor: Colors.white,
@@ -628,8 +380,8 @@ class _SeiTreePageState extends State<SeiTreePage> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                _progressTotal > 0
-                    ? 'Documento $_progress de $_progressTotal'
+                _service.total > 0
+                    ? 'Documento ${_service.progresso} de ${_service.total}'
                     : 'Preparando a árvore…',
                 style: TextStyle(
                   color: AppTheme.textPrimary,
@@ -637,24 +389,26 @@ class _SeiTreePageState extends State<SeiTreePage> {
                 ),
               ),
             ),
-            if (_progressTotal > 0)
+            if (_service.total > 0)
               Text(
-                '${((_progress / _progressTotal) * 100).round()}%',
+                '${((_service.progresso / _service.total) * 100).round()}%',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
           ],
         ),
         const SizedBox(height: 12),
         LinearProgressIndicator(
-          value: _progressTotal > 0 ? _progress / _progressTotal : null,
+          value: _service.total > 0
+              ? _service.progresso / _service.total
+              : null,
           color: Color(0xFFFFB454),
           backgroundColor: AppTheme.divider,
           borderRadius: BorderRadius.circular(8),
         ),
-        if (_progressLabel.isNotEmpty) ...[
+        if (_service.etapa.isNotEmpty) ...[
           const SizedBox(height: 9),
           Text(
-            _progressLabel,
+            _service.etapa,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
@@ -684,7 +438,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    'Documentos encontrados · ${_documents.length}',
+                    'Documentos encontrados · ${_service.documentos.length}',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontWeight: FontWeight.w600,
@@ -740,7 +494,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
           ),
         ),
         const Divider(height: 1),
-        if (_documents.isEmpty)
+        if (_service.documentos.isEmpty)
           Padding(
             padding: EdgeInsets.all(22),
             child: Text(
@@ -760,7 +514,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
                 border: Border.all(color: AppTheme.divider),
               ),
               child: SelectableText(
-                _formatReport(),
+                _service.relatorio(),
                 style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 13,
@@ -808,17 +562,17 @@ class _SeiTreePageState extends State<SeiTreePage> {
               DataColumn(label: Text('Data')),
               DataColumn(label: Text('Resumo')),
             ],
-            rows: _documents.map((document) {
+            rows: _service.documentos.map((document) {
               return DataRow(
                 cells: [
-                  DataCell(Text('${document.order}')),
-                  DataCell(_LimitedCell(document.treeName, width: 210)),
-                  DataCell(_LimitedCell(document.typeNumber, width: 220)),
+                  DataCell(Text('${document.ordem}')),
+                  DataCell(_LimitedCell(document.nomeArvore, width: 210)),
+                  DataCell(_LimitedCell(document.tipoNumero, width: 220)),
                   DataCell(
-                    Text(document.seiCode.isEmpty ? '—' : document.seiCode),
+                    Text(document.codigoSei.isEmpty ? '—' : document.codigoSei),
                   ),
-                  DataCell(_LimitedCell(document.date, width: 150)),
-                  DataCell(_LimitedCell(document.summary, width: 320)),
+                  DataCell(_LimitedCell(document.data, width: 150)),
+                  DataCell(_LimitedCell(document.resumo, width: 320)),
                 ],
               );
             }).toList(),
@@ -862,7 +616,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
   );
 
   Widget _buildLogPanel() => ExpansionTile(
-    initiallyExpanded: _logs.isNotEmpty,
+    initiallyExpanded: _service.logs.isNotEmpty,
     tilePadding: EdgeInsets.symmetric(horizontal: 18),
     collapsedShape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(14),
@@ -877,7 +631,7 @@ class _SeiTreePageState extends State<SeiTreePage> {
       style: TextStyle(color: AppTheme.textPrimary, fontSize: 13),
     ),
     subtitle: Text(
-      '${_logs.length} mensagens',
+      '${_service.logs.length} mensagens',
       style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
     ),
     children: [
@@ -887,11 +641,11 @@ class _SeiTreePageState extends State<SeiTreePage> {
         padding: const EdgeInsets.fromLTRB(18, 0, 18, 14),
         child: ListView.builder(
           shrinkWrap: true,
-          itemCount: _logs.length,
+          itemCount: _service.logs.length,
           itemBuilder: (context, index) => Padding(
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Text(
-              _logs[index],
+              _service.logs[index],
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 11,
@@ -902,33 +656,6 @@ class _SeiTreePageState extends State<SeiTreePage> {
         ),
       ),
     ],
-  );
-}
-
-class _SeiDocument {
-  const _SeiDocument({
-    required this.order,
-    required this.treeName,
-    required this.seiCode,
-    required this.typeNumber,
-    required this.date,
-    required this.summary,
-  });
-
-  final int order;
-  final String treeName;
-  final String seiCode;
-  final String typeNumber;
-  final String date;
-  final String summary;
-
-  factory _SeiDocument.fromJson(Map<String, dynamic> json) => _SeiDocument(
-    order: (json['ordem'] as num?)?.toInt() ?? 0,
-    treeName: json['nome_arvore']?.toString() ?? '',
-    seiCode: json['codigo_sei']?.toString() ?? '',
-    typeNumber: json['tipo_numero']?.toString() ?? '',
-    date: json['data']?.toString() ?? '',
-    summary: json['resumo']?.toString() ?? '',
   );
 }
 
