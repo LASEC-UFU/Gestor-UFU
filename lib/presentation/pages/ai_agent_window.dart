@@ -17,7 +17,9 @@ import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
+import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/orchestrator/application/ai_memory.dart';
+import 'package:gestor_ufu/orchestrator/application/ai_memory_share.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/application/project_setup.dart';
@@ -246,7 +248,14 @@ class _AiAgentPageState extends State<AiAgentPage> {
   }
 
   /// AI Memory oficial gerenciado (instalado só quando o usuário pede).
-  final _aiMemory = AiMemoryBridge(AiMemoryRuntime());
+  late final _aiMemory = AiMemoryBridge(
+    _aiMemoryRuntime,
+    share: AiMemoryShare(
+      _aiMemoryRuntime,
+      SharedPreferencesSyncService.openConfiguredFolder,
+    ),
+  );
+  final _aiMemoryRuntime = AiMemoryRuntime();
   bool _orqTab = true;
   final _orqMcp = <AgentBackend, AgentMcpServer>{};
 
@@ -355,7 +364,13 @@ class _AiAgentPageState extends State<AiAgentPage> {
     for (final mcp in _orqMcp.values) {
       unawaited(mcp.stop());
     }
-    _aiMemory.runtime.stop();
+    // Salva a memória na pasta compartilhada e libera a posse antes de
+    // parar o servidor (também é salva a cada 10 minutos).
+    unawaited(
+      (_aiMemory.share?.release() ?? Future<void>.value()).whenComplete(
+        _aiMemory.runtime.stop,
+      ),
+    );
     for (final session in _sessions.values) {
       for (final approval in session.approvals) {
         if (!approval.completer.isCompleted) {

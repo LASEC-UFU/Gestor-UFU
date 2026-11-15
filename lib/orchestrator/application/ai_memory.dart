@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:gestor_ufu/orchestrator/application/ai_memory_share.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_memory.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
 import 'package:gestor_ufu/orchestrator/domain/secret_redaction.dart';
@@ -181,6 +182,28 @@ class AiMemoryRuntime {
     }
   }
 
+  /// Cria a pasta de dados com `init` (configuração e token próprios deste
+  /// computador), se ainda não existir. O `restore` de outro computador
+  /// mantém esta configuração e o token (o backup não leva o token).
+  Future<void> initialize() async {
+    final exe = await executable();
+    if (exe == null) {
+      throw const AiMemoryException('O AI Memory não está instalado.');
+    }
+    await Directory(dataDir).create(recursive: true);
+    if (await File(configPath).exists()) return;
+    final init = await Process.run(exe, [
+      '--data-dir',
+      dataDir,
+      '--config',
+      configPath,
+      'init',
+    ], workingDirectory: root).timeout(const Duration(seconds: 60));
+    if (init.exitCode != 0) {
+      throw AiMemoryException('ai-memory init falhou: ${init.stderr}');
+    }
+  }
+
   /// Garante o servidor ativo (reaproveita o que estiver no endpoint salvo).
   Future<String> ensureServer() async {
     final current = _url;
@@ -192,19 +215,7 @@ class AiMemoryRuntime {
         'Orquestrador.',
       );
     }
-    await Directory(dataDir).create(recursive: true);
-    if (!await File(configPath).exists()) {
-      final init = await Process.run(exe, [
-        '--data-dir',
-        dataDir,
-        '--config',
-        configPath,
-        'init',
-      ], workingDirectory: root).timeout(const Duration(seconds: 60));
-      if (init.exitCode != 0) {
-        throw AiMemoryException('ai-memory init falhou: ${init.stderr}');
-      }
-    }
+    await initialize();
     try {
       final saved = jsonDecode(await File(endpointPath).readAsString());
       final savedUrl = saved is Map ? '${saved['url'] ?? ''}' : '';
@@ -399,9 +410,16 @@ class _DigestSink implements Sink<Digest> {
 /// `gestor-ufu/<projeto>`. Escreve com `create_only`, confere lendo de
 /// volta e só marca "verified" quando a leitura confirma.
 class AiMemoryBridge implements OrqMemoryBridge {
-  AiMemoryBridge(this.runtime);
+  AiMemoryBridge(this.runtime, {this.share});
 
   final AiMemoryRuntime runtime;
+
+  /// Leva a memória entre computadores pela pasta compartilhada (um ativo
+  /// por vez).
+  final AiMemoryShare? share;
+
+  /// Situação do compartilhamento da memória (para a tela).
+  String get shareStatus => share?.status ?? 'Memória só neste computador';
   String _status = 'AI Memory não iniciado';
   bool _ready = false;
 
@@ -421,7 +439,9 @@ class AiMemoryBridge implements OrqMemoryBridge {
       return;
     }
     try {
+      if (runtime.url == null) await share?.beforeStart();
       await runtime.ensureServer();
+      share?.startAutoExport();
       _status = 'AI Memory ${AiMemoryRelease.version} ativo';
       _ready = true;
     } on Object catch (error) {

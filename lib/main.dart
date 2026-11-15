@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/core/router/app_router.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
+import 'package:gestor_ufu/data/services/shared_folder/shared_files_mirror.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/data/services/windows_update_service.dart';
 import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
@@ -119,6 +120,17 @@ Future<void> main(List<String> args) async {
       }
     };
   if (Platform.isWindows) await agentHost.start();
+  // Dados vindos de outro computador pela pasta compartilhada: mesma
+  // recarga das alterações feitas pelo agente.
+  sharedDatabase.onRemoteChanged = (_) async {
+    await services.terms.load();
+    for (final module in ModuleRegistry.instance.modules) {
+      await module.onExternalDataChanged();
+    }
+  };
+  // Arquivos gerados (relatórios, PDFs, planilhas) na pasta compartilhada.
+  final filesMirror = SharedFilesMirror(sharedDatabase);
+  filesMirror.start();
 
   if (kDebugMode && diaryAutomationDebugEnabled) {
     unawaited(() async {

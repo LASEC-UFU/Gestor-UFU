@@ -9,6 +9,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/data/services/shared_folder/folder_sync_engine.dart';
+import 'package:gestor_ufu/data/services/shared_folder/shared_folder_crypto.dart';
+
 enum SharedPreferencesSyncStatus { disconnected, connected, conflict, error }
 
 class SharedPreferencesSyncService extends ChangeNotifier
@@ -18,6 +21,12 @@ class SharedPreferencesSyncService extends ChangeNotifier
   static const _baselineKey = '${metadataPrefix}baseline_hash';
   static const _baselineSnapshotKey = '${metadataPrefix}baseline_snapshot';
   static const _passwordKey = '${metadataPrefix}encryption_key';
+
+  /// "pasta": banco dividido por módulo numa pasta (Google Drive etc.).
+  /// Ausente: modo antigo de arquivo único (migrado automaticamente).
+  static const _modeKey = '${metadataPrefix}mode';
+  static const folderMode = 'pasta';
+  static const migrationBase = 'migracao/base.gdb';
   static const _format = 'gestor_ufu_encrypted_shared_database';
   static const _version = 1;
 
@@ -37,6 +46,22 @@ class SharedPreferencesSyncService extends ChangeNotifier
   Timer? _timer;
   bool _busy = false;
 
+  /// Modo pasta.
+  SharedFolderCrypto? _crypto;
+  FolderSyncEngine? _engine;
+  DateTime? _lastSync;
+
+  /// Avisado com as chaves alteradas por dados vindos de outro computador
+  /// (os módulos recarregam).
+  Future<void> Function(Set<String> keys)? onRemoteChanged;
+
+  bool get isFolder => _crypto != null;
+  SharedFolderCrypto? get crypto => _crypto;
+  DateTime? get lastSync => _lastSync;
+
+  /// Grupos (módulos) em conflito no modo pasta.
+  Set<String> get conflictGroups => _engine?.conflicts ?? const {};
+
   SharedPreferencesSyncStatus get status => _status;
   String? get filePath => _filePath;
   String? get error => _error;
@@ -45,8 +70,14 @@ class SharedPreferencesSyncService extends ChangeNotifier
 
   String get statusLabel => switch (_status) {
     SharedPreferencesSyncStatus.disconnected => 'Banco local',
-    SharedPreferencesSyncStatus.connected => 'Banco compartilhado conectado',
-    SharedPreferencesSyncStatus.conflict => 'Conflito de sincronização',
+    SharedPreferencesSyncStatus.connected =>
+      isFolder
+          ? 'Pasta compartilhada conectada'
+          : 'Banco compartilhado conectado',
+    SharedPreferencesSyncStatus.conflict =>
+      isFolder && conflictGroups.isNotEmpty
+          ? 'Conflito de sincronização em: ${conflictGroups.join(', ')}'
+          : 'Conflito de sincronização',
     SharedPreferencesSyncStatus.error => 'Erro de sincronização',
   };
 
@@ -65,8 +96,23 @@ class SharedPreferencesSyncService extends ChangeNotifier
       );
       return;
     }
+    if (prefs.getString(_modeKey) == folderMode) {
+      try {
+        await _openFolder(_filePath!, _password!);
+        await _synchronizeFolder();
+        _startTimer();
+      } catch (error) {
+        _setError('Não foi possível abrir a pasta compartilhada: $error');
+      }
+      return;
+    }
     try {
       await _synchronize();
+      // Banco antigo (arquivo único): migra para a pasta dividida.
+      if (_status == SharedPreferencesSyncStatus.connected) {
+        await _migrateToFolder();
+        return;
+      }
       _timer?.cancel();
       _timer = Timer.periodic(const Duration(seconds: 3), (_) {
         if (WidgetsBinding.instance.lifecycleState ==
@@ -115,13 +161,180 @@ class SharedPreferencesSyncService extends ChangeNotifier
       _setStatus(SharedPreferencesSyncStatus.connected);
     }
     _error = null;
+    // Arquivo antigo escolhido: migra já para a pasta dividida.
+    await _migrateToFolder();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------------------ Modo pasta
+
+  void _startTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-        unawaited(_synchronize());
+        unawaited(_synchronizeFolder());
       }
     });
+  }
+
+  static String stateDirFor(String folder) {
+    final base =
+        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+    final id = base64Url
+        .encode(utf8.encode(p.normalize(folder).toLowerCase()))
+        .replaceAll('=', '');
+    return p.join(
+      base,
+      'GestorUFU',
+      'banco-compartilhado',
+      id.length > 60 ? id.substring(id.length - 60) : id,
+    );
+  }
+
+  Future<void> _openFolder(
+    String folder,
+    String password, {
+    bool create = false,
+  }) async {
+    final crypto = await SharedFolderCrypto.open(
+      folder,
+      password,
+      create: create,
+    );
+    _crypto = crypto;
+    _engine = FolderSyncEngine(
+      crypto: crypto,
+      backend: _SharedPrefsBackend(),
+      stateDir: stateDirFor(folder),
+      machine: Platform.localHostname,
+    );
+  }
+
+  Future<void> _synchronizeFolder() async {
+    final engine = _engine;
+    if (_busy || engine == null) return;
+    _busy = true;
+    try {
+      final result = await engine.sync();
+      _lastSync = DateTime.now();
+      if (result.changedKeys.isNotEmpty) {
+        await onRemoteChanged?.call(result.changedKeys);
+      }
+      _error = null;
+      _setStatus(
+        engine.conflicts.isEmpty
+            ? SharedPreferencesSyncStatus.connected
+            : SharedPreferencesSyncStatus.conflict,
+      );
+      notifyListeners();
+    } catch (error) {
+      _setError('Não foi possível sincronizar a pasta compartilhada: $error');
+    } finally {
+      _busy = false;
+    }
+  }
+
+  /// Conecta a uma pasta: nova (cria e publica este computador) ou
+  /// existente (usa os dados da pasta ou publica os deste computador).
+  Future<void> connectToFolder({
+    required String folder,
+    required String password,
+    required bool useShared,
+  }) async {
+    if (password.trim().length < 8) {
+      throw const FormatException('Use uma senha com pelo menos 8 caracteres.');
+    }
+    final exists = SharedFolderCrypto.hasManifest(folder);
+    _timer?.cancel();
+    await _openFolder(folder, password, create: !exists);
+    final engine = _engine!;
+    if (exists && useShared) {
+      final changed = await engine.adoptAll();
+      if (changed.isNotEmpty) await onRemoteChanged?.call(changed);
+    } else {
+      await engine.publishAll();
+    }
+    _filePath = folder;
+    _password = password;
+    await _secureStorage.write(key: _passwordKey, value: password);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pathKey, folder);
+    await prefs.setString(_modeKey, folderMode);
+    await prefs.remove(_baselineKey);
+    await prefs.remove(_baselineSnapshotKey);
+    _error = null;
+    _setStatus(SharedPreferencesSyncStatus.connected);
+    _startTimer();
     notifyListeners();
+  }
+
+  /// Migra do arquivo único antigo para a pasta `GestorUFU-banco` ao lado
+  /// dele. O arquivo antigo fica intacto (cópia de segurança). Se outro
+  /// computador já migrou, usa o retrato da migração como base da junção.
+  Future<void> _migrateToFolder() async {
+    final file = _filePath;
+    final password = _password;
+    if (file == null || password == null) return;
+    final folder = p.join(p.dirname(file), 'GestorUFU-banco');
+    final exists = SharedFolderCrypto.hasManifest(folder);
+    _timer?.cancel();
+    await _openFolder(folder, password, create: !exists);
+    final engine = _engine!;
+    final crypto = _crypto!;
+    final snapshotText = await _localSnapshot();
+    if (!exists) {
+      await engine.publishAll();
+      await crypto.writeAtomic(
+        p.join(folder, migrationBase),
+        await crypto.encryptBytes(
+          utf8.encode(snapshotText),
+          header: {'tipo': 'base-da-migracao'},
+        ),
+      );
+    } else {
+      final baseBytes = await SharedFolderCrypto.readStable(
+        p.join(folder, migrationBase),
+      );
+      final base = baseBytes == null
+          ? _decodeSnapshot(snapshotText)
+          : _decodeSnapshot(utf8.decode(await crypto.decryptBytes(baseBytes)));
+      await engine.seedBaseline(base);
+      final result = await engine.sync();
+      if (result.changedKeys.isNotEmpty) {
+        await onRemoteChanged?.call(result.changedKeys);
+      }
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_pathKey, folder);
+    await prefs.setString(_modeKey, folderMode);
+    // A cópia completa do banco antigo (base da junção) não é mais usada.
+    await prefs.remove(_baselineKey);
+    await prefs.remove(_baselineSnapshotKey);
+    _filePath = folder;
+    _error = null;
+    _setStatus(
+      engine.conflicts.isEmpty
+          ? SharedPreferencesSyncStatus.connected
+          : SharedPreferencesSyncStatus.conflict,
+    );
+    _startTimer();
+    notifyListeners();
+  }
+
+  /// Abre a pasta configurada neste computador (usado pela janela do agente
+  /// para guardar a memória do AI Memory). Null se não houver pasta.
+  static Future<SharedFolderCrypto?> openConfiguredFolder() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    if (prefs.getString(_modeKey) != folderMode) return null;
+    final folder = prefs.getString(_pathKey);
+    final password = await _secureStorage.read(key: _passwordKey);
+    if (folder == null || password == null || password.isEmpty) return null;
+    try {
+      return await SharedFolderCrypto.open(folder, password);
+    } on Object {
+      return null;
+    }
   }
 
   Future<void> disconnect() async {
@@ -129,8 +342,11 @@ class SharedPreferencesSyncService extends ChangeNotifier
     _timer = null;
     _filePath = null;
     _password = null;
+    _crypto = null;
+    _engine = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_pathKey);
+    await prefs.remove(_modeKey);
     await prefs.remove(_baselineKey);
     await prefs.remove(_baselineSnapshotKey);
     await _secureStorage.delete(key: _passwordKey);
@@ -138,6 +354,22 @@ class SharedPreferencesSyncService extends ChangeNotifier
   }
 
   Future<void> resolveConflict({required bool useSharedFile}) async {
+    final engine = _engine;
+    if (engine != null) {
+      try {
+        final changed = <String>{};
+        for (final group in Set.of(engine.conflicts)) {
+          changed.addAll(await engine.resolve(group, useShared: useSharedFile));
+        }
+        if (changed.isNotEmpty) await onRemoteChanged?.call(changed);
+        _error = null;
+        _setStatus(SharedPreferencesSyncStatus.connected);
+        notifyListeners();
+      } catch (error) {
+        _setError('Não foi possível resolver o conflito: $error');
+      }
+      return;
+    }
     if (_status != SharedPreferencesSyncStatus.conflict ||
         _filePath == null ||
         _password == null) {
@@ -167,7 +399,7 @@ class SharedPreferencesSyncService extends ChangeNotifier
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && isConnected) {
-      unawaited(_synchronize());
+      unawaited(isFolder ? _synchronizeFolder() : _synchronize());
     }
   }
 
@@ -554,4 +786,46 @@ class _RemoteSnapshot {
 
   final String plainText;
   final Map<String, dynamic> preferences;
+}
+
+/// Banco local (SharedPreferences) para o motor da pasta, sem os metadados
+/// de sincronização.
+class _SharedPrefsBackend implements PrefsBackend {
+  @override
+  Future<Map<String, Object?>> readAll() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    return {
+      for (final key in prefs.getKeys())
+        if (!key.startsWith(SharedPreferencesSyncService.metadataPrefix))
+          key: prefs.get(key),
+    };
+  }
+
+  @override
+  Future<void> apply(Map<String, Object?> values, Set<String> remove) async {
+    final prefs = await SharedPreferences.getInstance();
+    for (final entry in values.entries) {
+      if (entry.key.startsWith(SharedPreferencesSyncService.metadataPrefix)) {
+        continue;
+      }
+      final value = entry.value;
+      if (value is String) {
+        await prefs.setString(entry.key, value);
+      } else if (value is bool) {
+        await prefs.setBool(entry.key, value);
+      } else if (value is int) {
+        await prefs.setInt(entry.key, value);
+      } else if (value is double) {
+        await prefs.setDouble(entry.key, value);
+      } else if (value is List) {
+        await prefs.setStringList(entry.key, [for (final v in value) '$v']);
+      }
+    }
+    for (final key in remove) {
+      if (!key.startsWith(SharedPreferencesSyncService.metadataPrefix)) {
+        await prefs.remove(key);
+      }
+    }
+  }
 }

@@ -1489,6 +1489,10 @@ class _AiMemoryPanelState extends State<AiMemoryPanel> {
         'Estado: ${widget.bridge.statusLabel}',
         style: const TextStyle(fontSize: 12),
       ),
+      Text(
+        'Entre computadores: ${widget.bridge.shareStatus}',
+        style: const TextStyle(fontSize: 12),
+      ),
       if (_progress != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),

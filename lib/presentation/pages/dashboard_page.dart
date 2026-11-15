@@ -4,6 +4,7 @@ import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/data/services/preferences_backup_service.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/data/services/shared_folder/shared_folder_crypto.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
@@ -85,11 +86,20 @@ class _DashboardPageState extends State<DashboardPage> {
     );
     if (connection == null || !mounted) return;
     try {
-      await context.read<SharedPreferencesSyncService>().connectToFile(
-        filePath: connection.path,
-        password: connection.password,
-        useSharedFile: connection.useSharedFile,
-      );
+      final sync = context.read<SharedPreferencesSyncService>();
+      if (connection.folder) {
+        await sync.connectToFolder(
+          folder: connection.path,
+          password: connection.password,
+          useShared: connection.useSharedFile,
+        );
+      } else {
+        await sync.connectToFile(
+          filePath: connection.path,
+          password: connection.password,
+          useSharedFile: connection.useSharedFile,
+        );
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -267,10 +277,14 @@ class _DatabaseConnectionRequest {
     required this.path,
     required this.password,
     required this.useSharedFile,
+    this.folder = true,
   });
   final String path;
   final String password;
   final bool useSharedFile;
+
+  /// Pasta compartilhada (modo novo); false = arquivo único antigo.
+  final bool folder;
 }
 
 class _SharedDatabaseDialog extends StatefulWidget {
@@ -303,9 +317,34 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
     super.dispose();
   }
 
-  Future<void> _pickExisting() async {
+  bool _folder = true;
+
+  /// Pasta compartilhada (ex.: dentro do Google Drive): existente (tem o
+  /// manifesto do Gestor) ou vazia/nova.
+  Future<void> _pickFolder() async {
+    final dir = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Pasta compartilhada do Gestor UFU (ex.: no Google Drive)',
+    );
+    if (dir == null) return;
+    final exists = SharedFolderCrypto.hasManifest(dir);
+    setState(() {
+      _path = dir;
+      _folder = true;
+      _creating = !exists;
+      _message = exists
+          ? 'Esta pasta já tem o banco do Gestor. Escolha usar os dados da '
+                'pasta ou publicar os dados deste computador.'
+          : 'O banco será criado nesta pasta (um arquivo cifrado por módulo, '
+                'os arquivos gerados e a memória do agente) com os dados '
+                'deste computador.';
+    });
+  }
+
+  /// Arquivo único do formato antigo: conecta e migra para a pasta
+  /// "GestorUFU-banco" ao lado dele.
+  Future<void> _pickLegacyFile() async {
     final result = await FilePicker.platform.pickFiles(
-      dialogTitle: 'Escolher banco compartilhado no OneDrive',
+      dialogTitle: 'Banco compartilhado antigo (.json)',
       type: FileType.custom,
       allowedExtensions: const ['json'],
       allowMultiple: false,
@@ -313,25 +352,11 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
     if (result == null || result.files.single.path == null) return;
     setState(() {
       _path = result.files.single.path;
+      _folder = false;
       _creating = false;
       _message =
-          'Ao conectar, escolha usar os dados do arquivo ou publicar os dados deste computador.';
-    });
-  }
-
-  Future<void> _createFile() async {
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Criar banco compartilhado no OneDrive',
-      fileName: 'gestor_ufu_banco_compartilhado.json',
-      type: FileType.custom,
-      allowedExtensions: const ['json'],
-    );
-    if (path == null) return;
-    setState(() {
-      _path = path.toLowerCase().endsWith('.json') ? path : '$path.json';
-      _creating = true;
-      _message =
-          'O conteúdo atual deste computador será publicado no novo arquivo.';
+          'O arquivo antigo será convertido para a pasta "GestorUFU-banco" '
+          'ao lado dele (o arquivo original fica como cópia de segurança).';
     });
   }
 
@@ -349,6 +374,7 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
         path: _path!,
         password: _password.text,
         useSharedFile: useSharedFile,
+        folder: _folder,
       ),
     );
   }
@@ -428,14 +454,14 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
                   runSpacing: 8,
                   children: [
                     OutlinedButton.icon(
-                      onPressed: _busy ? null : _pickExisting,
-                      icon: const Icon(Icons.folder_open_rounded),
-                      label: const Text('Escolher arquivo existente'),
+                      onPressed: _busy ? null : _pickFolder,
+                      icon: const Icon(Icons.folder_shared_rounded),
+                      label: const Text('Escolher pasta compartilhada'),
                     ),
-                    OutlinedButton.icon(
-                      onPressed: _busy ? null : _createFile,
-                      icon: const Icon(Icons.add_rounded),
-                      label: const Text('Criar banco novo'),
+                    TextButton.icon(
+                      onPressed: _busy ? null : _pickLegacyFile,
+                      icon: const Icon(Icons.history_rounded),
+                      label: const Text('Converter arquivo antigo (.json)'),
                     ),
                   ],
                 ),
@@ -453,7 +479,7 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
                   decoration: const InputDecoration(
                     labelText: 'Senha compartilhada',
                     helperText:
-                        'Use a mesma senha nos dois computadores. Ela protege os dados e credenciais no arquivo.',
+                        'Use a mesma senha nos dois computadores. Ela cifra todos os arquivos da pasta.',
                   ),
                 ),
                 if (_message != null) ...[
@@ -537,7 +563,7 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
         if (_path != null && !_creating)
           OutlinedButton(
             onPressed: _busy ? null : () => _connect(useSharedFile: true),
-            child: const Text('Usar banco compartilhado'),
+            child: const Text('Usar dados da pasta'),
           ),
         if (_path != null)
           FilledButton(
