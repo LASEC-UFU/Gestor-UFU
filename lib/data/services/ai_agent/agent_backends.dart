@@ -106,6 +106,10 @@ abstract class AgentBackend {
   /// Pasta de trabalho dos CLIs fora do modo "Só o Gestor".
   String workDir = '';
 
+  /// Servidores MCP adicionais (nome → URL HTTP) entregues aos CLIs, além do
+  /// servidor do Gestor (ex.: AI Memory nos agentes do Orquestrador).
+  Map<String, String> extraMcpServers = const {};
+
   /// Nível de esforço ('' = padrão).
   String effort = '';
 

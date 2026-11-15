@@ -17,6 +17,9 @@ import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
+import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
+import 'package:gestor_ufu/orchestrator/application/project_setup.dart';
+import 'package:gestor_ufu/presentation/pages/orchestrator/orchestrator_view.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_mcp_server.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
@@ -202,6 +205,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
     'Tramando…',
   ];
 
+  /// Orquestrador (primeira aba): coordenador, quadro de tarefas e agentes
+  /// trabalhadores criados por [_orqBackend].
+  late final OrqController _orq = OrqController(factory: _orqBackend);
+  bool _orqTab = true;
+  final _orqMcp = <AgentBackend, AgentMcpServer>{};
+
   /// Uma sessão por agente (aba); a janela mostra a da aba selecionada.
   final _sessions = <AgentProvider, _Session>{};
   _Session get _s => _sessions.putIfAbsent(
@@ -254,7 +263,14 @@ class _AiAgentPageState extends State<AiAgentPage> {
   void initState() {
     super.initState();
     _input.addListener(_onInputChanged);
+    _orq.addListener(_onOrqChanged);
+    unawaited(_orq.load());
+    _orq.startWatchingChanges();
     unawaited(_init());
+  }
+
+  void _onOrqChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _init() async {
@@ -289,6 +305,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   @override
   void dispose() {
+    _orq
+      ..removeListener(_onOrqChanged)
+      ..dispose();
+    for (final mcp in _orqMcp.values) {
+      unawaited(mcp.stop());
+    }
     for (final session in _sessions.values) {
       for (final approval in session.approvals) {
         if (!approval.completer.isCompleted) {
@@ -310,6 +332,129 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   /// Executa uma ferramenta do Gestor para a sessão [s]. Back-ends que não
   /// relatam as ferramentas têm a chamada mostrada pela janela.
+  /// Cria um agente para o Orquestrador (coordenador ou trabalhador) com o
+  /// mesmo código das abas: chave de API ou CLI oficial, servidor MCP
+  /// próprio e as ferramentas do Gestor.
+  Future<AgentBackend> _orqBackend(OrqBackendRequest request) async {
+    final provider = request.provider;
+    final mode = _settings.modeFor(provider);
+    final model = request.model.isNotEmpty
+        ? request.model
+        : _settings.modelFor(provider, mode);
+    final callTool = _orqToolCaller(request, cli: mode == AgentAuthMode.cli);
+    final coordinator = request.access == AgentAccess.plan;
+    AgentBackend backend;
+    if (mode == AgentAuthMode.apiKey) {
+      final key = await AgentSettings.readApiKey(provider);
+      if (key == null) {
+        throw AgentException(
+          'Informe a chave de API do ${provider.label} nas configurações.',
+        );
+      }
+      backend = switch (provider) {
+        AgentProvider.claude => ClaudeApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: callTool,
+        ),
+        AgentProvider.chatgpt => OpenAiApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: callTool,
+        ),
+        AgentProvider.gemini => GeminiApiBackend(
+          apiKey: key,
+          model: model,
+          callTool: callTool,
+        ),
+        AgentProvider.copilot => throw AgentException(
+          'O GitHub Copilot funciona só com a assinatura (login GitHub).',
+        ),
+      };
+    } else {
+      final mcp = AgentMcpServer(callTool, onPermission: request.onPermission);
+      await mcp.start();
+      backend = cliBackendFor(
+        provider,
+        mcp: mcp,
+        path: _settings.cliPathFor(provider),
+        model: model,
+      );
+      _orqMcp[backend] = mcp;
+    }
+    backend
+      ..access = request.access
+      ..effort = request.effort.isNotEmpty ? request.effort : _settings.effort
+      ..workDir = request.workDir
+      ..onPermission = request.onPermission
+      ..extraMcpServers = request.extraMcpServers
+      // O coordenador só devolve JSON; os trabalhadores recebem também o
+      // guia geral do Gestor (ferramentas, dados, navegador, computador).
+      ..systemPrompt = coordinator
+          ? request.systemPrompt
+          : '${AgentSkills.systemPrompt(AgentSkills.general)}\n\n'
+                '${request.systemPrompt}';
+    return _OrqBackend(
+      backend,
+      onDispose: () async {
+        await _orqMcp.remove(backend)?.stop();
+      },
+    );
+  }
+
+  /// Ferramentas do Gestor para os agentes do Orquestrador, com as mesmas
+  /// regras das abas (controle do computador e comandos com aprovação).
+  AgentToolCaller _orqToolCaller(
+    OrqBackendRequest request, {
+    required bool cli,
+  }) => (name, input) async {
+    final access = request.access;
+    if (name.startsWith('computer_')) {
+      if (access == AgentAccess.gestor || access == AgentAccess.plan) {
+        return jsonEncode({
+          'error':
+              'O controle do computador não está disponível para este '
+              'agente do Orquestrador.',
+        });
+      }
+      final asks =
+          access == AgentAccess.manual || access == AgentAccess.acceptEdits;
+      if (asks &&
+          AgentComputer.actions.contains(name) &&
+          !await request.onPermission(name, input)) {
+        return jsonEncode({'error': 'O usuário negou a ação ($name).'});
+      }
+    }
+    if (name == 'run_command' && access != AgentAccess.bypass) {
+      final command = ModuleRegistry.instance.commandById(
+        '${input['command'] ?? ''}',
+      );
+      if (command != null &&
+          command.approval == CommandApproval.required &&
+          !await request.onPermission(
+            'Comando: ${command.title}',
+            Map<String, dynamic>.from(input['input'] as Map? ?? const {}),
+          )) {
+        return jsonEncode({'error': 'O usuário negou "${command.title}".'});
+      }
+    }
+    String result;
+    try {
+      result =
+          await _host.invokeMethod<String>('tool', {
+            'name': name,
+            'input': jsonEncode(input),
+          }) ??
+          '{"error":"Sem resposta da janela principal."}';
+    } on Object catch (error) {
+      result = jsonEncode({'error': '$error'});
+    }
+    if (agentTools.any((t) => t.name == name && t.mutates)) {
+      unawaited(_refreshUndo());
+    }
+    return cli ? result : _withoutImage(result);
+  };
+
   AgentToolCaller _toolCaller(_Session s) => (name, input) async {
     // Controle do computador: desligado em "Só o Gestor"; cada ação (clique,
     // digitação, atalho...) pede aprovação nos modos que não são automáticos.
@@ -671,6 +816,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
   /// Troca de aba. Cada agente mantém a sua sessão (conectado, com a sua
   /// conversa e até trabalhando), então voltar a ele é imediato.
   Future<void> _selectProvider(AgentProvider provider) async {
+    if (_orqTab) setState(() => _orqTab = false);
     if (provider == _settings.provider) {
       if (_backend == null) await _autoConnect();
       return;
@@ -1726,6 +1872,24 @@ class _AiAgentPageState extends State<AiAgentPage> {
   Widget build(BuildContext context) {
     final vs = VsColors.of(context);
     final connected = _backend != null;
+    if (_orqTab) {
+      return Scaffold(
+        backgroundColor: vs.bg,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _tabs(vs),
+              Expanded(
+                child: OrchestratorView(
+                  controller: _orq,
+                  onPrepareProject: prepareOrchestratorProject,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: vs.bg,
       body: SafeArea(
@@ -1754,6 +1918,36 @@ class _AiAgentPageState extends State<AiAgentPage> {
     padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
     child: Row(
       children: [
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(5),
+            onTap: () => setState(() => _orqTab = true),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: _orqTab ? vs.tab : null,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Orquestrador',
+                    style: TextStyle(fontSize: 13, color: vs.text),
+                  ),
+                  if (_orq.activeCount > 0 || _orq.coordinatorBusy) ...[
+                    const SizedBox(width: 6),
+                    const PulsingDot(color: Color(0xFF0A6ED1)),
+                  ] else if (_orq.approvals.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    TimelineDot(vs.accent),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
         for (final provider in AgentProvider.values)
           Padding(
             padding: const EdgeInsets.only(right: 4),
@@ -1763,7 +1957,9 @@ class _AiAgentPageState extends State<AiAgentPage> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: provider == _settings.provider ? vs.tab : null,
+                  color: !_orqTab && provider == _settings.provider
+                      ? vs.tab
+                      : null,
                   borderRadius: BorderRadius.circular(5),
                 ),
                 child: Row(
@@ -2844,5 +3040,51 @@ class ProviderIcon extends StatelessWidget {
       ),
       child: glyph,
     );
+  }
+}
+
+/// Backend do Orquestrador: delega ao backend real e libera o servidor MCP
+/// próprio ao descartar.
+class _OrqBackend extends AgentBackend {
+  _OrqBackend(this._inner, {required this.onDispose});
+
+  final AgentBackend _inner;
+  final Future<void> Function() onDispose;
+
+  @override
+  bool get reportsTools => _inner.reportsTools;
+
+  @override
+  String get label => _inner.label;
+
+  @override
+  Future<String> verify() => _inner.verify();
+
+  @override
+  Future<List<AgentModel>> listModels() => _inner.listModels();
+
+  @override
+  Future<void> send(
+    String prompt,
+    List<AgentAttachment> attachments,
+    AgentEventSink emit,
+  ) => _inner.send(prompt, attachments, emit);
+
+  @override
+  void reset() => _inner.reset();
+
+  @override
+  Map<String, dynamic> saveState() => _inner.saveState();
+
+  @override
+  void restoreState(Map<String, dynamic> state) => _inner.restoreState(state);
+
+  @override
+  Future<void> cancel() => _inner.cancel();
+
+  @override
+  Future<void> dispose() async {
+    await _inner.dispose();
+    await onDispose();
   }
 }
