@@ -27,7 +27,11 @@ void main() {
     expect(
       () => run('planosTrabalho.salvarCadastro', {'nome': 'Plano 2026'}),
       throwsA(
-        isA<CommandException>().having((e) => e.code, 'code', 'entrada_invalida'),
+        isA<CommandException>().having(
+          (e) => e.code,
+          'code',
+          'entrada_invalida',
+        ),
       ),
     );
     final saved = await run('planosTrabalho.salvarCadastro', {

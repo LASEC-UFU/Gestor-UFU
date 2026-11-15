@@ -112,6 +112,7 @@ class OrqSettings {
     List<OrqUpstream>? upstreams,
     this.aiMemory = true,
     List<OrqProfile>? profiles,
+    this.coordinatorEffort = 'medium',
   }) : workers = workers ?? AgentProvider.values.toSet(),
        projectPaths = projectPaths ?? {},
        upstreams = upstreams ?? [],
@@ -142,6 +143,10 @@ class OrqSettings {
 
   /// Contas extras dos agentes CLI.
   List<OrqProfile> profiles;
+
+  /// Esforço do coordenador ('' = padrão da conta). Planejar raramente
+  /// precisa de esforço alto; "medium" equilibra qualidade e tokens.
+  String coordinatorEffort;
 
   OrqProfile? profile(String id) {
     for (final profile in profiles) {
@@ -192,6 +197,7 @@ class OrqSettings {
           if (u is Map) OrqUpstream.fromJson(Map<String, dynamic>.from(u)),
       ],
       aiMemory: raw['aiMemory'] != false,
+      coordinatorEffort: '${raw['coordinatorEffort'] ?? 'medium'}',
       profiles: [
         for (final item in raw['profiles'] as List? ?? const [])
           if (item is Map) OrqProfile.fromJson(Map<String, dynamic>.from(item)),
@@ -215,5 +221,6 @@ class OrqSettings {
         'upstreams': [for (final u in upstreams) u.toJson()],
         'aiMemory': aiMemory,
         'profiles': [for (final profile in profiles) profile.toJson()],
+        'coordinatorEffort': coordinatorEffort,
       });
 }

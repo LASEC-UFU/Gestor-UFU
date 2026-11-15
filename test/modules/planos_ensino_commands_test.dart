@@ -59,9 +59,11 @@ void main() {
     final imported = await run('planosEnsino.importarWord', {
       'path': word.data['path'],
     });
-    final back = (await run('planosEnsino.listar', {
-      'id': imported.data['id'],
-    })).data['plano'] as Map;
+    final back =
+        (await run('planosEnsino.listar', {
+              'id': imported.data['id'],
+            })).data['plano']
+            as Map;
     expect((back['identificacao'] as Map)['codigo'], 'FEELT31201');
     final backup = await run('planosEnsino.exportarBackup', {
       'path': '${dir.path}/backup.json',

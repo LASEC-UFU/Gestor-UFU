@@ -63,10 +63,7 @@ void main() {
     expect(result.ok, isTrue);
     final state = await service.load();
     final created = state.curriculum(result.data['curriculumId'] as String)!;
-    expect(created.subjects.map((s) => s.code), [
-      'FEELT31101',
-      'FEELT31102',
-    ]);
+    expect(created.subjects.map((s) => s.code), ['FEELT31101', 'FEELT31102']);
     expect(created.subjects.last.practical, 30);
   });
 

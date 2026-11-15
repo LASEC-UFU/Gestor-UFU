@@ -1157,6 +1157,22 @@ class _OrqSettingsDialogState extends State<_OrqSettingsDialog> {
                 onChanged: (v) =>
                     setState(() => s.coordinator = v ?? s.coordinator),
               ),
+              DropdownButtonFormField<String>(
+                initialValue: s.coordinatorEffort,
+                decoration: const InputDecoration(
+                  labelText: 'Esforço do coordenador (menos = menos tokens)',
+                ),
+                items: const [
+                  DropdownMenuItem(value: '', child: Text('Padrão da conta')),
+                  DropdownMenuItem(value: 'low', child: Text('Baixo')),
+                  DropdownMenuItem(
+                    value: 'medium',
+                    child: Text('Médio (recomendado)'),
+                  ),
+                  DropdownMenuItem(value: 'high', child: Text('Alto')),
+                ],
+                onChanged: (v) => setState(() => s.coordinatorEffort = v ?? ''),
+              ),
               const SizedBox(height: 6),
               const Text(
                 'Trabalhadores permitidos',

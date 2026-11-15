@@ -91,10 +91,7 @@ void main() {
     expect(File(pdf.data['path'] as String).existsSync(), isTrue);
     final copy = await run('progressao.duplicar', {'processoId': id});
     expect(copy.data['processoId'], isNot(id));
-    expect(
-      commands['progressao.excluir']!.approval,
-      CommandApproval.required,
-    );
+    expect(commands['progressao.excluir']!.approval, CommandApproval.required);
     await run('progressao.excluir', {'processoId': id});
     final listed = await run('progressao.listar', {});
     expect((listed.data['processos'] as List), hasLength(1));

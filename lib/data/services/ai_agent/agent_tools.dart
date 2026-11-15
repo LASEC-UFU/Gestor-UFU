@@ -440,6 +440,42 @@ const agentTools = <AgentToolSpec>[
     description: 'Fecha o navegador do agente.',
     schema: {'type': 'object', 'properties': {}},
   ),
+  // ------------------------------------------------ Arquivos (econômico)
+  AgentToolSpec(
+    name: 'read_spreadsheet',
+    description:
+        'Lê planilha .xlsx/.xlsm/.csv/.tsv gastando poucos tokens. Sem sheet: '
+        'resumo (abas, tamanho, cabeçalho, primeiras linhas). Com sheet: só o '
+        'trecho pedido (range "A1:F50" ou start_row/max_rows) em TSV. Prefira '
+        'isto a abrir o Excel ou escrever scripts.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'path': {'type': 'string'},
+        'sheet': {'type': 'string'},
+        'range': {'type': 'string'},
+        'start_row': {'type': 'integer'},
+        'max_rows': {'type': 'integer'},
+        'preview_rows': {'type': 'integer'},
+      },
+      'required': ['path'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'read_document',
+    description:
+        'Lê o texto de .docx (parágrafos e tabelas) ou de arquivos de texto, '
+        'em fatias (offset/max_chars, padrão 8000).',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'path': {'type': 'string'},
+        'offset': {'type': 'integer'},
+        'max_chars': {'type': 'integer'},
+      },
+      'required': ['path'],
+    },
+  ),
   // ------------------------------------------------ Controle do computador
   AgentToolSpec(
     name: 'computer_screenshot',

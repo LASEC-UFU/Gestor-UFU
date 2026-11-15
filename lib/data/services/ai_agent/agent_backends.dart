@@ -106,6 +106,18 @@ abstract class AgentBackend {
   /// Pasta de trabalho dos CLIs fora do modo "Só o Gestor".
   String workDir = '';
 
+  /// Ferramentas do Gestor oferecidas a este agente (null = todas). Menos
+  /// ferramentas = menos tokens em cada pedido.
+  Set<String>? toolFilter;
+
+  /// As ferramentas efetivamente oferecidas (respeita [toolFilter]).
+  List<AgentToolSpec> get tools => toolFilter == null
+      ? agentTools
+      : [
+          for (final t in agentTools)
+            if (toolFilter!.contains(t.name)) t,
+        ];
+
   /// Variáveis do perfil de conta (ex.: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`)
   /// para usar outra conta do mesmo CLI — perfis do Orquestrador.
   Map<String, String> profileEnvironment = const {};
@@ -276,7 +288,7 @@ class ClaudeApiBackend extends AgentBackend {
                   },
                 ],
                 'tools': [
-                  for (final tool in agentTools)
+                  for (final tool in tools)
                     {
                       'name': tool.name,
                       'description': tool.description,
@@ -481,7 +493,7 @@ class OpenAiApiBackend extends AgentBackend {
                   ..._messages,
                 ],
                 'tools': [
-                  for (final tool in agentTools)
+                  for (final tool in tools)
                     {
                       'type': 'function',
                       'function': {
@@ -777,14 +789,12 @@ abstract class CliAgentBackend extends AgentBackend {
   Future<void> openLoginTerminal() async {
     final exe = await executable();
     final loginArgs = ['"$exe"', ...provider.loginArgs].join(' ');
-    await Process.start('cmd', [
-      '/c',
-      'start',
-      'Login ${provider.label}',
+    await Process.start(
       'cmd',
-      '/k',
-      loginArgs,
-    ], mode: ProcessStartMode.detached, environment: profileEnvironment);
+      ['/c', 'start', 'Login ${provider.label}', 'cmd', '/k', loginArgs],
+      mode: ProcessStartMode.detached,
+      environment: profileEnvironment,
+    );
   }
 
   String get _instructions => access == AgentAccess.gestor
@@ -2644,7 +2654,7 @@ class GeminiApiBackend extends AgentBackend {
                 'tools': [
                   {
                     'functionDeclarations': [
-                      for (final tool in agentTools)
+                      for (final tool in tools)
                         {
                           'name': tool.name,
                           'description': tool.description,

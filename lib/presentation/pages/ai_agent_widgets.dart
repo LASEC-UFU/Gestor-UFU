@@ -497,6 +497,8 @@ String agentToolLabel(String name) {
     'TodoWrite' => 'Lista de tarefas',
     'Task' || 'Agent' => 'Subagente',
     'ExitPlanMode' => 'Plano pronto',
+    'read_spreadsheet' => 'Ler planilha',
+    'read_document' => 'Ler documento',
     'computer_screenshot' => 'Ver a tela',
     'computer_windows' => 'Listar janelas',
     'computer_cursor' => 'Posição do mouse',

@@ -16,9 +16,13 @@ typedef AgentPermissionHandler =
 /// ferramentas do Gestor UFU para o Claude Code CLI e o Codex CLI. Escuta
 /// apenas em 127.0.0.1 e exige um token aleatório na URL.
 class AgentMcpServer {
-  AgentMcpServer(this._callTool, {this.onPermission});
+  AgentMcpServer(this._callTool, {this.onPermission, this.toolFilter});
 
   final AgentToolCaller _callTool;
+
+  /// Ferramentas oferecidas (null = todas). Menos ferramentas = menos tokens
+  /// por pedido (ex.: trabalhador de projeto só recebe as de arquivos).
+  Set<String>? toolFilter;
 
   /// Usado pelo Claude Code (`--permission-prompt-tool`) para pedir
   /// aprovação de comandos e edições no chat do Gestor.
@@ -171,11 +175,12 @@ class AgentMcpServer {
         return ok({
           'tools': [
             for (final tool in agentTools)
-              {
-                'name': tool.name,
-                'description': tool.description,
-                'inputSchema': tool.schema,
-              },
+              if (toolFilter == null || toolFilter!.contains(tool.name))
+                {
+                  'name': tool.name,
+                  'description': tool.description,
+                  'inputSchema': tool.schema,
+                },
           ],
         });
       case 'tools/call':
@@ -184,7 +189,11 @@ class AgentMcpServer {
         final input = Map<String, dynamic>.from(
           params['arguments'] as Map? ?? const {},
         );
-        final result = await _callTool(name, input);
+        final result = toolFilter != null && !toolFilter!.contains(name)
+            ? jsonEncode({
+                'error': 'Ferramenta $name indisponível para este agente.',
+              })
+            : await _callTool(name, input);
         final isError = result.startsWith('{"error"');
         // Capturas de tela vão como imagem MCP (o agente "vê" a página).
         if (result.contains('"image_base64"')) {

@@ -13,6 +13,7 @@ import 'package:gestor_ufu/orchestrator/application/git_worktrees.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_journal.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_memory.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_prompts.dart';
+import 'package:gestor_ufu/orchestrator/application/orq_routing_skill.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/application/project_guidance.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
@@ -35,6 +36,8 @@ class OrqBackendRequest {
     this.workDir = '',
     this.extraMcpServers = const {},
     this.environment = const {},
+    this.toolFilter,
+    this.gestorGuide = true,
   });
 
   final AgentProvider provider;
@@ -53,7 +56,32 @@ class OrqBackendRequest {
 
   /// Variáveis do perfil de conta (outra conta do mesmo CLI).
   final Map<String, String> environment;
+
+  /// Ferramentas do Gestor oferecidas (null = todas). Menos = menos tokens.
+  final Set<String>? toolFilter;
+
+  /// Inclui o guia geral do Gestor no prompt de sistema (~2.400 tokens);
+  /// desnecessário para tarefas de projeto de código.
+  final bool gestorGuide;
 }
+
+/// Ferramentas do trabalhador de projeto: só leitura econômica de arquivos
+/// e modelos de importação.
+const orqProjectWorkerTools = {
+  'read_spreadsheet',
+  'read_document',
+  'list_templates',
+  'create_template',
+};
+
+/// Ferramentas do coordenador: consulta (ele só planeja).
+const orqCoordinatorTools = {
+  'read_spreadsheet',
+  'read_document',
+  'list_modules',
+  'list_commands',
+  'get_skill',
+};
 
 typedef OrqBackendFactory =
     Future<AgentBackend> Function(OrqBackendRequest request);
@@ -99,6 +127,16 @@ class OrqController extends ChangeNotifier {
 
   OrqSettings settings = OrqSettings();
   bool loaded = false;
+
+  /// Modelos disponíveis em cada conta (provedor → ids), consultados nos
+  /// CLIs/APIs sem gastar tokens. Fornecido pela janela.
+  Future<Map<String, List<String>>> Function()? modelCatalog;
+  Map<String, List<String>>? _catalog;
+  DateTime? _catalogAt;
+
+  /// Assinatura do contexto fixo já enviado nesta conversa do coordenador
+  /// (orientações, branches, catálogo): só é reenviado quando muda.
+  String _sentContext = '';
 
   /// Conversa com o coordenador.
   final chat = <AgentEntry>[];
@@ -163,6 +201,7 @@ class OrqController extends ChangeNotifier {
       _coordinatorState = Map<String, dynamic>.from(
         saved['state'] as Map? ?? const {},
       );
+      _sentContext = '${saved['sentContext'] ?? ''}';
     }
     // Tarefas deste computador que estavam executando quando o app fechou.
     for (final run in runs) {
@@ -199,6 +238,7 @@ class OrqController extends ChangeNotifier {
     await _store.writeJson(chatKey, {
       'entries': [for (final e in entries) e.toJson()],
       'state': _coordinator?.saveState() ?? _coordinatorState,
+      'sentContext': _sentContext,
     });
   }
 
@@ -207,6 +247,7 @@ class OrqController extends ChangeNotifier {
     _coordinator = null;
     _coordinatorProvider = null;
     _coordinatorState = const {};
+    _sentContext = '';
     await backend?.dispose();
   }
 
@@ -259,8 +300,7 @@ class OrqController extends ChangeNotifier {
       final backend = await _ensureCoordinator();
       final project = settings.projectPath;
       final root = await GitWorktrees.repositoryRoot(project);
-      final message = buildCoordinatorMessage(
-        userText: prompt,
+      final fixed = buildCoordinatorContext(
         projectPath: project,
         guidance: await _guidance(project),
         branches: root == null
@@ -274,11 +314,21 @@ class OrqController extends ChangeNotifier {
             '${profile.provider}: ${profile.id} (${profile.name}, até '
                 '${profile.maxParallel} em paralelo)',
         ],
+        catalog: await _modelCatalog(),
+      );
+      // O contexto fixo vai uma vez por conversa (fica no histórico da
+      // sessão do coordenador); só é reenviado quando muda.
+      final signature = '${fixed.length}:${fixed.hashCode}';
+      final sendFixed = signature != _sentContext;
+      final message = buildCoordinatorMessage(
+        userText: prompt,
+        fixedContext: sendFixed ? fixed : '',
         runs: runs,
         memoryContext: settings.aiMemory
             ? await memory.coordinatorContext(prompt, project)
             : '',
       );
+      _sentContext = signature;
       final reply = StringBuffer();
       await backend.send(message, const [], (event) {
         switch (event) {
@@ -314,6 +364,25 @@ class OrqController extends ChangeNotifier {
 
   Future<void> stopCoordinator() async => _coordinator?.cancel();
 
+  /// Catálogo de modelos (atualizado a cada hora).
+  Future<Map<String, List<String>>> _modelCatalog() async {
+    final source = modelCatalog;
+    if (source == null) return const {};
+    final at = _catalogAt;
+    if (_catalog != null &&
+        at != null &&
+        DateTime.now().difference(at) < const Duration(hours: 1)) {
+      return _catalog!;
+    }
+    try {
+      _catalog = await source().timeout(const Duration(seconds: 25));
+      _catalogAt = DateTime.now();
+    } on Object {
+      _catalog ??= const {};
+    }
+    return _catalog!;
+  }
+
   Future<AgentBackend> _ensureCoordinator() async {
     final current = _coordinator;
     if (current != null && _coordinatorProvider == settings.coordinator) {
@@ -325,8 +394,11 @@ class OrqController extends ChangeNotifier {
         provider: settings.coordinator,
         // Só planeja: leitura do projeto, sem editar nem disparar agentes.
         access: AgentAccess.plan,
-        systemPrompt: orqCoordinatorSystemPrompt,
+        systemPrompt: '$orqCoordinatorSystemPrompt\n$orqRoutingSkill',
         label: 'Coordenador',
+        effort: settings.coordinatorEffort,
+        toolFilter: orqCoordinatorTools,
+        gestorGuide: false,
         workDir: settings.projectPath,
         onPermission: permissionFor('Coordenador'),
       ),
@@ -853,6 +925,10 @@ class OrqController extends ChangeNotifier {
           label: 'Tarefa ${task.id} · ${provider.name}',
           onPermission: permissionFor('Tarefa ${task.id} · ${provider.name}'),
           environment: profile?.environment ?? const {},
+          toolFilter: task.target == OrqTarget.gestor
+              ? null
+              : orqProjectWorkerTools,
+          gestorGuide: task.target == OrqTarget.gestor,
           extraMcpServers: {
             if (taskMemory.mcpServerUrl.isNotEmpty)
               'ai_memory': taskMemory.mcpServerUrl,

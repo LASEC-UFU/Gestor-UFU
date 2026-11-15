@@ -43,17 +43,20 @@ void main() {
     expect(File(exported.data['path'] as String).existsSync(), isTrue);
   });
 
-  test('excluir exige aprovação e configuração inexistente tem código', () async {
-    expect(commands['moodle.excluir']!.approval, CommandApproval.required);
-    expect(
-      () => run('moodle.exportarPlanilha', {'configId': 'x'}),
-      throwsA(
-        isA<CommandException>().having(
-          (e) => e.code,
-          'code',
-          'configuracao_nao_encontrada',
+  test(
+    'excluir exige aprovação e configuração inexistente tem código',
+    () async {
+      expect(commands['moodle.excluir']!.approval, CommandApproval.required);
+      expect(
+        () => run('moodle.exportarPlanilha', {'configId': 'x'}),
+        throwsA(
+          isA<CommandException>().having(
+            (e) => e.code,
+            'code',
+            'configuracao_nao_encontrada',
+          ),
         ),
-      ),
-    );
-  });
+      );
+    },
+  );
 }

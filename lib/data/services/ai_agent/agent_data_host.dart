@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gestor_ufu/data/services/ai_agent/agent_browser.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_files.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
@@ -210,6 +211,17 @@ class AgentDataHost {
         );
       } on StateError catch (error) {
         throw _ToolError(error.message);
+      }
+    }
+    if (name == 'read_spreadsheet' || name == 'read_document') {
+      try {
+        return name == 'read_spreadsheet'
+            ? await AgentFiles.readSpreadsheet(input)
+            : await AgentFiles.readDocument(input);
+      } on StateError catch (error) {
+        throw _ToolError(error.message);
+      } on Object catch (error) {
+        throw _ToolError('Não foi possível ler o arquivo: $error');
       }
     }
     if (name.startsWith('computer_')) {

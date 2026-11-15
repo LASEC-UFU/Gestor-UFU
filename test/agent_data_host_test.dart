@@ -12,8 +12,12 @@ void main() {
   final host = AgentDataHost.instance;
   installModules(ModuleRegistry.instance);
 
-  Future<Map<String, dynamic>> run(String name, Map<String, dynamic> input) async =>
-      Map<String, dynamic>.from(jsonDecode(await host.runTool(name, input)) as Map);
+  Future<Map<String, dynamic>> run(
+    String name,
+    Map<String, dynamic> input,
+  ) async => Map<String, dynamic>.from(
+    jsonDecode(await host.runTool(name, input)) as Map,
+  );
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({
@@ -110,9 +114,7 @@ void main() {
   });
 
   test('run_command executa e devolve erros com código', () async {
-    final listed = await run('run_command', {
-      'command': 'equivalencia.listar',
-    });
+    final listed = await run('run_command', {'command': 'equivalencia.listar'});
     expect(listed['ok'], isTrue);
     expect(listed['currentId'], 'eca-2020');
     final failed = await run('run_command', {

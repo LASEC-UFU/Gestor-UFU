@@ -66,9 +66,6 @@ void main() {
   });
 
   test('registrar o mesmo módulo duas vezes é erro', () {
-    expect(
-      () => registry.register(registry.byId('diario')!),
-      throwsStateError,
-    );
+    expect(() => registry.register(registry.byId('diario')!), throwsStateError);
   });
 }

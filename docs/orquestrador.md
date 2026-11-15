@@ -81,6 +81,40 @@ O Gestor usa o runtime oficial do [AI Memory](https://github.com/akitaonrails/ai
 
 O AI Memory fica **neste computador**. Já o quadro, o diário e as transferências do Orquestrador ficam no banco compartilhado do Gestor e sincronizam entre computadores.
 
+## Roteamento e economia de tokens
+
+O coordenador recebe uma skill de roteamento (`lib/orchestrator/application/orq_routing_skill.dart`). Ela é fixa no prompt de sistema, e os CLIs reaproveitam esse trecho do cache. A skill ensina:
+
+- **Faixa de modelo por tipo de tarefa:**
+  - **econômico** (haiku, mini, flash, lite, luna) com esforço `low`, para tarefas mecânicas;
+  - **padrão** (sonnet, codex padrão) com `medium`, para código do dia a dia;
+  - **forte** (opus, pro, fable, terra, max) com `high`, só para trabalho difícil ou depois de uma falha.
+  - O critério é o custo por tarefa concluída: retrabalho sai mais caro que um modelo melhor.
+- **Agente por perfil de uso:**
+  - Claude: código em vários arquivos e PDF;
+  - Codex: a variante mini rende cerca de 4 vezes mais uso na assinatura;
+  - Gemini: contexto grande e barato;
+  - Copilot: créditos por modelo × tokens, então só modelos econômicos;
+  - tarefas do Gestor: qualquer agente na faixa econômica.
+- **Arquivos:**
+  - planilhas pelo `read_spreadsheet`: resumo primeiro, depois só o intervalo;
+  - importação no Gestor pelo comando do módulo, que lê o arquivo sozinho;
+  - `.docx` pelo `read_document`;
+  - `browser_snapshot` em vez de capturas de tela; controle do computador só como último recurso.
+- **Plano:** tarefas pequenas e autocontidas; passos mecânicos agrupados; dependências em vez de reexplorar; "pedir ajustes" em vez de nova tentativa.
+
+**Catálogo de modelos.** O coordenador recebe a lista real de modelos de cada conta, com a faixa de cada um. A lista vem do cache das abas ou da consulta do próprio CLI, que não gasta tokens, e é atualizada a cada hora.
+
+**Medidas que reduzem tokens automaticamente:**
+
+| Item | Antes | Agora |
+|---|---|---|
+| Trabalhador de projeto (guia + ferramentas) | ~6.200 tokens | ~700 tokens (só `read_spreadsheet`, `read_document` e modelos) |
+| Ferramentas do coordenador | ~3.700 tokens | ~440 tokens |
+| Orientações do projeto, branches, catálogo e perfis | a cada mensagem | uma vez por conversa; reenvio só quando mudam |
+| Quadro enviado ao coordenador | até ~3.300 tokens | compacto: rodadas ativas + a última, resultados resumidos |
+| Esforço do coordenador | padrão da conta | `medium` (configurável) |
+
 ## Dados
 
 | Chave | Conteúdo |

@@ -10,6 +10,7 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/orchestrator/application/git_worktrees.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
+import 'package:gestor_ufu/orchestrator/application/orq_prompts.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
 
@@ -312,6 +313,90 @@ void main() {
       contains('cli_auth_credentials_store = "file"'),
     );
     await Directory(profile.directory).delete(recursive: true);
+  });
+
+  test(
+    'coordenador: contexto fixo uma vez, skill, ferramentas e esforço',
+    () async {
+      final orq = controller()
+        ..modelCatalog = () async => {
+          'claude': [
+            'claude-haiku-5-5',
+            'claude-sonnet-5-5',
+            'claude-opus-5-5',
+          ],
+        };
+      await orq.load();
+      coordinatorReply = '{"mode":"answer","answer":"ok"}';
+      await orq.send('primeira');
+      await orq.send('segunda');
+      final coordinator = created.single;
+      expect(
+        coordinator.request.systemPrompt,
+        contains('Roteamento e economia'),
+      );
+      expect(coordinator.request.toolFilter, orqCoordinatorTools);
+      expect(coordinator.request.effort, 'medium');
+      expect(coordinator.request.gestorGuide, isFalse);
+      final first = coordinator.prompts[0];
+      final second = coordinator.prompts[1];
+      expect(first, contains('Agentes trabalhadores permitidos'));
+      expect(first, contains('claude-haiku-5-5 (econômico)'));
+      expect(first, contains('claude-opus-5-5 (forte)'));
+      expect(second, isNot(contains('Agentes trabalhadores permitidos')));
+      expect(second, contains('Pedido do usuário:\nsegunda'));
+      // Nova conversa: o contexto volta a ser enviado.
+      await orq.newConversation();
+      await orq.send('terceira');
+      expect(
+        created.last.prompts.single,
+        contains('Agentes trabalhadores permitidos'),
+      );
+      orq.dispose();
+    },
+  );
+
+  test('trabalhador de projeto recebe só ferramentas de arquivo', () async {
+    final repo = await Directory.systemTemp.createTemp('orq_proj');
+    final orq = controller();
+    await orq.load();
+    orq.settings.projectPath = repo.path;
+    coordinatorReply = _plan([
+      {..._task('p'), 'target': 'project', 'worktree': 'current'},
+      _task('g'),
+    ]);
+    await orq.send('duas');
+    final run = orq.runs.first;
+    await orq.approvePlan(run.id);
+    await _settle(
+      () => run.tasks.every((t) => t.status == OrqTaskStatus.awaitingReview),
+    );
+    final project = created.firstWhere(
+      (b) => b.request.label.startsWith('Tarefa p '),
+    );
+    final gestor = created.firstWhere(
+      (b) => b.request.label.startsWith('Tarefa g '),
+    );
+    expect(project.request.toolFilter, orqProjectWorkerTools);
+    expect(project.request.gestorGuide, isFalse);
+    expect(gestor.request.toolFilter, isNull);
+    expect(gestor.request.gestorGuide, isTrue);
+    orq.dispose();
+    await repo.delete(recursive: true);
+  });
+
+  test('faixa de custo pelo nome do modelo', () {
+    expect(modelTier('claude-haiku-5-5'), 'econômico');
+    expect(modelTier('gpt-5.6-luna'), 'econômico');
+    expect(modelTier('gemini-3-flash'), 'econômico');
+    expect(modelTier('gpt-5-codex-mini'), 'econômico');
+    expect(modelTier('claude-sonnet-5-5'), 'padrão');
+    expect(modelTier('claude-opus-5-5'), 'forte');
+    expect(modelTier('gemini-3.1-pro'), 'forte');
+    expect(modelTier('gpt-5.6-terra'), 'forte');
+    expect(modelTier('gemini-3.5-flash'), 'econômico');
+    expect(modelTier('gpt-5-codex-max'), 'forte');
+    expect(modelTier('gpt-5-codex'), 'padrão');
   });
 
   group('git', () {

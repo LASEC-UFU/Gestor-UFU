@@ -212,7 +212,38 @@ class _AiAgentPageState extends State<AiAgentPage> {
   late final OrqController _orq = OrqController(
     factory: _orqBackend,
     memory: _aiMemory,
-  );
+  )..modelCatalog = _orqModelCatalog;
+
+  /// Modelos de cada conta para o coordenador: os já listados nas abas e,
+  /// para os demais agentes de CLI, a consulta de modelos do próprio CLI
+  /// (não gasta tokens).
+  Future<Map<String, List<String>>> _orqModelCatalog() async {
+    final result = <String, List<String>>{};
+    for (final provider in _orq.settings.workers) {
+      final mode = _settings.modeFor(provider);
+      var models = _modelCache['${provider.name}.${mode.name}'];
+      if ((models == null || models.isEmpty) && mode == AgentAuthMode.cli) {
+        try {
+          final probe = cliBackendFor(
+            provider,
+            mcp: AgentMcpServer((name, input) async => '{}'),
+            path: _settings.cliPathFor(provider),
+            model: '',
+          );
+          models = await probe.listModels().timeout(
+            const Duration(seconds: 12),
+          );
+          _modelCache['${provider.name}.${mode.name}'] = models;
+        } on Object {
+          models = null;
+        }
+      }
+      if (models != null && models.isNotEmpty) {
+        result[provider.name] = [for (final m in models) m.id];
+      }
+    }
+    return result;
+  }
 
   /// AI Memory oficial gerenciado (instalado só quando o usuário pede).
   final _aiMemory = AiMemoryBridge(AiMemoryRuntime());
@@ -386,7 +417,11 @@ class _AiAgentPageState extends State<AiAgentPage> {
         ),
       };
     } else {
-      final mcp = AgentMcpServer(callTool, onPermission: request.onPermission);
+      final mcp = AgentMcpServer(
+        callTool,
+        onPermission: request.onPermission,
+        toolFilter: request.toolFilter,
+      );
       await mcp.start();
       backend = cliBackendFor(
         provider,
@@ -403,9 +438,10 @@ class _AiAgentPageState extends State<AiAgentPage> {
       ..onPermission = request.onPermission
       ..extraMcpServers = request.extraMcpServers
       ..profileEnvironment = request.environment
+      ..toolFilter = request.toolFilter
       // O coordenador só devolve JSON; os trabalhadores recebem também o
       // guia geral do Gestor (ferramentas, dados, navegador, computador).
-      ..systemPrompt = coordinator
+      ..systemPrompt = coordinator || !request.gestorGuide
           ? request.systemPrompt
           : '${AgentSkills.systemPrompt(AgentSkills.general)}\n\n'
                 '${request.systemPrompt}';
