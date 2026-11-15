@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:puppeteer/puppeteer.dart';
 
 import 'package:gestor_ufu/platform/services/browser_service.dart';
-import 'package:gestor_ufu/data/services/sei_plano_html_merger.dart';
+import 'package:gestor_ufu/modules/planos_ensino/data/sei_plano_html_merger.dart';
 
 typedef PlanoEnsinoLog = void Function(String message);
 
