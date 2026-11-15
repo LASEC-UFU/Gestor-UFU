@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/app/installed_modules.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_templates.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/modules/diario/application/diario_commands.dart';
 import 'package:gestor_ufu/modules/diario/application/diario_service.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
@@ -12,6 +14,12 @@ import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 void main() {
+  // create_template usa os modelos declarados pelos módulos instalados.
+  setUpAll(() {
+    ModuleRegistry.instance.clear();
+    installModules();
+  });
+
   late Directory dir;
   late Map<String, ModuleCommand> commands;
   const term = '1º semestre de 2026';
