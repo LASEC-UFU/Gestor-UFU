@@ -26,6 +26,18 @@ String syncGroupFor(String key) {
   }
   final run = RegExp(r'^orquestrador\.(?:run|events)\.(.+)$').firstMatch(key);
   if (run != null) return 'orquestrador-rodada-${_safe(run.group(1)!)}';
+  final handoff = RegExp(r'^orquestrador\.handoff\.([^.]+)\.').firstMatch(key);
+  if (handoff != null) {
+    return 'orquestrador-rodada-${_safe(handoff.group(1)!)}';
+  }
+  // Conversa "atual" de cada computador: chave por computador, sem conflito.
+  if (key.startsWith('orquestrador.chat.atual.') ||
+      key.startsWith('orquestrador.projeto.')) {
+    return 'orquestrador-computadores';
+  }
+  if (key.startsWith('orquestrador.chat.') && key != 'orquestrador.chat.v1') {
+    return 'orquestrador-conversa-${_safe(key.substring('orquestrador.chat.'.length))}';
+  }
   if (key.startsWith('orquestrador.')) return 'orquestrador';
   // Períodos letivos são de todos os módulos.
   if (key == 'ajusta_horarios_periodos_letivos' ||

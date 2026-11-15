@@ -31,6 +31,7 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
+import 'package:gestor_ufu/platform/services/session_lease.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_widgets.dart';
 
 /// Abre (ou traz para frente) a janela separada do Agente de IA. A janela é
@@ -139,6 +140,10 @@ class _Session {
 
   final AgentProvider provider;
   AgentConversation conv;
+
+  /// Computador que está com esta conversa aberta: aqui ela fica só para
+  /// leitura (docs/arquitetura/decisoes.md, D6).
+  String? readOnlyBy;
   AgentBackend? backend;
   AgentMcpServer? mcp;
   bool busy = false;
@@ -209,11 +214,20 @@ class _AiAgentPageState extends State<AiAgentPage> {
     'Tramando…',
   ];
 
+  /// Posse das sessões entre computadores (uma conversa nunca roda em dois
+  /// computadores ao mesmo tempo).
+  final _lease = SessionLease(
+    SharedPreferencesSyncService.configuredFolderPath,
+  );
+  static const _leaseKind = 'agente';
+  Timer? _readOnlyRefresh;
+
   /// Orquestrador (primeira aba): coordenador, quadro de tarefas e agentes
   /// trabalhadores criados por [_orqBackend].
   late final OrqController _orq = OrqController(
     factory: _orqBackend,
     memory: _aiMemory,
+    lease: SessionLease(SharedPreferencesSyncService.configuredFolderPath),
   )..modelCatalog = _orqModelCatalog;
 
   /// Modelos de cada conta para o coordenador: os já listados nas abas e,
@@ -358,6 +372,9 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   @override
   void dispose() {
+    _readOnlyRefresh?.cancel();
+    unawaited(_lease.releaseAll());
+    _lease.dispose();
     _orq
       ..removeListener(_onOrqChanged)
       ..dispose();
@@ -984,6 +1001,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
     final s = _s;
     final text = _input.text.trim();
     if (s.backend == null || (text.isEmpty && _attachments.isEmpty)) return;
+    if (s.readOnlyBy != null) {
+      _info(
+        'Esta conversa está aberta em ${s.readOnlyBy}. Use "Assumir aqui".',
+      );
+      return;
+    }
     final attachments = List<AgentAttachment>.of(_attachments);
     if (s.busy) {
       // O agente está trabalhando: a mensagem entra na fila e é entregue
@@ -1010,6 +1033,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
   ) async {
     final backend = s.backend;
     if (backend == null) return;
+    if (!await _holdConversation(s)) return;
     final prompt = text.isEmpty
         ? 'Analise os anexos e proponha como usá-los no Gestor UFU.'
         : text;
@@ -1213,6 +1237,9 @@ class _AiAgentPageState extends State<AiAgentPage> {
   Future<void> _saveConversation([_Session? session]) async {
     final s = session ?? _s;
     if (!s.conv.hasMessages) return;
+    // Só leitura: a versão certa é a do outro computador; salvar aqui
+    // sobrescreveria a mais nova com esta cópia.
+    if (s.readOnlyBy != null) return;
     final backend = s.backend;
     s.conv
       ..updatedAt = DateTime.now()
@@ -1233,6 +1260,8 @@ class _AiAgentPageState extends State<AiAgentPage> {
   Future<void> _newConversation() async {
     if (_busy) return;
     await _saveConversation();
+    await _lease.release(_leaseKind, _conv.id);
+    _s.readOnlyBy = null;
     _backend?.reset();
     _backend?.systemPrompt = AgentSkills.systemPrompt(_skill);
     _s.pendingContext = null;
@@ -1259,15 +1288,31 @@ class _AiAgentPageState extends State<AiAgentPage> {
       _info('O ${provider.tabLabel} está trabalhando; aguarde ou pare antes.');
       return;
     }
+    // Aberta em outro computador: só visualizar ou assumir (D6).
+    final elsewhere = await _lease.openElsewhere(_leaseKind, loaded.id);
+    var readOnlyBy = elsewhere?.machine;
+    if (elsewhere != null) {
+      final choice = await _askTakeOver(elsewhere.machine);
+      if (choice == null || !mounted) return;
+      if (choice) readOnlyBy = null;
+    }
     if (provider != _settings.provider) await _selectProvider(provider);
     if (!mounted) return;
+    if (_conv.id != loaded.id) await _lease.release(_leaseKind, _conv.id);
     setState(() {
       _showHistory = false;
       _allowAll = false;
       _approvals.clear();
       _conv = loaded;
+      _s.readOnlyBy = readOnlyBy;
       _skill = AgentSkills.byId(loaded.skill) != null ? loaded.skill : _skill;
     });
+    if (readOnlyBy != null) {
+      _startReadOnlyRefresh();
+      _scrollToEnd(force: true);
+      return;
+    }
+    await _holdConversation(_s);
     final backend = _backend;
     if (backend != null) {
       backend.systemPrompt = AgentSkills.systemPrompt(_skill);
@@ -1275,6 +1320,118 @@ class _AiAgentPageState extends State<AiAgentPage> {
     }
     _scrollToEnd(force: true);
   }
+
+  /// Garante a posse da conversa neste computador antes de usá-la. Se outro
+  /// computador a assumiu no meio tempo, deixa só para leitura.
+  Future<bool> _holdConversation(_Session s) async {
+    final id = s.conv.id;
+    if (_lease.holds(_leaseKind, id)) return true;
+    final elsewhere = await _lease.openElsewhere(_leaseKind, id);
+    if (elsewhere != null) {
+      if (mounted) setState(() => s.readOnlyBy = elsewhere.machine);
+      _startReadOnlyRefresh();
+      _info('Esta conversa está aberta em ${elsewhere.machine}.');
+      return false;
+    }
+    await _lease.take(
+      _leaseKind,
+      id,
+      onLost: (by) => unawaited(_conversationTaken(id, by)),
+    );
+    return true;
+  }
+
+  /// Outro computador assumiu a conversa: para o agente dela aqui.
+  Future<void> _conversationTaken(String id, String by) async {
+    for (final s in _sessions.values) {
+      if (s.conv.id != id) continue;
+      for (final approval in List.of(s.approvals)) {
+        if (!approval.completer.isCompleted) approval.completer.complete(false);
+      }
+      s.queue.clear();
+      if (s.busy) await s.backend?.cancel();
+      if (!mounted) return;
+      setState(() {
+        s.approvals.clear();
+        s.readOnlyBy = by;
+        s.entries.add(
+          AgentEntry(
+            AgentEntryKind.info,
+            'Conversa assumida por $by. Aqui ela ficou só para leitura.',
+          ),
+        );
+      });
+    }
+    _startReadOnlyRefresh();
+  }
+
+  /// Assumir aqui a conversa aberta em outro computador.
+  Future<void> _takeOverConversation() async {
+    final s = _s;
+    await _lease.take(
+      _leaseKind,
+      s.conv.id,
+      onLost: (by) => unawaited(_conversationTaken(s.conv.id, by)),
+    );
+    final latest = await AgentHistory.load(s.conv.id);
+    if (!mounted) return;
+    setState(() {
+      if (latest != null) s.conv = latest;
+      s.readOnlyBy = null;
+      s.entries.add(
+        AgentEntry(
+          AgentEntryKind.info,
+          'Conversa assumida neste computador. O outro computador para em até '
+          'um minuto (mais o tempo do Google Drive sincronizar).',
+        ),
+      );
+    });
+    final backend = s.backend;
+    if (backend != null) await _restoreInto(s, backend, s.conv);
+  }
+
+  /// Conversas só para leitura acompanham o outro computador.
+  void _startReadOnlyRefresh() {
+    _readOnlyRefresh ??= Timer.periodic(const Duration(seconds: 15), (_) async {
+      final s = _s;
+      if (s.readOnlyBy == null) return;
+      final latest = await AgentHistory.load(s.conv.id);
+      if (latest == null || !mounted || s.readOnlyBy == null) return;
+      if (latest.updatedAt != s.conv.updatedAt ||
+          latest.entries.length != s.conv.entries.length) {
+        setState(() => s.conv = latest);
+        _scrollToEnd();
+      }
+    });
+  }
+
+  /// Pergunta o que fazer com uma conversa aberta em outro computador:
+  /// true = assumir, false = só visualizar, null = cancelar.
+  Future<bool?> _askTakeOver(String machine) => showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Conversa aberta em outro computador'),
+      content: Text(
+        'Esta conversa está aberta em $machine. Uma conversa não roda em dois '
+        'computadores ao mesmo tempo: você pode só visualizar (ela se atualiza '
+        'sozinha) ou assumir aqui (lá ela para).',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        OutlinedButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Só visualizar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Assumir aqui'),
+        ),
+      ],
+    ),
+  );
 
   /// Retoma [conv] no [backend]: pela própria sessão do agente quando ela
   /// existe neste computador; senão (outro computador, sessão expirada ou
@@ -1996,7 +2153,10 @@ class _AiAgentPageState extends State<AiAgentPage> {
                   ? _emptyState(vs)
                   : _chat(vs),
             ),
-            if (connected) _composer(vs),
+            if (connected && _s.readOnlyBy != null)
+              _readOnlyBar(vs)
+            else if (connected)
+              _composer(vs),
           ],
         ),
       ),
@@ -2350,6 +2510,35 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   /// Caixa de mensagem no estilo da extensão: texto, anexos e a barra com
   /// +, /, modelo, modo e enviar.
+  /// No lugar da caixa de texto quando a conversa está aberta em outro
+  /// computador.
+  Widget _readOnlyBar(VsColors vs) => Container(
+    margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+    decoration: BoxDecoration(
+      color: vs.card,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: vs.border),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.visibility_outlined, size: 16, color: vs.muted),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Só leitura: esta conversa está aberta em ${_s.readOnlyBy} e se '
+            'atualiza sozinha.',
+            style: TextStyle(fontSize: 12.5, color: vs.text),
+          ),
+        ),
+        FilledButton(
+          onPressed: _takeOverConversation,
+          child: const Text('Assumir aqui'),
+        ),
+      ],
+    ),
+  );
+
   /// Mensagens na fila, acima da caixa de texto.
   Widget _queuePanel(VsColors vs) => Container(
     padding: const EdgeInsets.fromLTRB(10, 8, 6, 6),

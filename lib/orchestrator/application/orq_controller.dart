@@ -20,6 +20,7 @@ import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
 import 'package:gestor_ufu/orchestrator/domain/plan_parser.dart';
 import 'package:gestor_ufu/orchestrator/domain/secret_redaction.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
+import 'package:gestor_ufu/platform/services/session_lease.dart';
 
 /// O que o Orquestrador precisa para criar um agente (coordenador ou
 /// trabalhador). A janela do agente monta o backend com o mesmo código das
@@ -106,12 +107,25 @@ class OrqController extends ChangeNotifier {
     OrqMemoryBridge? memory,
     String? storageRoot,
     this.machine = '',
+    SessionLease? lease,
   }) : _store = store ?? KeyValueStore(),
        journal = journal ?? OrqJournal(store),
        memory = memory ?? const NoMemoryBridge(),
-       storageRoot = storageRoot ?? _defaultStorage();
+       storageRoot = storageRoot ?? _defaultStorage(),
+       lease = lease ?? SessionLease(() async => null);
 
-  static const chatKey = 'orquestrador.chat.v1';
+  /// Conversa do formato antigo (uma só), migrada ao abrir.
+  static const legacyChatKey = 'orquestrador.chat.v1';
+  static const chatPrefix = 'orquestrador.chat.';
+  static String chatKeyFor(String id) => '$chatPrefix$id';
+  static String currentChatKey(String machine) =>
+      'orquestrador.chat.atual.$machine';
+  static const _chatKind = 'orq-conversa';
+  static const _runKind = 'orq-rodada';
+
+  /// Posse das sessões entre computadores: conversas do coordenador e
+  /// rodadas nunca rodam em dois computadores ao mesmo tempo (D6).
+  final SessionLease lease;
 
   final OrqBackendFactory factory;
   final OrqJournal journal;
@@ -138,12 +152,27 @@ class OrqController extends ChangeNotifier {
   /// (orientações, branches, catálogo): só é reenviado quando muda.
   String _sentContext = '';
 
-  /// Conversa com o coordenador.
+  /// Conversa atual com o coordenador.
   final chat = <AgentEntry>[];
+  String chatId = '';
+  String chatTitle = '';
+
+  /// Computador que está com a conversa atual aberta (aqui: só leitura).
+  String? chatReadOnlyBy;
   bool coordinatorBusy = false;
   AgentBackend? _coordinator;
   AgentProvider? _coordinatorProvider;
   Map<String, dynamic> _coordinatorState = const {};
+
+  /// Computador onde a sessão do coordenador foi salva (a sessão do CLI só
+  /// existe nele; nos outros, o coordenador recebe o histórico).
+  String _stateMachine = '';
+  String _pendingTranscript = '';
+
+  /// Rodadas abertas em outros computadores (rodada → computador).
+  final runHolders = <String, String>{};
+  final _lostRuns = <String>{};
+  Timer? _leaseTimer;
 
   /// Rodadas, mais recentes primeiro.
   final runs = <OrqRun>[];
@@ -190,19 +219,29 @@ class OrqController extends ChangeNotifier {
     runs
       ..clear()
       ..addAll(await journal.runs());
-    final saved = await _store.readJson(chatKey);
-    if (saved is Map) {
-      chat
-        ..clear()
-        ..addAll([
-          for (final e in saved['entries'] as List? ?? const [])
-            if (e is Map) AgentEntry.fromJson(Map<String, dynamic>.from(e)),
-        ]);
-      _coordinatorState = Map<String, dynamic>.from(
-        saved['state'] as Map? ?? const {},
-      );
-      _sentContext = '${saved['sentContext'] ?? ''}';
+    await _migrateLegacyChat();
+    var current = await _store.readString(currentChatKey(_machine)) ?? '';
+    // Conversa atual aberta em outro computador: começa uma nova aqui.
+    if (current.isNotEmpty &&
+        await lease.openElsewhere(_chatKind, current) != null) {
+      current = '';
     }
+    if (current.isEmpty || !await _loadChat(current)) _startChat();
+    // Rodadas que este computador executava: retoma a posse (se ninguém
+    // assumiu no meio tempo).
+    for (final run in runs) {
+      if (run.machine == _machine &&
+          (run.status == OrqRunStatus.running ||
+              run.status == OrqRunStatus.paused) &&
+          await lease.openElsewhere(_runKind, run.id) == null) {
+        await _takeRunLease(run);
+      }
+    }
+    await refreshHolders();
+    _leaseTimer ??= Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_refreshFromOtherComputers()),
+    );
     // Tarefas deste computador que estavam executando quando o app fechou.
     for (final run in runs) {
       var dirty = false;
@@ -217,7 +256,7 @@ class OrqController extends ChangeNotifier {
           dirty = true;
         }
       }
-      if (dirty) await journal.saveRun(run);
+      if (dirty) await _saveRun(run);
     }
     loaded = true;
     _changed();
@@ -234,12 +273,174 @@ class OrqController extends ChangeNotifier {
   }
 
   Future<void> _saveChat() async {
+    // Só quem tem a conversa grava (D6).
+    if (chatReadOnlyBy != null || chat.isEmpty) return;
     final entries = chat.length > 200 ? chat.sublist(chat.length - 200) : chat;
-    await _store.writeJson(chatKey, {
+    await _store.writeJson(chatKeyFor(chatId), {
+      'id': chatId,
+      'title': chatTitle,
       'entries': [for (final e in entries) e.toJson()],
       'state': _coordinator?.saveState() ?? _coordinatorState,
+      'stateMachine': _machine,
       'sentContext': _sentContext,
+      'machine': _machine,
+      'updatedAt': DateTime.now().toIso8601String(),
     });
+    await _store.writeString(currentChatKey(_machine), chatId);
+  }
+
+  void _startChat() {
+    chatId = 'c${DateTime.now().microsecondsSinceEpoch}';
+    chatTitle = '';
+    chat.clear();
+    chatReadOnlyBy = null;
+    _coordinatorState = const {};
+    _stateMachine = '';
+    _sentContext = '';
+    _pendingTranscript = '';
+  }
+
+  /// Carrega a conversa [id]; false se não existir.
+  Future<bool> _loadChat(String id) async {
+    final saved = await _store.readJson(chatKeyFor(id));
+    if (saved is! Map) return false;
+    chatId = id;
+    chatTitle = '${saved['title'] ?? ''}';
+    chat
+      ..clear()
+      ..addAll([
+        for (final e in saved['entries'] as List? ?? const [])
+          if (e is Map) AgentEntry.fromJson(Map<String, dynamic>.from(e)),
+      ]);
+    _coordinatorState = Map<String, dynamic>.from(
+      saved['state'] as Map? ?? const {},
+    );
+    _stateMachine = '${saved['stateMachine'] ?? saved['machine'] ?? ''}';
+    _sentContext = '${saved['sentContext'] ?? ''}';
+    // Sessão do CLI de outro computador: não existe aqui. O coordenador
+    // recebe o histórico e o contexto fixo de novo.
+    if (_stateMachine.isNotEmpty && _stateMachine != _machine) {
+      _coordinatorState = const {};
+      _sentContext = '';
+      _pendingTranscript = _transcript();
+    } else {
+      _pendingTranscript = '';
+    }
+    return true;
+  }
+
+  String _transcript() {
+    final buffer = StringBuffer();
+    for (final entry in chat.reversed.take(30).toList().reversed) {
+      if (entry.kind != AgentEntryKind.user &&
+          entry.kind != AgentEntryKind.agent) {
+        continue;
+      }
+      final text = entry.text.length > 1500
+          ? '${entry.text.substring(0, 1500)}…'
+          : entry.text;
+      buffer.writeln(
+        '${entry.kind == AgentEntryKind.user ? 'Usuário' : 'Coordenador'}: $text',
+      );
+    }
+    return buffer.toString();
+  }
+
+  Future<void> _migrateLegacyChat() async {
+    final legacy = await _store.readJson(legacyChatKey);
+    if (legacy is! Map) return;
+    final id = 'c${DateTime.now().microsecondsSinceEpoch}';
+    await _store.writeJson(chatKeyFor(id), {
+      ...Map<String, dynamic>.from(legacy),
+      'id': id,
+      'title': 'Conversa anterior',
+      'machine': _machine,
+      'stateMachine': _machine,
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+    await _store.writeString(currentChatKey(_machine), id);
+    await _store.remove(legacyChatKey);
+  }
+
+  /// Conversas do coordenador (de todos os computadores), mais recentes
+  /// primeiro, com quem está com cada uma aberta.
+  Future<List<OrqChatSummary>> conversations() async {
+    final result = <OrqChatSummary>[];
+    for (final key in await _store.keys(chatPrefix)) {
+      final id = key.substring(chatPrefix.length);
+      if (id.startsWith('atual.') || id == 'v1') continue;
+      final raw = await _store.readJson(key);
+      if (raw is! Map) continue;
+      final holder = await lease.openElsewhere(_chatKind, id);
+      result.add(
+        OrqChatSummary(
+          id: id,
+          title: '${raw['title'] ?? ''}',
+          machine: '${raw['machine'] ?? ''}',
+          updatedAt: DateTime.tryParse('${raw['updatedAt']}') ?? DateTime(2000),
+          openIn: holder?.machine,
+        ),
+      );
+    }
+    result.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return result;
+  }
+
+  /// Abre uma conversa do coordenador. Aberta em outro computador: só
+  /// leitura, a menos que [takeOver] (o outro para).
+  Future<void> openConversation(String id, {bool takeOver = false}) async {
+    if (coordinatorBusy || id == chatId) return;
+    await _saveChat();
+    await lease.release(_chatKind, chatId);
+    await _dropCoordinator();
+    if (!await _loadChat(id)) return;
+    final elsewhere = await lease.openElsewhere(_chatKind, id);
+    if (elsewhere != null && !takeOver) {
+      chatReadOnlyBy = elsewhere.machine;
+    } else {
+      chatReadOnlyBy = null;
+      await _takeChatLease();
+      await _store.writeString(currentChatKey(_machine), chatId);
+    }
+    _changed();
+  }
+
+  /// Assume aqui a conversa atual (aberta em outro computador).
+  Future<void> takeOverConversation() async {
+    await _takeChatLease();
+    await _loadChat(chatId);
+    chatReadOnlyBy = null;
+    chat.add(
+      AgentEntry(
+        AgentEntryKind.info,
+        'Conversa assumida neste computador. O outro para em até um minuto '
+        '(mais o tempo do Google Drive sincronizar).',
+      ),
+    );
+    await _store.writeString(currentChatKey(_machine), chatId);
+    _changed();
+  }
+
+  Future<void> _takeChatLease() async {
+    final id = chatId;
+    await lease.take(
+      _chatKind,
+      id,
+      onLost: (by) => unawaited(_chatTaken(id, by)),
+    );
+  }
+
+  Future<void> _chatTaken(String id, String by) async {
+    if (id != chatId) return;
+    if (coordinatorBusy) await _coordinator?.cancel();
+    chatReadOnlyBy = by;
+    chat.add(
+      AgentEntry(
+        AgentEntryKind.info,
+        'Conversa assumida por $by. Aqui ela ficou só para leitura.',
+      ),
+    );
+    _changed();
   }
 
   Future<void> _dropCoordinator() async {
@@ -251,11 +452,13 @@ class OrqController extends ChangeNotifier {
     await backend?.dispose();
   }
 
-  /// Nova conversa com o coordenador (o quadro continua).
+  /// Nova conversa com o coordenador (o quadro continua; a anterior fica
+  /// guardada e pode ser reaberta em qualquer computador).
   Future<void> newConversation() async {
-    await _dropCoordinator();
-    chat.clear();
     await _saveChat();
+    await lease.release(_chatKind, chatId);
+    await _dropCoordinator();
+    _startChat();
     _changed();
   }
 
@@ -293,6 +496,29 @@ class OrqController extends ChangeNotifier {
   Future<void> send(String text) async {
     final prompt = text.trim();
     if (prompt.isEmpty || coordinatorBusy) return;
+    if (chatReadOnlyBy != null) {
+      chat.add(
+        AgentEntry(
+          AgentEntryKind.error,
+          'Esta conversa está aberta em $chatReadOnlyBy. Use "Assumir aqui".',
+        ),
+      );
+      _changed();
+      return;
+    }
+    if (!lease.holds(_chatKind, chatId)) {
+      final elsewhere = await lease.openElsewhere(_chatKind, chatId);
+      if (elsewhere != null) {
+        chatReadOnlyBy = elsewhere.machine;
+        _changed();
+        return;
+      }
+      await _takeChatLease();
+    }
+    if (chatTitle.isEmpty) {
+      final line = prompt.split('\n').first.trim();
+      chatTitle = line.length > 70 ? '${line.substring(0, 70)}…' : line;
+    }
     chat.add(AgentEntry(AgentEntryKind.user, prompt));
     coordinatorBusy = true;
     _changed();
@@ -320,8 +546,12 @@ class OrqController extends ChangeNotifier {
       // sessão do coordenador); só é reenviado quando muda.
       final signature = '${fixed.length}:${fixed.hashCode}';
       final sendFixed = signature != _sentContext;
+      final transcript = _pendingTranscript;
       final message = buildCoordinatorMessage(
-        userText: prompt,
+        userText: transcript.isEmpty
+            ? prompt
+            : 'Histórico desta conversa (começou em outro computador; '
+                  'continue a partir dele):\n$transcript\n---\n$prompt',
         fixedContext: sendFixed ? fixed : '',
         runs: runs,
         memoryContext: settings.aiMemory
@@ -345,6 +575,8 @@ class OrqController extends ChangeNotifier {
         }
       });
       _coordinatorState = backend.saveState();
+      _stateMachine = _machine;
+      _pendingTranscript = '';
       await _handleReply(prompt, reply.toString());
     } on OrqPlanException catch (error) {
       chat.add(AgentEntry(AgentEntryKind.error, error.message));
@@ -425,7 +657,7 @@ class OrqController extends ChangeNotifier {
           projectPath: settings.projectPath,
         );
         runs.insert(0, run);
-        await journal.saveRun(run);
+        await _saveRun(run);
         chat.add(
           AgentEntry(
             AgentEntryKind.agent,
@@ -465,6 +697,135 @@ class OrqController extends ChangeNotifier {
     }
   }
 
+  // ------------------------------------------------------------ Posse
+
+  /// Só o computador dono da rodada grava (evita conflito no Drive).
+  Future<void> _saveRun(OrqRun run) async {
+    if (_lostRuns.contains(run.id)) return;
+    await journal.saveRun(run);
+  }
+
+  Future<void> _event(
+    String runId,
+    String taskId,
+    String event,
+    String detail,
+  ) async {
+    if (_lostRuns.contains(runId)) return;
+    await journal.addEvent(runId, taskId, event, detail);
+  }
+
+  Future<void> _takeRunLease(OrqRun run) async {
+    final id = run.id;
+    _lostRuns.remove(id);
+    runHolders.remove(id);
+    await lease.take(
+      _runKind,
+      id,
+      onLost: (by) => unawaited(_runTaken(id, by)),
+    );
+  }
+
+  /// Garante que este computador pode executar/alterar a rodada.
+  Future<void> _holdRun(OrqRun run) async {
+    if (lease.holds(_runKind, run.id)) return;
+    final elsewhere = await lease.openElsewhere(_runKind, run.id);
+    if (elsewhere != null) {
+      runHolders[run.id] = elsewhere.machine;
+      _changed();
+      throw StateError(
+        'Esta rodada está em execução em ${elsewhere.machine}. Use "Assumir '
+        'rodada aqui".',
+      );
+    }
+    await _takeRunLease(run);
+    run.machine = _machine;
+  }
+
+  /// Outro computador assumiu a rodada: para os agentes dela aqui e não
+  /// grava mais nada (o outro passa a ser o único a gravar).
+  Future<void> _runTaken(String runId, String by) async {
+    _lostRuns.add(runId);
+    runHolders[runId] = by;
+    final run = _run(runId);
+    if (run != null) {
+      for (final task in run.tasks) {
+        final worker = _workers[key(run, task)];
+        if (worker != null) {
+          _cancelRequested.add(key(run, task));
+          await worker.cancel();
+        }
+      }
+    }
+    _changed();
+  }
+
+  /// Assume aqui uma rodada aberta em outro computador (ou abandonada).
+  /// Tarefas que estavam executando lá ficam "Parada" e podem ser
+  /// retomadas aqui (o agente recebe o pacote de continuidade).
+  Future<void> takeOverRun(String runId) async {
+    await _takeRunLease(_requireRun(runId));
+    final fresh = await journal.loadRun(runId);
+    final index = runs.indexWhere((r) => r.id == runId);
+    final run = fresh ?? _requireRun(runId);
+    if (index >= 0) runs[index] = run;
+    run.machine = _machine;
+    for (final task in run.tasks) {
+      if (task.status.active && task.machine != _machine) {
+        task
+          ..status = OrqTaskStatus.parked
+          ..error = 'Parada: a rodada foi assumida por $_machine.'
+          ..log('assumida', 'Rodada assumida por $_machine.');
+      }
+    }
+    await _saveRun(run);
+    _changed();
+    _pump();
+  }
+
+  /// Este computador está executando a rodada?
+  bool holdsRun(OrqRun run) => lease.holds(_runKind, run.id);
+
+  String get machineName => _machine;
+
+  /// Este computador pode alterar a rodada?
+  bool ownsRun(OrqRun run) =>
+      lease.holds(_runKind, run.id) || !runHolders.containsKey(run.id);
+
+  /// Atualiza quem está com cada rodada aberta.
+  Future<void> refreshHolders() async {
+    for (final run in runs) {
+      if (lease.holds(_runKind, run.id)) {
+        runHolders.remove(run.id);
+        continue;
+      }
+      final elsewhere = await lease.openElsewhere(_runKind, run.id);
+      if (elsewhere == null) {
+        runHolders.remove(run.id);
+      } else {
+        runHolders[run.id] = elsewhere.machine;
+      }
+    }
+  }
+
+  /// A cada 30 s: rodadas e conversa de outros computadores (só leitura).
+  Future<void> _refreshFromOtherComputers() async {
+    if (_disposed) return;
+    for (final summary in await journal.runs()) {
+      if (lease.holds(_runKind, summary.id)) continue;
+      final index = runs.indexWhere((r) => r.id == summary.id);
+      if (index < 0) {
+        runs.add(summary);
+      } else if (!runs[index].tasks.any((t) => isWorking(runs[index], t))) {
+        runs[index] = summary;
+      }
+    }
+    runs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (chatReadOnlyBy != null) await _loadChat(chatId);
+    await refreshHolders();
+    _changed();
+  }
+
   // ------------------------------------------------------------ Plano/rodada
 
   OrqRun? _run(String id) {
@@ -481,6 +842,7 @@ class OrqController extends ChangeNotifier {
   Future<void> approvePlan(String runId, {List<OrqTask>? edited}) async {
     final run = _requireRun(runId);
     if (run.status != OrqRunStatus.proposed) return;
+    await _holdRun(run);
     final problems = <String>[];
     for (final task in edited ?? run.tasks) {
       if (task.profileId.isEmpty) continue;
@@ -511,37 +873,41 @@ class OrqController extends ChangeNotifier {
         ..status = OrqTaskStatus.queued
         ..log('aprovada', 'Plano aprovado pelo usuário.');
     }
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     _pump();
   }
 
   Future<void> rejectPlan(String runId) async {
     final run = _requireRun(runId);
+    await _holdRun(run);
     run.status = OrqRunStatus.rejected;
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
   }
 
   Future<void> pauseRun(String runId) async {
     final run = _requireRun(runId);
     if (run.status != OrqRunStatus.running) return;
+    await _holdRun(run);
     run.status = OrqRunStatus.paused;
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
   }
 
   Future<void> resumeRun(String runId) async {
     final run = _requireRun(runId);
     if (run.status != OrqRunStatus.paused) return;
+    await _holdRun(run);
     run.status = OrqRunStatus.running;
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     _pump();
   }
 
   Future<void> cancelRun(String runId) async {
     final run = _requireRun(runId);
+    await _holdRun(run);
     run.status = OrqRunStatus.cancelled;
     for (final task in run.tasks) {
       if (task.status == OrqTaskStatus.queued ||
@@ -549,7 +915,7 @@ class OrqController extends ChangeNotifier {
         task.status = OrqTaskStatus.cancelled;
       }
     }
-    await journal.saveRun(run);
+    await _saveRun(run);
     for (final task in run.tasks) {
       if (isWorking(run, task)) await cancelTask(run.id, task.id);
     }
@@ -558,11 +924,13 @@ class OrqController extends ChangeNotifier {
 
   Future<void> deleteRun(String runId) async {
     final run = _requireRun(runId);
+    await _holdRun(run);
     if (run.tasks.any((t) => isWorking(run, t))) {
       throw StateError('Cancele as tarefas em execução antes de apagar.');
     }
     runs.remove(run);
     await journal.deleteRun(runId);
+    await lease.release(_runKind, runId);
     _changed();
   }
 
@@ -573,11 +941,12 @@ class OrqController extends ChangeNotifier {
     final task = run.task(taskId)!;
     final worker = _workers[key(run, task)];
     if (worker == null) {
+      await _holdRun(run);
       if (!task.status.settled) {
         task
           ..status = OrqTaskStatus.cancelled
           ..log('cancelada', 'Cancelada antes de iniciar.');
-        await journal.saveRun(run);
+        await _saveRun(run);
         _changed();
       }
       return;
@@ -598,6 +967,15 @@ class OrqController extends ChangeNotifier {
     final run = _requireRun(runId);
     final task = run.task(taskId)!;
     if (isWorking(run, task)) return;
+    await _holdRun(run);
+    // Tentativa anterior em outro computador: a sessão do agente ficou lá.
+    // Aqui começa uma sessão nova com o pacote de continuidade.
+    if (task.machine.isNotEmpty && task.machine != _machine) {
+      task.sessionState = const {};
+      _handoffContext[key(run, task)] =
+          'Esta tarefa começou em ${task.machine}; continue a partir do '
+          'histórico.\n${await journal.continuityPacket(run, task)}';
+    }
     if (task.attempts >= settings.maxAttempts) {
       throw StateError(
         'Limite de ${settings.maxAttempts} tentativa(s) atingido.',
@@ -612,7 +990,7 @@ class OrqController extends ChangeNotifier {
         run.status == OrqRunStatus.complete) {
       run.status = OrqRunStatus.running;
     }
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     _pump();
   }
@@ -653,6 +1031,7 @@ class OrqController extends ChangeNotifier {
     final run = _requireRun(runId);
     final task = run.task(taskId)!;
     if (task.status != OrqTaskStatus.awaitingReview) return;
+    await _holdRun(run);
     task
       ..status = complete ? OrqTaskStatus.complete : OrqTaskStatus.blocked
       ..log(
@@ -661,7 +1040,7 @@ class OrqController extends ChangeNotifier {
             ? 'Critérios confirmados pelo usuário.'
             : 'O revisor marcou como bloqueada.',
       );
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     _pump();
   }
@@ -679,6 +1058,7 @@ class OrqController extends ChangeNotifier {
   }) async {
     final run = _requireRun(runId);
     final task = run.task(taskId)!;
+    await _holdRun(run);
     if (profileId.isNotEmpty &&
         settings.profile(profileId)?.provider != provider) {
       throw StateError('O perfil $profileId não pertence ao agente $provider.');
@@ -733,7 +1113,7 @@ class OrqController extends ChangeNotifier {
       ..error = '';
     _handoffContext[key(run, task)] = record.context;
     if (run.status != OrqRunStatus.running) run.status = OrqRunStatus.running;
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     _pump();
   }
@@ -750,10 +1130,11 @@ class OrqController extends ChangeNotifier {
     if (!loaded || _disposed) return;
     for (final run in runs.reversed) {
       if (run.status != OrqRunStatus.running) continue;
+      // Só executa rodadas que este computador tem (D6).
+      if (!lease.holds(_runKind, run.id)) continue;
       for (final task in run.tasks) {
         if (_workers.length >= settings.maxParallel) return;
         if (task.status != OrqTaskStatus.queued) continue;
-        if (task.machine.isNotEmpty && task.machine != _machine) continue;
         final blocker = task.dependsOn
             .map(run.task)
             .whereType<OrqTask>()
@@ -768,7 +1149,7 @@ class OrqController extends ChangeNotifier {
             ..error =
                 'A dependência ${blocker.first.id} terminou como '
                 '${blocker.first.status.label.toLowerCase()}.';
-          unawaited(journal.saveRun(run));
+          unawaited(_saveRun(run));
           continue;
         }
         if (!_dependenciesDone(run, task)) continue;
@@ -781,7 +1162,7 @@ class OrqController extends ChangeNotifier {
       }
       if (run.tasks.every((t) => t.status == OrqTaskStatus.complete)) {
         run.status = OrqRunStatus.complete;
-        unawaited(journal.saveRun(run));
+        unawaited(_saveRun(run));
       }
     }
     _changed();
@@ -877,7 +1258,7 @@ class OrqController extends ChangeNotifier {
       ..machine = _machine
       ..error = ''
       ..log('iniciando', 'Tentativa ${task.attempts}.');
-    await journal.saveRun(run);
+    await _saveRun(run);
     _changed();
     AgentBackend? backend;
     final segment = StringBuffer();
@@ -946,8 +1327,8 @@ class OrqController extends ChangeNotifier {
         );
       }
       task.status = OrqTaskStatus.running;
-      await journal.addEvent(run.id, task.id, 'início', backend.label);
-      await journal.saveRun(run);
+      await _event(run.id, task.id, 'início', backend.label);
+      await _saveRun(run);
       _changed();
       await backend.send(prompt, const [], (event) {
         switch (event) {
@@ -967,14 +1348,14 @@ class OrqController extends ChangeNotifier {
           case AgentToolEvent(:final name, :final input):
             if (segment.toString().trim().isNotEmpty) {
               lastText = segment.toString().trim();
-              unawaited(journal.addEvent(run.id, task.id, 'texto', lastText));
+              unawaited(_event(run.id, task.id, 'texto', lastText));
             }
             segment.clear();
             final summary = _toolSummary(name, input);
             _setActivity(k, '⚙ $summary');
-            unawaited(journal.addEvent(run.id, task.id, 'ferramenta', summary));
+            unawaited(_event(run.id, task.id, 'ferramenta', summary));
           case AgentInfoEvent(:final text):
-            unawaited(journal.addEvent(run.id, task.id, 'info', text));
+            unawaited(_event(run.id, task.id, 'info', text));
           default:
             break;
         }
@@ -995,7 +1376,7 @@ class OrqController extends ChangeNotifier {
           provider.name,
         );
       }
-      await journal.addEvent(run.id, task.id, 'resultado', finalText);
+      await _event(run.id, task.id, 'resultado', finalText);
     } on Object catch (error) {
       final cancelled = _cancelRequested.contains(k) || error is _Cancelled;
       try {
@@ -1019,7 +1400,7 @@ class OrqController extends ChangeNotifier {
           ..status = OrqTaskStatus.failed
           ..error = redactSensitiveText(message, max: 3000)
           ..log('falhou', message);
-        await journal.addEvent(run.id, task.id, 'erro', message);
+        await _event(run.id, task.id, 'erro', message);
       }
     } finally {
       if (identical(_workers[k], backend) ||
@@ -1030,7 +1411,7 @@ class OrqController extends ChangeNotifier {
       activity.remove(k);
       await backend?.dispose();
       await _refreshChanges(run, task);
-      await journal.saveRun(run);
+      await _saveRun(run);
       _changed();
       _pump();
     }
@@ -1155,6 +1536,9 @@ class OrqController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _changesTimer?.cancel();
+    _leaseTimer?.cancel();
+    unawaited(lease.releaseAll());
+    lease.dispose();
     for (final approval in approvals) {
       if (!approval.completer.isCompleted) approval.completer.complete(false);
     }
@@ -1190,4 +1574,25 @@ class _PendingBackend extends AgentBackend {
 
   @override
   void reset() {}
+}
+
+/// Uma conversa do coordenador na lista.
+class OrqChatSummary {
+  const OrqChatSummary({
+    required this.id,
+    required this.title,
+    required this.machine,
+    required this.updatedAt,
+    this.openIn,
+  });
+
+  final String id;
+  final String title;
+
+  /// Último computador que gravou a conversa.
+  final String machine;
+  final DateTime updatedAt;
+
+  /// Computador com a conversa aberta agora (null = livre).
+  final String? openIn;
 }

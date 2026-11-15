@@ -110,7 +110,10 @@ class _OrchestratorViewState extends State<OrchestratorView> {
         _header(vs, active),
         if (_orq.approvals.isNotEmpty) _approvals(vs),
         Expanded(child: _board ? _boardView(vs) : _chatView(vs)),
-        if (!_board) _composer(vs),
+        if (!_board && _orq.chatReadOnlyBy != null)
+          _readOnlyBar(vs)
+        else if (!_board)
+          _composer(vs),
       ],
     );
   }
@@ -152,6 +155,12 @@ class _OrchestratorViewState extends State<OrchestratorView> {
               style: TextStyle(fontSize: 11.5, color: vs.muted),
             ),
           ),
+          if (!_board)
+            VsIconButton(
+              icon: Icons.history_rounded,
+              tooltip: 'Conversas do coordenador (todos os computadores)',
+              onPressed: _orq.coordinatorBusy ? null : _openConversations,
+            ),
           if (!_board)
             VsIconButton(
               icon: Icons.add_comment_outlined,
@@ -418,50 +427,66 @@ class _OrchestratorViewState extends State<OrchestratorView> {
               style: TextStyle(fontSize: 11.5, color: vs.muted),
             ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                if (proposed) ...[
-                  FilledButton.icon(
-                    onPressed: () => _run(() => _orq.approvePlan(run.id)),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 16),
-                    label: const Text('Aprovar e iniciar'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () => _editPlan(run),
-                    child: const Text('Editar plano'),
-                  ),
-                  TextButton(
-                    onPressed: () => _run(() => _orq.rejectPlan(run.id)),
-                    child: const Text('Rejeitar'),
-                  ),
+            if (_runElsewhere(run) case final by?)
+              _holderBanner(
+                vs,
+                'Em execução em $by. Só visualização aqui (atualiza sozinha).',
+                'Assumir rodada aqui',
+                run,
+              )
+            else if (_runOrphan(run))
+              _holderBanner(
+                vs,
+                'Nenhum computador está executando esta rodada'
+                    '${run.machine.isEmpty ? '' : ' (última vez em ${run.machine})'}.',
+                'Retomar aqui',
+                run,
+              ),
+            if (_runElsewhere(run) == null && !_runOrphan(run))
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  if (proposed) ...[
+                    FilledButton.icon(
+                      onPressed: () => _run(() => _orq.approvePlan(run.id)),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                      label: const Text('Aprovar e iniciar'),
+                    ),
+                    OutlinedButton(
+                      onPressed: () => _editPlan(run),
+                      child: const Text('Editar plano'),
+                    ),
+                    TextButton(
+                      onPressed: () => _run(() => _orq.rejectPlan(run.id)),
+                      child: const Text('Rejeitar'),
+                    ),
+                  ],
+                  if (run.status == OrqRunStatus.running)
+                    OutlinedButton(
+                      onPressed: () => _run(() => _orq.pauseRun(run.id)),
+                      child: const Text('Pausar'),
+                    ),
+                  if (run.status == OrqRunStatus.paused)
+                    OutlinedButton(
+                      onPressed: () => _run(() => _orq.resumeRun(run.id)),
+                      child: const Text('Retomar'),
+                    ),
+                  if (run.status == OrqRunStatus.running ||
+                      run.status == OrqRunStatus.paused)
+                    TextButton(
+                      onPressed: () => _run(() => _orq.cancelRun(run.id)),
+                      child: const Text('Cancelar rodada'),
+                    ),
+                  if (!proposed &&
+                      run.status != OrqRunStatus.running &&
+                      run.status != OrqRunStatus.paused)
+                    TextButton(
+                      onPressed: () => _run(() => _orq.deleteRun(run.id)),
+                      child: const Text('Apagar do quadro'),
+                    ),
                 ],
-                if (run.status == OrqRunStatus.running)
-                  OutlinedButton(
-                    onPressed: () => _run(() => _orq.pauseRun(run.id)),
-                    child: const Text('Pausar'),
-                  ),
-                if (run.status == OrqRunStatus.paused)
-                  OutlinedButton(
-                    onPressed: () => _run(() => _orq.resumeRun(run.id)),
-                    child: const Text('Retomar'),
-                  ),
-                if (run.status == OrqRunStatus.running ||
-                    run.status == OrqRunStatus.paused)
-                  TextButton(
-                    onPressed: () => _run(() => _orq.cancelRun(run.id)),
-                    child: const Text('Cancelar rodada'),
-                  ),
-                if (!proposed &&
-                    run.status != OrqRunStatus.running &&
-                    run.status != OrqRunStatus.paused)
-                  TextButton(
-                    onPressed: () => _run(() => _orq.deleteRun(run.id)),
-                    child: const Text('Apagar do quadro'),
-                  ),
-              ],
-            ),
+              ),
             for (final task in run.tasks) _taskCard(vs, run, task),
           ],
         ),
@@ -613,65 +638,211 @@ class _OrchestratorViewState extends State<OrchestratorView> {
               ),
             ),
           const SizedBox(height: 4),
-          Wrap(
-            spacing: 4,
-            runSpacing: 2,
-            children: [
-              if (task.status == OrqTaskStatus.awaitingReview) ...[
-                FilledButton(
-                  onPressed: () =>
-                      _run(() => _orq.review(run.id, task.id, complete: true)),
-                  child: const Text('Confirmar critérios e concluir'),
-                ),
-                if (canRetry)
-                  OutlinedButton(
-                    onPressed: () => _requestChanges(run, task),
-                    child: const Text('Pedir ajustes'),
+          if (_runElsewhere(run) == null && !_runOrphan(run))
+            Wrap(
+              spacing: 4,
+              runSpacing: 2,
+              children: [
+                if (task.status == OrqTaskStatus.awaitingReview) ...[
+                  FilledButton(
+                    onPressed: () => _run(
+                      () => _orq.review(run.id, task.id, complete: true),
+                    ),
+                    child: const Text('Confirmar critérios e concluir'),
                   ),
-                TextButton(
-                  onPressed: () =>
-                      _run(() => _orq.review(run.id, task.id, complete: false)),
-                  child: const Text('Marcar bloqueada'),
-                ),
+                  if (canRetry)
+                    OutlinedButton(
+                      onPressed: () => _requestChanges(run, task),
+                      child: const Text('Pedir ajustes'),
+                    ),
+                  TextButton(
+                    onPressed: () => _run(
+                      () => _orq.review(run.id, task.id, complete: false),
+                    ),
+                    child: const Text('Marcar bloqueada'),
+                  ),
+                ],
+                if (working ||
+                    task.status == OrqTaskStatus.queued ||
+                    task.status == OrqTaskStatus.planned)
+                  TextButton(
+                    onPressed: () =>
+                        _run(() => _orq.cancelTask(run.id, task.id)),
+                    child: const Text('Cancelar tarefa'),
+                  ),
+                if (!working &&
+                    canRetry &&
+                    {
+                      OrqTaskStatus.failed,
+                      OrqTaskStatus.blocked,
+                      OrqTaskStatus.parked,
+                      OrqTaskStatus.cancelled,
+                    }.contains(task.status))
+                  OutlinedButton(
+                    onPressed: () =>
+                        _run(() => _orq.retryTask(run.id, task.id)),
+                    child: const Text('Tentar novamente'),
+                  ),
+                if (!canRetry &&
+                    !task.status.active &&
+                    task.status != OrqTaskStatus.complete)
+                  Text(
+                    'Limite de ${_orq.settings.maxAttempts} tentativa(s) atingido',
+                    style: TextStyle(fontSize: 11, color: vs.muted),
+                  ),
+                if (task.status != OrqTaskStatus.complete &&
+                    task.status != OrqTaskStatus.planned &&
+                    run.status != OrqRunStatus.proposed)
+                  TextButton(
+                    onPressed: () => _handoff(run, task),
+                    child: const Text('Transferir para outro agente'),
+                  ),
               ],
-              if (working ||
-                  task.status == OrqTaskStatus.queued ||
-                  task.status == OrqTaskStatus.planned)
-                TextButton(
-                  onPressed: () => _run(() => _orq.cancelTask(run.id, task.id)),
-                  child: const Text('Cancelar tarefa'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Computador que está com a rodada (null = este ou ninguém).
+  String? _runElsewhere(OrqRun run) =>
+      _orq.holdsRun(run) ? null : _orq.runHolders[run.id];
+
+  /// Rodada em andamento sem nenhum computador executando (o dono fechou
+  /// ou ficou sem posse): pode ser retomada aqui.
+  bool _runOrphan(OrqRun run) =>
+      !_orq.holdsRun(run) &&
+      _orq.runHolders[run.id] == null &&
+      run.machine.isNotEmpty &&
+      run.machine != _orq.machineName &&
+      (run.status == OrqRunStatus.running || run.status == OrqRunStatus.paused);
+
+  Widget _holderBanner(VsColors vs, String text, String action, OrqRun run) =>
+      Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+        decoration: BoxDecoration(
+          color: vs.accent.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: vs.accent.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.devices_rounded, size: 16, color: vs.accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(text, style: TextStyle(fontSize: 12, color: vs.text)),
+            ),
+            FilledButton(
+              onPressed: () => _run(() => _orq.takeOverRun(run.id)),
+              child: Text(action),
+            ),
+          ],
+        ),
+      );
+
+  Widget _readOnlyBar(VsColors vs) => Container(
+    margin: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+    padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+    decoration: BoxDecoration(
+      color: vs.card,
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: vs.border),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.visibility_outlined, size: 16, color: vs.muted),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Só leitura: esta conversa está aberta em ${_orq.chatReadOnlyBy} '
+            'e se atualiza sozinha.',
+            style: TextStyle(fontSize: 12.5, color: vs.text),
+          ),
+        ),
+        FilledButton(
+          onPressed: () => _run(_orq.takeOverConversation),
+          child: const Text('Assumir aqui'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _openConversations() async {
+    final list = await _orq.conversations();
+    if (!mounted) return;
+    final picked = await showDialog<OrqChatSummary>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Conversas do coordenador'),
+        content: SizedBox(
+          width: 520,
+          height: 420,
+          child: list.isEmpty
+              ? const Center(child: Text('Nenhuma conversa guardada.'))
+              : ListView(
+                  children: [
+                    for (final c in list)
+                      ListTile(
+                        dense: true,
+                        selected: c.id == _orq.chatId,
+                        title: Text(c.title.isEmpty ? '(sem título)' : c.title),
+                        subtitle: Text(
+                          '${c.machine.isEmpty ? '' : '${c.machine} · '}'
+                          '${c.updatedAt.day.toString().padLeft(2, '0')}/'
+                          '${c.updatedAt.month.toString().padLeft(2, '0')} '
+                          '${c.updatedAt.hour.toString().padLeft(2, '0')}:'
+                          '${c.updatedAt.minute.toString().padLeft(2, '0')}'
+                          '${c.openIn == null ? '' : ' · aberta em ${c.openIn}'}',
+                        ),
+                        trailing: c.openIn == null
+                            ? null
+                            : const Icon(Icons.devices_rounded, size: 16),
+                        onTap: () => Navigator.pop(context, c),
+                      ),
+                  ],
                 ),
-              if (!working &&
-                  canRetry &&
-                  {
-                    OrqTaskStatus.failed,
-                    OrqTaskStatus.blocked,
-                    OrqTaskStatus.parked,
-                    OrqTaskStatus.cancelled,
-                  }.contains(task.status))
-                OutlinedButton(
-                  onPressed: () => _run(() => _orq.retryTask(run.id, task.id)),
-                  child: const Text('Tentar novamente'),
-                ),
-              if (!canRetry &&
-                  !task.status.active &&
-                  task.status != OrqTaskStatus.complete)
-                Text(
-                  'Limite de ${_orq.settings.maxAttempts} tentativa(s) atingido',
-                  style: TextStyle(fontSize: 11, color: vs.muted),
-                ),
-              if (task.status != OrqTaskStatus.complete &&
-                  task.status != OrqTaskStatus.planned &&
-                  run.status != OrqRunStatus.proposed)
-                TextButton(
-                  onPressed: () => _handoff(run, task),
-                  child: const Text('Transferir para outro agente'),
-                ),
-            ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fechar'),
           ),
         ],
       ),
     );
+    if (picked == null || !mounted) return;
+    var takeOver = false;
+    if (picked.openIn != null) {
+      final choice = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Conversa aberta em outro computador'),
+          content: Text(
+            'Esta conversa está aberta em ${picked.openIn}. Ela não roda em '
+            'dois computadores ao mesmo tempo: você pode só visualizar ou '
+            'assumir aqui (lá ela para).',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Só visualizar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Assumir aqui'),
+            ),
+          ],
+        ),
+      );
+      if (choice == null) return;
+      takeOver = choice;
+    }
+    await _run(() => _orq.openConversation(picked.id, takeOver: takeOver));
   }
 
   // ------------------------------------------------------------ Diálogos

@@ -120,18 +120,25 @@ class OrqClaim {
 /// entre computadores). Cada rodada tem chave própria, para que dois
 /// computadores mexendo em rodadas diferentes não se sobrescrevam.
 ///
-/// Nomes das chaves (não mudar depois de publicadas):
-/// - `orquestrador.runs.v1`: ids das rodadas, mais recentes primeiro;
+/// Nomes das chaves (não mudar depois de publicadas). Cada item tem chave
+/// própria (nada de índice compartilhado): dois computadores criando
+/// rodadas ou transferências ao mesmo tempo nunca conflitam (D6).
 /// - `orquestrador.run.<id>`: a rodada com as tarefas;
 /// - `orquestrador.events.<id>`: eventos das tarefas da rodada;
-/// - `orquestrador.handoffs.v1`: transferências.
+/// - `orquestrador.handoff.<rodada>.<id>`: uma transferência;
+/// - `orquestrador.runs.v1` / `orquestrador.handoffs.v1`: formato antigo,
+///   só lido.
 class OrqJournal {
   OrqJournal([KeyValueStore? store]) : _store = store ?? KeyValueStore();
 
-  static const indexKey = 'orquestrador.runs.v1';
-  static const handoffsKey = 'orquestrador.handoffs.v1';
-  static String runKey(String id) => 'orquestrador.run.$id';
+  static const legacyIndexKey = 'orquestrador.runs.v1';
+  static const legacyHandoffsKey = 'orquestrador.handoffs.v1';
+  static const runPrefix = 'orquestrador.run.';
+  static const handoffPrefix = 'orquestrador.handoff.';
+  static String runKey(String id) => '$runPrefix$id';
   static String eventsKey(String id) => 'orquestrador.events.$id';
+  static String handoffKey(String runId, String id) =>
+      '$handoffPrefix$runId.$id';
 
   static const maxRuns = 40;
   static const maxEventsPerTask = 240;
@@ -149,24 +156,30 @@ class OrqJournal {
 
   // ------------------------------------------------------------ Rodadas
 
-  Future<List<String>> runIds() async =>
-      await _store.readStringList(indexKey) ?? const [];
-
   Future<OrqRun?> loadRun(String id) async {
     final raw = await _store.readJson(runKey(id));
     if (raw is! Map) return null;
     return OrqRun.fromJson(Map<String, dynamic>.from(raw));
   }
 
-  /// Rodadas mais recentes primeiro.
-  Future<List<OrqRun>> runs({int limit = maxRuns}) async {
+  /// Todas as rodadas guardadas, mais recentes primeiro.
+  Future<List<OrqRun>> _allRuns() async {
     final result = <OrqRun>[];
-    for (final id in (await runIds()).take(limit)) {
-      final run = await loadRun(id);
+    for (final key in await _store.keys(runPrefix)) {
+      final run = await loadRun(key.substring(runPrefix.length));
       if (run != null) result.add(run);
     }
+    result.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return result;
   }
+
+  Future<List<String>> runIds() async => [
+    for (final run in await _allRuns()) run.id,
+  ];
+
+  /// Rodadas mais recentes primeiro.
+  Future<List<OrqRun>> runs({int limit = maxRuns}) async =>
+      (await _allRuns()).take(limit).toList();
 
   Future<void> saveRun(OrqRun run) => _locked(() async {
     final json = run.toJson();
@@ -176,24 +189,21 @@ class OrqJournal {
       t['error'] = redactSensitiveText(t['error'], max: 3000);
     }
     await _store.writeJson(runKey(run.id), json);
-    final ids = [run.id, ...(await runIds()).where((id) => id != run.id)];
-    if (ids.length > maxRuns) {
-      for (final old in ids.skip(maxRuns)) {
-        await _store.remove(runKey(old));
-        await _store.remove(eventsKey(old));
-      }
+    final all = await _allRuns();
+    for (final old in all.skip(maxRuns)) {
+      await _removeRun(old.id);
     }
-    await _store.writeStringList(indexKey, ids.take(maxRuns).toList());
   });
 
-  Future<void> deleteRun(String id) => _locked(() async {
+  Future<void> _removeRun(String id) async {
     await _store.remove(runKey(id));
     await _store.remove(eventsKey(id));
-    await _store.writeStringList(
-      indexKey,
-      (await runIds()).where((r) => r != id).toList(),
-    );
-  });
+    for (final key in await _store.keys('$handoffPrefix$id.')) {
+      await _store.remove(key);
+    }
+  }
+
+  Future<void> deleteRun(String id) => _locked(() => _removeRun(id));
 
   // ------------------------------------------------------------ Eventos
 
@@ -236,25 +246,30 @@ class OrqJournal {
   // ------------------------------------------------------------ Transferências
 
   Future<Map<String, OrqHandoff>> _handoffs() async {
-    final raw = await _store.readJson(handoffsKey);
-    if (raw is! Map) return {};
-    return {
-      for (final entry in raw.entries)
-        if (entry.value is Map)
-          '${entry.key}': OrqHandoff.fromJson(
+    final result = <String, OrqHandoff>{};
+    // Formato antigo (uma chave com todas), só leitura.
+    final legacy = await _store.readJson(legacyHandoffsKey);
+    if (legacy is Map) {
+      for (final entry in legacy.entries) {
+        if (entry.value is Map) {
+          result['${entry.key}'] = OrqHandoff.fromJson(
             Map<String, dynamic>.from(entry.value as Map),
-          ),
-    };
+          );
+        }
+      }
+    }
+    for (final key in await _store.keys(handoffPrefix)) {
+      final raw = await _store.readJson(key);
+      if (raw is Map) {
+        final handoff = OrqHandoff.fromJson(Map<String, dynamic>.from(raw));
+        result[handoff.id] = handoff;
+      }
+    }
+    return result;
   }
 
-  Future<void> _saveHandoffs(Map<String, OrqHandoff> all) async {
-    // Mantém as 200 mais recentes.
-    final sorted = all.values.toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    await _store.writeJson(handoffsKey, {
-      for (final h in sorted.take(200)) h.id: h.toJson(),
-    });
-  }
+  Future<void> _saveHandoff(OrqHandoff handoff) =>
+      _store.writeJson(handoffKey(handoff.runId, handoff.id), handoff.toJson());
 
   /// Cria uma transferência pendente. Recusa se já houver uma pendente para
   /// a mesma tarefa.
@@ -292,8 +307,7 @@ class OrqJournal {
       expiresAt: now.add(ttl),
       createdAt: now,
     );
-    all[handoff.id] = handoff;
-    await _saveHandoffs(all);
+    await _saveHandoff(handoff);
     return handoff;
   });
 
@@ -321,13 +335,13 @@ class OrqJournal {
         }
         if (DateTime.now().isAfter(handoff.expiresAt)) {
           handoff.status = OrqHandoffStatus.expired;
-          await _saveHandoffs(all);
+          await _saveHandoff(handoff);
           return const OrqClaim(false, 'expired');
         }
         handoff
           ..status = OrqHandoffStatus.claimed
           ..claimedBy = recipient;
-        await _saveHandoffs(all);
+        await _saveHandoff(handoff);
         return const OrqClaim(true);
       });
 
@@ -343,7 +357,7 @@ class OrqJournal {
     handoff
       ..status = OrqHandoffStatus.pending
       ..claimedBy = '';
-    await _saveHandoffs(all);
+    await _saveHandoff(handoff);
     return true;
   });
 
@@ -354,7 +368,7 @@ class OrqJournal {
       return false;
     }
     handoff.status = OrqHandoffStatus.cancelled;
-    await _saveHandoffs(all);
+    await _saveHandoff(handoff);
     return true;
   });
 
@@ -377,7 +391,7 @@ class OrqJournal {
     handoff
       ..status = OrqHandoffStatus.sessionStarted
       ..sessionId = sessionId;
-    await _saveHandoffs(all);
+    await _saveHandoff(handoff);
     return true;
   });
 

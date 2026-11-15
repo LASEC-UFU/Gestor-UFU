@@ -161,8 +161,20 @@ class OrqSettings {
   String get projectPath => projectPaths[machine] ?? '';
   set projectPath(String value) => projectPaths[machine] = value.trim();
 
+  /// Pasta do projeto de cada computador: chave própria (mudar a pasta
+  /// num computador não mexe na configuração compartilhada).
+  static String projectKey(String machine) => 'orquestrador.projeto.$machine';
+
   static Future<OrqSettings> load([KeyValueStore? store]) async {
-    final raw = await (store ?? KeyValueStore()).readJson(key);
+    final kv = store ?? KeyValueStore();
+    final settings = await _load(kv);
+    final own = await kv.readString(projectKey(machine));
+    if (own != null) settings.projectPaths[machine] = own;
+    return settings;
+  }
+
+  static Future<OrqSettings> _load(KeyValueStore kv) async {
+    final raw = await kv.readJson(key);
     if (raw is! Map) return OrqSettings();
     AgentProvider provider(Object? value, AgentProvider fallback) =>
         AgentProvider.values.firstWhere(
@@ -205,15 +217,26 @@ class OrqSettings {
     );
   }
 
-  Future<void> save([KeyValueStore? store]) =>
-      (store ?? KeyValueStore()).writeJson(key, {
+  Future<void> save([KeyValueStore? store]) async {
+    final kv = store ?? KeyValueStore();
+    await kv.writeString(projectKey(machine), projectPath);
+    final shared = await _load(kv);
+    // Só lê o mapa antigo; a pasta deste computador fica na própria chave.
+    projectPaths
+      ..clear()
+      ..addAll({...shared.projectPaths, machine: projectPath});
+    await _saveShared(kv, shared.projectPaths);
+  }
+
+  Future<void> _saveShared(KeyValueStore kv, Map<String, String> legacy) =>
+      kv.writeJson(key, {
         'coordinator': coordinator.name,
         'workers': [for (final w in workers) w.name],
         'defaultWorker': defaultWorker.name,
         'maxParallel': maxParallel,
         'maxAttempts': maxAttempts,
         'workerAccess': workerAccess.name,
-        'projectPaths': projectPaths,
+        'projectPaths': legacy,
         'buildCommand': buildCommand,
         'buildArgs': buildArgs,
         'buildDir': buildDir,

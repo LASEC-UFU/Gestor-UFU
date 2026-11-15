@@ -321,6 +321,15 @@ class SharedPreferencesSyncService extends ChangeNotifier
     notifyListeners();
   }
 
+  /// Pasta compartilhada configurada neste computador (sem abrir a
+  /// criptografia): usada pela posse de sessões.
+  static Future<String?> configuredFolderPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    if (prefs.getString(_modeKey) != folderMode) return null;
+    return prefs.getString(_pathKey);
+  }
+
   /// Abre a pasta configurada neste computador (usado pela janela do agente
   /// para guardar a memória do AI Memory). Null se não houver pasta.
   static Future<SharedFolderCrypto?> openConfiguredFolder() async {

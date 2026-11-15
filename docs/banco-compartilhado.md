@@ -68,6 +68,20 @@ O banco do AI Memory é SQLite. Abrir o mesmo arquivo em dois computadores pela 
 - **Posse abandonada:** sem renovação há 3 minutos (computador desligado ou suspenso), a posse pode ser assumida. O computador que a perdeu para de gravar ao perceber.
 - **Token:** o token de acesso do AI Memory é próprio de cada computador e nunca vai para a pasta. O backup oficial não o inclui.
 
+## Sessões em vários computadores
+
+Dois ou mais computadores podem trabalhar ao mesmo tempo, cada um com as suas sessões, inclusive do mesmo agente. A regra completa está em `docs/arquitetura/decisoes.md` (D6).
+
+- **Toda sessão é visível e pode ser continuada em qualquer computador:** conversas dos agentes, conversas do coordenador do Orquestrador e rodadas do Orquestrador.
+- **Uma sessão nunca roda em dois computadores ao mesmo tempo.** Cada sessão aberta tem uma posse em `sessoes/<tipo>-<id>.json`, com o computador e a última batida, renovada a cada minuto.
+- **Ao abrir uma sessão que está aberta em outro computador**, aparece "aberta em PC-X" com duas opções:
+  - **Só visualizar:** a sessão fica em leitura e se atualiza sozinha.
+  - **Assumir aqui:** o outro computador para o agente daquela sessão e mostra "assumida por PC-Y". Isso leva até um minuto, mais o tempo de o Google Drive sincronizar.
+- **Uma rodada do Orquestrador** só é executada e gravada pelo computador que tem a posse. Ao assumir uma rodada, as tarefas que estavam executando no outro computador ficam "Parada" e podem ser repetidas aqui.
+- **Continuar em outro computador** não retoma a sessão do CLI do agente, que só existe no computador de origem. O agente recebe o histórico (conversas) ou o pacote de continuidade (tarefas).
+- **Posse abandonada:** sem batida há 3 minutos, por exemplo com o computador desligado, a posse fica livre e a rodada aparece com "Retomar aqui".
+- **Dados de sessão em chaves próprias:** uma conversa ou rodada por arquivo e uma transferência por chave, sem índices compartilhados. Sessões diferentes nunca conflitam entre si.
+
 ## O que não vai para a pasta
 
 - **Senhas e logins do cofre do Windows** (contas dos agentes, chaves de API, senha da pasta): cada computador entra uma vez.

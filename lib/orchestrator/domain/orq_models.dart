@@ -256,6 +256,7 @@ class OrqRun {
     required this.tasks,
     this.status = OrqRunStatus.proposed,
     this.projectPath = '',
+    this.machine = '',
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
@@ -267,6 +268,9 @@ class OrqRun {
   final List<OrqTask> tasks;
   OrqRunStatus status;
   String projectPath;
+
+  /// Computador que executa a rodada (só ele grava a rodada; D6).
+  String machine;
   final DateTime createdAt;
 
   OrqTask? task(String id) {
@@ -282,6 +286,7 @@ class OrqRun {
     'prompt': prompt,
     'status': status.name,
     'projectPath': projectPath,
+    'machine': machine,
     'createdAt': createdAt.toIso8601String(),
     'tasks': [for (final t in tasks) t.toJson()],
   };
@@ -292,6 +297,7 @@ class OrqRun {
     prompt: '${json['prompt'] ?? ''}',
     status: OrqRunStatus.parse(json['status']),
     projectPath: '${json['projectPath'] ?? ''}',
+    machine: '${json['machine'] ?? ''}',
     createdAt: DateTime.tryParse('${json['createdAt']}'),
     tasks: [
       for (final t in json['tasks'] as List? ?? const [])

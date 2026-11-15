@@ -44,6 +44,13 @@ class KeyValueStore {
 
   Future<void> remove(String key) async => (await _open()).remove(key);
 
+  /// Chaves que começam com [prefix] (evita "índices" compartilhados: cada
+  /// item numa chave própria não conflita entre computadores).
+  Future<List<String>> keys([String prefix = '']) async => [
+    for (final key in (await _open()).getKeys())
+      if (key.startsWith(prefix)) key,
+  ];
+
   /// Chave de um dado que depende do período letivo: `prefixo + token`,
   /// onde o token é o período em base64url sem "=" (formato já usado pelos
   /// módulos; não alterar).

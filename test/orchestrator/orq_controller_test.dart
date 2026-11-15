@@ -13,6 +13,7 @@ import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_prompts.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
+import 'package:gestor_ufu/platform/services/session_lease.dart';
 
 /// Agente falso: responde com [reply] (ou espera [gate] para terminar).
 class FakeBackend extends AgentBackend {
@@ -397,6 +398,155 @@ void main() {
     expect(modelTier('gemini-3.5-flash'), 'econômico');
     expect(modelTier('gpt-5-codex-max'), 'forte');
     expect(modelTier('gpt-5-codex'), 'padrão');
+  });
+
+  group('dois computadores (D6)', () {
+    late Directory folder;
+    setUp(() async => folder = await Directory.systemTemp.createTemp('sess'));
+    tearDown(() async {
+      // As posses são liberadas em segundo plano ao descartar.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      try {
+        await folder.delete(recursive: true);
+      } on FileSystemException {
+        // Pasta temporária: o sistema limpa depois.
+      }
+    });
+
+    SessionLease leaseFor(String name) =>
+        SessionLease(() async => folder.path, machine: name);
+
+    OrqController pc(String name, SessionLease lease) => OrqController(
+      machine: name,
+      storageRoot: storage.path,
+      lease: lease,
+      factory: (request) async {
+        final taskId = RegExp(
+          r'Tarefa (\S+)',
+        ).firstMatch(request.label)?.group(1);
+        final backend = FakeBackend(
+          request,
+          () => request.label == 'Coordenador'
+              ? coordinatorReply
+              : 'feito ${taskId ?? ''} em $name',
+          gate: taskId == null ? null : gates['$name/$taskId'],
+        );
+        created.add(backend);
+        return backend;
+      },
+    );
+
+    test('posse: outro computador vê, assume e o primeiro perde', () async {
+      final a = leaseFor('A');
+      final b = leaseFor('B');
+      final lost = <String>[];
+      await a.take('agente', 'c1', onLost: lost.add);
+      expect((await b.openElsewhere('agente', 'c1'))!.machine, 'A');
+      expect(await a.openElsewhere('agente', 'c1'), isNull);
+      await b.take('agente', 'c1', onLost: (_) {});
+      await a.heartbeat();
+      expect(lost, ['B']);
+      expect(a.holds('agente', 'c1'), isFalse);
+      // Posse abandonada (sem batida há mais de 3 min) fica livre.
+      File(p.join(folder.path, 'sessoes', 'agente-c2.json'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'computador': 'A',
+            'batida': DateTime.now()
+                .toUtc()
+                .subtract(const Duration(minutes: 5))
+                .toIso8601String(),
+          }),
+        );
+      expect(await b.openElsewhere('agente', 'c2'), isNull);
+      a.dispose();
+      b.dispose();
+    });
+
+    test(
+      'conversa do coordenador: só visualizar, assumir, outro para',
+      () async {
+        final leaseA = leaseFor('A');
+        final leaseB = leaseFor('B');
+        final a = pc('A', leaseA);
+        await a.load();
+        coordinatorReply = '{"mode":"answer","answer":"oi"}';
+        await a.send('olá do A');
+        final conversation = a.chatId;
+
+        final b = pc('B', leaseB);
+        await b.load();
+        expect(b.chatId, isNot(conversation), reason: 'não rouba a conversa');
+        final list = await b.conversations();
+        expect(list.single.openIn, 'A');
+
+        await b.openConversation(conversation);
+        expect(b.chatReadOnlyBy, 'A');
+        expect(b.chat.first.text, 'olá do A');
+        final sentBefore = created.length;
+        await b.send('tentativa');
+        expect(created.length, sentBefore, reason: 'não chama o coordenador');
+
+        await b.takeOverConversation();
+        expect(b.chatReadOnlyBy, isNull);
+        await leaseA.heartbeat();
+        expect(a.chatReadOnlyBy, 'B');
+        await b.send('continuando no B');
+        // A sessão do CLI era do A: o coordenador do B recebe o histórico.
+        expect(created.last.prompts.last, contains('olá do A'));
+        a.dispose();
+        b.dispose();
+      },
+    );
+
+    test(
+      'rodada: dono executa, outro assume e continua com o histórico',
+      () async {
+        final leaseA = leaseFor('A');
+        final leaseB = leaseFor('B');
+        final a = pc('A', leaseA);
+        await a.load();
+        gates['A/t1'] = Completer<void>();
+        coordinatorReply = _plan([_task('t1')]);
+        await a.send('uma tarefa');
+        final run = a.runs.first;
+        await a.approvePlan(run.id);
+        await _settle(() => run.task('t1')!.status == OrqTaskStatus.running);
+
+        final b = pc('B', leaseB);
+        await b.load();
+        final runB = b.runs.first;
+        expect(b.runHolders[run.id], 'A');
+        await expectLater(
+          () => b.retryTask(run.id, 't1'),
+          throwsA(
+            isA<StateError>().having((e) => e.message, 'm', contains('em A')),
+          ),
+        );
+
+        await b.takeOverRun(run.id);
+        expect(b.runs.first.task('t1')!.status, OrqTaskStatus.parked);
+        await leaseA.heartbeat();
+        await _settle(() => a.activeCount == 0);
+        expect(a.runHolders[run.id], 'B');
+
+        await b.retryTask(runB.id, 't1');
+        await _settle(
+          () => b.runs.first.task('t1')!.status == OrqTaskStatus.awaitingReview,
+        );
+        final worker = created.last;
+        expect(worker.prompts.single, contains('começou em A'));
+        expect(
+          worker.restored,
+          isEmpty,
+          reason: 'sessão local do A não existe aqui',
+        );
+        expect(b.runs.first.task('t1')!.result, 'feito t1 em B');
+        a.dispose();
+        b.dispose();
+      },
+    );
   });
 
   group('git', () {

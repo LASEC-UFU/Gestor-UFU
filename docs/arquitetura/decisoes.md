@@ -46,3 +46,24 @@ Um serviço da plataforma unifica achar o Edge/Chrome, abrir com perfil e
 conectar/reconectar pelo DevToolsActivePort. Cada uso tem perfil e sessão
 próprios (Portal do Docente, SEI, agente); o serviço não compartilha a mesma
 janela entre usos.
+
+## D6 — Sessões entre computadores
+Pelo menos dois computadores podem usar o Gestor ao mesmo tempo, cada um com
+as próprias sessões, inclusive do mesmo agente. Toda sessão (conversa de
+agente, conversa do coordenador e rodada do Orquestrador) é visível e pode
+ser continuada em qualquer computador, mas **nunca roda em dois ao mesmo
+tempo**:
+- cada sessão aberta tem uma **posse** (computador + batida a cada minuto)
+  num arquivo da pasta compartilhada (`sessoes/`); posse sem batida há 3 min
+  está livre;
+- outro computador que abre a sessão vê "aberta em PC-X" e escolhe **só
+  visualizar** (leitura, atualizada sozinha) ou **assumir aqui**;
+- ao perder a posse, o computador original para o agente daquela sessão e
+  mostra "assumida por PC-Y";
+- ao continuar em outro computador, a sessão local do CLI (que só existe no
+  computador de origem) não é retomada: o novo agente recebe o histórico como
+  contexto;
+- dados de sessão ficam em chaves próprias (nada de índices compartilhados),
+  para que sessões diferentes nunca conflitem.
+Projetos de código não são sincronizados pelo Gestor: commit/push num
+computador e pull no outro.
