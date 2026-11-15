@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:gestor_ufu/modules/elaborar_relato/domain/sei_documento.dart';
+import 'package:gestor_ufu/modules/elabora_relato/domain/sei_documento.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 import 'package:gestor_ufu/platform/services/sei_automation_service.dart';

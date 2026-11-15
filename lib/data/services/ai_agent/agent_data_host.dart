@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gestor_ufu/data/services/ai_agent/agent_browser.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
@@ -207,6 +208,13 @@ class AgentDataHost {
           fileName: input['file_name'] as String?,
           options: Map<String, dynamic>.from(input['options'] as Map? ?? {}),
         );
+      } on StateError catch (error) {
+        throw _ToolError(error.message);
+      }
+    }
+    if (name.startsWith('computer_')) {
+      try {
+        return await AgentComputer.instance.run(name, input);
       } on StateError catch (error) {
         throw _ToolError(error.message);
       }

@@ -497,6 +497,16 @@ String agentToolLabel(String name) {
     'TodoWrite' => 'Lista de tarefas',
     'Task' || 'Agent' => 'Subagente',
     'ExitPlanMode' => 'Plano pronto',
+    'computer_screenshot' => 'Ver a tela',
+    'computer_windows' => 'Listar janelas',
+    'computer_cursor' => 'Posição do mouse',
+    'computer_focus_window' => 'Trocar de janela',
+    'computer_click' => 'Clicar',
+    'computer_move' => 'Mover o mouse',
+    'computer_drag' => 'Arrastar',
+    'computer_scroll' => 'Rolar',
+    'computer_type' => 'Digitar',
+    'computer_key' => 'Teclas',
     _ => short,
   };
 }
@@ -515,6 +525,9 @@ String agentToolSummary(Map<String, dynamic>? input) {
     'pattern',
     'description',
     'arquivos',
+    'text',
+    'keys',
+    'title',
   ]) {
     final value = input[key];
     if (value == null || '$value'.trim().isEmpty) continue;
@@ -524,6 +537,13 @@ String agentToolSummary(Map<String, dynamic>? input) {
         : '';
     final line = text.replaceAll(RegExp(r'\s+'), ' ');
     return '${line.length > 90 ? '${line.substring(0, 90)}…' : line}$ops';
+  }
+  // Ações no computador: ponto da captura de tela.
+  if (input['x'] is num && input['y'] is num) {
+    final to = input['to_x'] is num
+        ? ' → (${input['to_x']}, ${input['to_y']})'
+        : '';
+    return '(${input['x']}, ${input['y']})$to';
   }
   return '';
 }

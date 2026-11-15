@@ -6,7 +6,7 @@ import 'package:gestor_ufu/modules/moodle/moodle_module.dart';
 import 'package:gestor_ufu/modules/planos_ensino/planos_ensino_module.dart';
 import 'package:gestor_ufu/modules/planos_trabalho/planos_trabalho_module.dart';
 import 'package:gestor_ufu/modules/progressao/progressao_module.dart';
-import 'package:gestor_ufu/modules/elaborar_relato/elaborar_relato_module.dart';
+import 'package:gestor_ufu/modules/elabora_relato/elabora_relato_module.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 
 /// Módulos instalados no Gestor UFU — a única lista que conhece todos.
@@ -19,7 +19,7 @@ void installModules([ModuleRegistry? target]) {
   registry
     ..register(MoodleModule())
     ..register(DiarioModule())
-    ..register(ElaborarRelatoModule())
+    ..register(ElaboraRelatoModule())
     ..register(PlanosEnsinoModule())
     ..register(PlanosTrabalhoModule())
     ..register(AjustaHorariosModule())

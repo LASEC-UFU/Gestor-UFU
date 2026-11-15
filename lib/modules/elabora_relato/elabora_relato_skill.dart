@@ -1,8 +1,8 @@
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 
 /// Guia do módulo entregue ao Agente de IA.
-ModuleSkill elaborarRelatoSkill() => const ModuleSkill(
-  title: 'Elaborar Relato',
+ModuleSkill elaboraRelatoSkill() => const ModuleSkill(
+  title: 'Elabora Relato',
   summary: 'Relatos de processos do SEI (árvore de documentos e inventário).',
   body: '''
 ## Para que serve
@@ -24,13 +24,13 @@ Comandos (run_command):
    ficam sem data/resumo. Avise que esses campos precisam de revisão.
 3. `relato.relatorioArvore` {path?}: texto no formato para parecer
    ("1. Ofício 12 (1234567), de 03/03/2025 – resumo"); com path salva .txt
-   (padrão Documentos/GestorUFU Agente/elaborar_relato).
+   (padrão Documentos/GestorUFU Agente/elabora_relato).
 
 Códigos de erro: endereco_invalido, sei_fechado (Edge não aberto pelo app),
 fora_do_sei (aba saiu do SEI), arvore_vazia (nenhum processo aberto),
 em_andamento, sem_extracao.
 
-Na tela (`/elaborar-relato`, aba "Extrair árvore de processo"): "Abrir
+Na tela (`/elabora-relato`, aba "Extrair árvore de processo"): "Abrir
 Edge"/"Ir para o SEI", depois "Extrair árvore"; "Copiar relatório" ou
 "Exportar .txt".
 

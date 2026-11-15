@@ -28,6 +28,11 @@ const _path = {
   },
 };
 
+const _afterAction = {
+  'type': 'boolean',
+  'description': 'Devolver uma captura de tela após a ação (padrão true).',
+};
+
 const agentTools = <AgentToolSpec>[
   AgentToolSpec(
     name: 'get_app_context',
@@ -434,6 +439,152 @@ const agentTools = <AgentToolSpec>[
     name: 'browser_close',
     description: 'Fecha o navegador do agente.',
     schema: {'type': 'object', 'properties': {}},
+  ),
+  // ------------------------------------------------ Controle do computador
+  AgentToolSpec(
+    name: 'computer_screenshot',
+    description:
+        'Captura a tela de um monitor (padrão: o da última captura, senão o '
+        'principal) e devolve a imagem, a lista de monitores e a posição do '
+        'mouse. As coordenadas x/y das ações computer_* são as da última '
+        'captura. monitor: número (0 = principal) ou "todos".',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'monitor': {
+          'anyOf': [
+            {'type': 'integer'},
+            {
+              'type': 'string',
+              'enum': ['todos'],
+            },
+          ],
+        },
+      },
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_windows',
+    description:
+        'Lista as janelas abertas (título e retângulo em coordenadas da '
+        'captura) e a janela ativa.',
+    schema: {'type': 'object', 'properties': {}},
+  ),
+  AgentToolSpec(
+    name: 'computer_cursor',
+    description: 'Posição atual do mouse (coordenadas da captura).',
+    schema: {'type': 'object', 'properties': {}},
+  ),
+  AgentToolSpec(
+    name: 'computer_focus_window',
+    description:
+        'Traz para a frente a janela cujo título contém o texto informado.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'title': {'type': 'string'},
+        'screenshot': _afterAction,
+      },
+      'required': ['title'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_click',
+    description:
+        'Move o mouse até (x, y) da captura e clica. button: left (padrão), '
+        'right ou middle; clicks: 2 = clique duplo; modifiers: ex. "ctrl" ou '
+        '"shift".',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'x': {'type': 'number'},
+        'y': {'type': 'number'},
+        'button': {
+          'type': 'string',
+          'enum': ['left', 'right', 'middle'],
+        },
+        'clicks': {'type': 'integer'},
+        'modifiers': {'type': 'string'},
+        'screenshot': _afterAction,
+      },
+      'required': ['x', 'y'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_move',
+    description: 'Move o mouse até (x, y) da captura (ex.: abrir um tooltip).',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'x': {'type': 'number'},
+        'y': {'type': 'number'},
+        'screenshot': _afterAction,
+      },
+      'required': ['x', 'y'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_drag',
+    description: 'Arrasta com o botão esquerdo de (x, y) até (to_x, to_y).',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'x': {'type': 'number'},
+        'y': {'type': 'number'},
+        'to_x': {'type': 'number'},
+        'to_y': {'type': 'number'},
+        'screenshot': _afterAction,
+      },
+      'required': ['x', 'y', 'to_x', 'to_y'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_scroll',
+    description:
+        'Rola a roda do mouse em (x, y) (opcional): direction up/down/left/'
+        'right, amount = número de "cliques" da roda (padrão 3).',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'x': {'type': 'number'},
+        'y': {'type': 'number'},
+        'direction': {
+          'type': 'string',
+          'enum': ['up', 'down', 'left', 'right'],
+        },
+        'amount': {'type': 'integer'},
+        'screenshot': _afterAction,
+      },
+      'required': ['direction'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_type',
+    description:
+        'Digita o texto no campo com foco (qualquer caractere; quebra de linha = Enter). '
+        'Clique no campo antes.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'text': {'type': 'string'},
+        'screenshot': _afterAction,
+      },
+      'required': ['text'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'computer_key',
+    description:
+        'Pressiona teclas/atalhos: "enter", "tab", "esc", "ctrl+s", '
+        '"alt+tab", "ctrl+shift+t", "f5"; vários separados por espaço.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'keys': {'type': 'string'},
+        'screenshot': _afterAction,
+      },
+      'required': ['keys'],
+    },
   ),
 ];
 

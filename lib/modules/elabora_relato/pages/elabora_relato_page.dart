@@ -2,12 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/modules/elaborar_relato/application/sei_arvore_service.dart';
-import 'package:gestor_ufu/modules/elaborar_relato/pages/extrair_arvore_view.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/extrair_arvore_view.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 
-/// Uma funcionalidade do Elaborar Relato (uma aba da tela).
+/// Uma funcionalidade do Elabora Relato (uma aba da tela).
 class _Funcionalidade {
   const _Funcionalidade(this.titulo, this.icone, this.builder);
 
@@ -16,11 +16,11 @@ class _Funcionalidade {
   final WidgetBuilder builder;
 }
 
-/// Tela do módulo Elaborar Relato. Cada funcionalidade é uma aba; para
+/// Tela do módulo Elabora Relato. Cada funcionalidade é uma aba; para
 /// acrescentar uma nova, crie a vista em `pages/` e inclua-a em
 /// [_funcionalidades].
-class ElaborarRelatoPage extends StatelessWidget {
-  const ElaborarRelatoPage({required this.arvore, super.key});
+class ElaboraRelatoPage extends StatelessWidget {
+  const ElaboraRelatoPage({required this.arvore, super.key});
 
   final SeiArvoreService arvore;
 
@@ -39,7 +39,7 @@ class ElaborarRelatoPage extends StatelessWidget {
     return DefaultTabController(
       length: itens.length,
       child: ModuleScaffold(
-        moduleId: 'elaborar-relato',
+        moduleId: 'elabora-relato',
         subtitle: 'Relatos de processos do SEI',
         body: Column(
           children: [

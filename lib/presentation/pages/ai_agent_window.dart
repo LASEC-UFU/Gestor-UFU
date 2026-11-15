@@ -16,6 +16,7 @@ import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_mcp_server.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
@@ -298,6 +299,31 @@ class _AiAgentPageState extends State<AiAgentPage> {
   /// Executa uma ferramenta do Gestor para a sessão [s]. Back-ends que não
   /// relatam as ferramentas têm a chamada mostrada pela janela.
   AgentToolCaller _toolCaller(_Session s) => (name, input) async {
+    // Controle do computador: desligado em "Só o Gestor"; cada ação (clique,
+    // digitação, atalho...) pede aprovação nos modos que não são automáticos.
+    if (name.startsWith('computer_')) {
+      final access = _settings.access;
+      if (access == AgentAccess.gestor) {
+        return jsonEncode({
+          'error':
+              'O controle do computador está desligado no modo "Só o '
+              'Gestor". Peça ao usuário para escolher outro modo de acesso.',
+        });
+      }
+      final asks = {
+        AgentAccess.manual,
+        AgentAccess.plan,
+        AgentAccess.acceptEdits,
+      }.contains(access);
+      if (asks && AgentComputer.actions.contains(name)) {
+        final allowed = await _permissionFor(s)(name, input);
+        if (!allowed) {
+          return jsonEncode({
+            'error': 'O usuário negou a ação no computador ($name).',
+          });
+        }
+      }
+    }
     // Comandos que exigem aprovação: confirma no chat antes de executar.
     if (name == 'run_command' && _settings.access != AgentAccess.bypass) {
       final command = ModuleRegistry.instance.commandById(

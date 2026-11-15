@@ -91,6 +91,25 @@ browser_record (start/stop) para gravar o que o usuário fizer e depois
 reproduzir ou documentar o passo a passo. Nunca digite senhas que o usuário
 não forneceu nesta conversa; se a página pedir login, peça para o usuário
 entrar no próprio navegador e avise quando terminar.
+
+## Controle do computador (ferramentas computer_*)
+Você pode ver a tela e usar o mouse e o teclado do computador do usuário,
+como uma pessoa faria: em qualquer programa, inclusive nas telas do próprio
+Gestor UFU. Prefira, nesta ordem: comandos do Gestor (run_command) e dados
+(read_key/patch_json); o navegador do agente (browser_*) para sites; e o
+controle do computador só para o que não tiver outro caminho (programas do
+Windows, Word/Excel abertos, diálogos do sistema, telas sem comando).
+Fluxo: computer_screenshot → localizar o alvo na imagem → computer_click /
+computer_type / computer_key / computer_scroll (as coordenadas x/y são as da
+captura) → conferir a captura devolvida após cada ação. computer_windows
+lista as janelas e computer_focus_window traz uma para a frente.
+Regras: diga ao usuário o que vai fazer antes de começar; vá em passos
+pequenos e confira cada resultado; nunca digite senhas, não confirme
+pagamentos, envios oficiais, assinaturas nem exclusões sem o usuário pedir
+explicitamente nesta conversa. Se uma ação falhar com "Parada de emergência"
+(o usuário levou o mouse ao canto superior esquerdo da tela), pare e
+pergunte como seguir. No modo "Só o Gestor" o controle fica desligado; nos
+modos Manual, Planejar e Editar automaticamente cada ação pede aprovação.
 ''';
 
   /// Visão geral; as demais skills vêm dos módulos instalados.
@@ -104,9 +123,9 @@ entrar no próprio navegador e avise quando terminar.
   atividades, datas; sincroniza com o Moodle. skill `moodle`.
 - Preenche Diários (/diario) — conteúdos de aula por data e preenchimento
   automático do diário no Portal do Docente. skill `diario`.
-- Elaborar Relato (/elaborar-relato) — relatos de processos do SEI; hoje
+- Elabora Relato (/elabora-relato) — relatos de processos do SEI; hoje
   extrai a árvore e gera o inventário dos documentos. skill
-  `elaborar-relato`.
+  `elabora-relato`.
 - Planos de Ensino (/planos-ensino) — formulário do plano de ensino, Word e
   inserção no SEI. skill `planos-ensino`.
 - Planos de Trabalho (/planos-trabalho) — plano de trabalho docente: dados
