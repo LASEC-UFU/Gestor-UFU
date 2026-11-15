@@ -25,10 +25,8 @@ class AcademicTermService extends ChangeNotifier {
   String get active => _active;
 
   /// Corrige o "º"/"ª" gravado com codificação dupla por versões antigas.
-  static String normalize(String value) => value
-      .trim()
-      .replaceAll('Âº', 'º')
-      .replaceAll('Âª', 'ª');
+  static String normalize(String value) =>
+      value.trim().replaceAll('Âº', 'º').replaceAll('Âª', 'ª');
 
   /// Lê, normaliza e grava de volta (lista ordenada e período ativo válido).
   Future<void> load() async {

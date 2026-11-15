@@ -1,5 +1,5 @@
-import 'package:gestor_ufu/data/datasources/local_datasource.dart';
-import 'package:gestor_ufu/data/repositories/config_repository_impl.dart';
+import 'package:gestor_ufu/modules/moodle/data/datasources/local_datasource.dart';
+import 'package:gestor_ufu/modules/moodle/data/repositories/config_repository_impl.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:flutter_test/flutter_test.dart';
 

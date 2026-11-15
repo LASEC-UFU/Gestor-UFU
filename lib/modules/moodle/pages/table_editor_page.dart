@@ -6,15 +6,15 @@ import 'package:intl/intl.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
-import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/auth_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
-import 'package:gestor_ufu/presentation/widgets/inline_edit_text.dart';
-import 'package:gestor_ufu/presentation/widgets/inline_link_picker.dart';
-import 'package:gestor_ufu/presentation/widgets/word_table_dialog.dart';
+import 'package:gestor_ufu/modules/moodle/widgets/inline_edit_text.dart';
+import 'package:gestor_ufu/modules/moodle/widgets/inline_link_picker.dart';
+import 'package:gestor_ufu/modules/moodle/widgets/word_table_dialog.dart';
 
 class TableEditorPage extends StatefulWidget {
   final String courseConfigId;

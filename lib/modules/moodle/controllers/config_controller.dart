@@ -6,7 +6,7 @@ import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
-import 'package:gestor_ufu/domain/repositories/i_config_repository.dart';
+import 'package:gestor_ufu/modules/moodle/domain/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
   static const _termKey = 'ajusta_horarios_periodo_letivo';

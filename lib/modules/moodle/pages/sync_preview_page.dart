@@ -4,9 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
-import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/auth_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 

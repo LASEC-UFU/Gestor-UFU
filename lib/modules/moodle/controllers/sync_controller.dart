@@ -4,7 +4,7 @@ import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/core/utils/string_matcher.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
-import 'package:gestor_ufu/domain/repositories/i_moodle_repository.dart';
+import 'package:gestor_ufu/modules/moodle/domain/i_moodle_repository.dart';
 
 class SyncController extends ChangeNotifier {
   final IMoodleRepository _repo;

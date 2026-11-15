@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
-import 'package:gestor_ufu/domain/repositories/i_moodle_repository.dart';
+import 'package:gestor_ufu/modules/moodle/domain/i_moodle_repository.dart';
 
 class AuthController extends ChangeNotifier {
   final IMoodleRepository _repo;

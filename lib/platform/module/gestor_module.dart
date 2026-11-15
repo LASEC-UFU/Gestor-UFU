@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/single_child_widget.dart';
 
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
@@ -76,6 +77,18 @@ abstract class GestorModule {
   /// Ações do módulo executáveis pela tela, pelo menu e pelo agente.
   List<ModuleCommand> get commands => const [];
 
+  /// Providers que o módulo publica para as SUAS telas (ex.: controllers
+  /// do Config Moodle). Outros módulos não devem lê-los — usam contratos.
+  List<SingleChildWidget> get providers => const [];
+
+  /// Modelos de arquivo das importações do módulo (ferramenta
+  /// `create_template` do agente e botões "baixar modelo").
+  List<ModuleTemplate> get templates => const [];
+
+  /// O banco foi alterado por fora da tela (agente, outro computador):
+  /// descarte caches e recarregue.
+  Future<void> onExternalDataChanged() async {}
+
   bool get enabled => route != null;
 
   /// Chave usada pelo painel para guardar ordem/ocultos (compatível com as
@@ -92,3 +105,26 @@ String termScopedSkillNote(String prefix) =>
     '`term_storage_key(prefix: "$prefix", term: <período>)` ou use os '
     'comandos do módulo. O período ativo vem de `get_app_context` (ex.: '
     '"2º semestre de 2026").';
+
+/// Modelo de arquivo aceito por uma importação do módulo.
+class ModuleTemplate {
+  const ModuleTemplate({
+    required this.id,
+    required this.description,
+    required this.build,
+  });
+
+  final String id;
+
+  /// Onde importar (tela e botão).
+  final String description;
+
+  /// Gera o arquivo: (nome sugerido, bytes, como importar). [rows] substitui
+  /// os exemplos; [data] é o conteúdo completo em modelos JSON.
+  final (String, List<int>, String) Function({
+    List<List<Object?>>? rows,
+    Object? data,
+    Map<String, dynamic> options,
+  })
+  build;
+}

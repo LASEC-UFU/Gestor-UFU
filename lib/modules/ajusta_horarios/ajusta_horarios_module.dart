@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
+import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 
@@ -39,6 +41,12 @@ class AjustaHorariosModule extends GestorModule {
       builder: (context, state) => const AjustaHorariosPage(),
     ),
   ];
+
+  /// Importa a grade 2026/2 de Controle e Automação na primeira abertura
+  /// e aplica as migrações de dados do módulo.
+  @override
+  Future<void> activate(GestorServices services) =>
+      AjustaHorariosStore().load();
 
   @override
   Map<String, ModuleWindowBuilder> get windows => {

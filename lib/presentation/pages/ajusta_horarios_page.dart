@@ -16,7 +16,7 @@ import 'package:gestor_ufu/data/services/ajusta_horarios_pdf_service.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
-import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
+import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 class AjustaHorariosPage extends StatefulWidget {

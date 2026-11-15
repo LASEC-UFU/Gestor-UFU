@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
-import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
 import 'package:gestor_ufu/data/services/planos_ensino_service.dart';
 import 'package:gestor_ufu/data/services/planos_ensino_automation_service.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';

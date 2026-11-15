@@ -4,17 +4,16 @@ import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:path/path.dart' as p;
 
-import 'package:gestor_ufu/data/template_generator.dart';
+import 'package:gestor_ufu/platform/module/gestor_module.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 
 /// Modelos de arquivo aceitos pelas importações do Gestor UFU. O agente usa a
 /// ferramenta `create_template` para entregar ao usuário um arquivo no
 /// formato exato que cada tela importa — com exemplos ou já com os dados que
 /// ele montou a partir do que o usuário colou/anexou.
 class AgentTemplates {
-  static const all = <String, String>{
-    'moodle_planilha':
-        'Config Moodle → "Novo" → "Importar Planilha": planilha .xlsx de uma '
-        'disciplina (seções e atividades), abas _Datas Especiais e _Trocas de Dia.',
+  /// Modelos ainda mantidos aqui (os demais vêm dos módulos instalados).
+  static const _builtIn = <String, String>{
     'diario_planilha':
         'Preenche Diários → "Importar Excel": colunas Data | Modalidade | '
         'Matéria Lecionada.',
@@ -38,6 +37,22 @@ class AgentTemplates {
         'colunas separadas por TAB (Data, Modalidade, Matéria Lecionada…).',
   };
 
+  /// Todos os modelos: os declarados pelos módulos + os embutidos.
+  static Map<String, String> get all => {
+    for (final module in ModuleRegistry.instance.modules)
+      for (final t in module.templates) t.id: t.description,
+    ..._builtIn,
+  };
+
+  static ModuleTemplate? _fromModules(String id) {
+    for (final module in ModuleRegistry.instance.modules) {
+      for (final t in module.templates) {
+        if (t.id == id) return t;
+      }
+    }
+    return null;
+  }
+
   /// Gera o modelo [id] e devolve o caminho do arquivo criado.
   ///
   /// [rows]: linhas de dados (lista de listas) no lugar dos exemplos; para
@@ -50,20 +65,22 @@ class AgentTemplates {
     String? fileName,
     Map<String, dynamic> options = const {},
   }) async {
-    final (String name, List<int> bytes, String howTo) = switch (id) {
-      'moodle_planilha' => _moodle(rows, options),
-      'diario_planilha' => _diarioXlsx(rows),
-      'diario_json' => _diarioJson(data),
-      'ajusta_horarios_bdados' => _bdados(rows),
-      'ajusta_horarios_banco' => _banco(rows),
-      'equivalencia_curriculo' => _curriculo(rows),
-      'equivalencia_analise' => _analise(rows, options),
-      'plano_ensino_json' => _planoJson(data),
-      'plano_ensino_cronograma' => _cronograma(rows),
-      _ => throw StateError(
-        'Modelo desconhecido "$id". Use um destes: ${all.keys.join(', ')}.',
-      ),
-    };
+    final fromModule = _fromModules(id);
+    final (String name, List<int> bytes, String howTo) = fromModule != null
+        ? fromModule.build(rows: rows, data: data, options: options)
+        : switch (id) {
+            'diario_planilha' => _diarioXlsx(rows),
+            'diario_json' => _diarioJson(data),
+            'ajusta_horarios_bdados' => _bdados(rows),
+            'ajusta_horarios_banco' => _banco(rows),
+            'equivalencia_curriculo' => _curriculo(rows),
+            'equivalencia_analise' => _analise(rows, options),
+            'plano_ensino_json' => _planoJson(data),
+            'plano_ensino_cronograma' => _cronograma(rows),
+            _ => throw StateError(
+              'Modelo desconhecido "$id". Use um destes: ${all.keys.join(', ')}.',
+            ),
+          };
     final dir = Directory(
       folder?.trim().isNotEmpty == true ? folder!.trim() : _defaultFolder(),
     );
@@ -105,40 +122,6 @@ class AgentTemplates {
   }
 
   // ------------------------------------------------------------ Config Moodle
-
-  static (String, List<int>, String) _moodle(
-    List<List<Object?>>? rows,
-    Map<String, dynamic> options,
-  ) {
-    final swaps = <DateTime, int>{};
-    final rawSwaps = options['day_swaps'];
-    if (rawSwaps is Map) {
-      for (final entry in rawSwaps.entries) {
-        final date = DateTime.tryParse('${entry.key}');
-        final weekday = int.tryParse('${entry.value}');
-        if (date != null && weekday != null) swaps[date] = weekday;
-      }
-    }
-    final bytes = TemplateGenerator.generateTemplate(
-      sheetName: '${options['sheet_name'] ?? 'Disciplina'}',
-      courseName: '${options['course_name'] ?? 'NOME DA DISCIPLINA NO MOODLE'}',
-      moodleCourseId: options['moodle_course_id'],
-      semesterStart: DateTime.tryParse('${options['semester_start'] ?? ''}'),
-      rows: rows,
-      holidays: [
-        for (final date in (options['holidays'] as List? ?? const []))
-          ?DateTime.tryParse('$date'),
-      ],
-      daySwaps: swaps,
-    );
-    return (
-      'config_moodle_modelo.xlsx',
-      bytes,
-      'Config Moodle → "Novo" → "Importar Planilha (.xlsx)". Cada aba com a '
-          'linha de cabeçalho "Ordem … Tipo" vira uma configuração (o nome da '
-          'aba é o nome da configuração).',
-    );
-  }
 
   // ------------------------------------------------------------ Diários
 

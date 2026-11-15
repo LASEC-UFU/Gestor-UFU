@@ -21,14 +21,12 @@ import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
 import 'package:gestor_ufu/modules/diario/application/diario_lancamentos.dart';
+import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
-import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
-import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
+import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
 const _diaryPeriodsKey = 'ajusta_horarios_periodos_letivos';
@@ -40,7 +38,11 @@ const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
 const _portalAddressKey = 'portal_docente_url';
 
 class PreencheDiariosPage extends StatefulWidget {
-  const PreencheDiariosPage({super.key});
+  const PreencheDiariosPage({this.moodle, super.key});
+
+  /// Planejamento do Config Moodle (contrato; ausente se o módulo não estiver
+  /// instalado).
+  final MoodlePlanning? moodle;
 
   @override
   State<PreencheDiariosPage> createState() => _PreencheDiariosPageState();
@@ -80,9 +82,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final controller = context.read<ConfigController>();
-      await controller.loadAll();
-      final snapshots = await controller.getSnapshots();
+      final snapshots =
+          await widget.moodle?.snapshots() ?? <MoodleConfigSnapshot>[];
       if (mounted) setState(() => _moodleSnapshots = snapshots);
       await _loadPortalAddress();
       await _loadPortalCredentials();
@@ -1182,7 +1183,8 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   }
 
   Future<void> _importFromSavedConfig() async {
-    final configs = context.read<ConfigController>().configs;
+    final configs = await widget.moodle?.savedConfigs() ?? <CourseConfig>[];
+    if (!mounted) return;
     if (configs.isEmpty) {
       await _showMessage(
         'Nenhuma configuração disponível',
@@ -1199,37 +1201,32 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   }
 
   Future<void> _importFromLiveMoodle() async {
-    final auth = context.read<AuthController>();
-    if (!auth.isLoggedIn) {
-      final loggedIn = await _showMoodleLoginDialog();
-      if (!loggedIn || !mounted) return;
+    final moodle = widget.moodle;
+    if (moodle == null) {
+      await _showMessage(
+        'Config Moodle indisponível',
+        'O módulo Config Moodle não está instalado.',
+      );
+      return;
     }
-
+    if (!await moodle.ensureConnected(context) || !mounted) return;
     setState(() => _loadingMoodleCourses = true);
-    final sync = context.read<SyncController>();
     try {
-      await sync.loadCourses(auth.token, auth.baseUrl);
+      final courses = await moodle.courses();
       if (!mounted) return;
-      if (sync.error != null) {
-        await _showMessage('Falha ao consultar Moodle', sync.error!);
-        return;
-      }
-      if (sync.courses.isEmpty) {
+      if (courses.isEmpty) {
         await _showMessage(
           'Nenhuma disciplina encontrada',
           'A conta conectada não possui disciplinas disponíveis no Moodle.',
         );
         return;
       }
-
       final course = await showDialog<MoodleCourse>(
         context: context,
-        builder: (dialogContext) =>
-            _MoodleDiaryCourseDialog(courses: sync.courses),
+        builder: (dialogContext) => _MoodleDiaryCourseDialog(courses: courses),
       );
       if (course == null || !mounted) return;
-
-      final configs = context.read<ConfigController>().configs;
+      final configs = await moodle.savedConfigs();
       final matching = configs.where(
         (item) => item.moodleCourseId == course.id,
       );
@@ -1237,19 +1234,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
           course.startDate ??
           (matching.isNotEmpty ? matching.first.semesterStartDate : null);
       if (semesterStart == null) {
+        if (!mounted) return;
         await _showMessage(
           'Data de início não encontrada',
           'O Moodle não retornou a data de início desta disciplina e não existe uma configuração local correspondente. Configure a data de início do curso no Moodle e tente novamente.',
         );
         return;
       }
-
-      final config = await sync.buildConfigFromMoodle(
-        auth.token,
-        auth.baseUrl,
-        course,
-        semesterStart,
-      );
+      final config = await moodle.configFromCourse(course, semesterStart);
       if (!mounted) return;
       setState(() => _loadingMoodleCourses = false);
       await _useMoodleConfig(config, sourceLabel: 'Moodle ao vivo');
@@ -1260,117 +1252,6 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     } finally {
       if (mounted) setState(() => _loadingMoodleCourses = false);
     }
-  }
-
-  Future<bool> _showMoodleLoginDialog() async {
-    final auth = context.read<AuthController>();
-    await auth.init();
-    if (!mounted) return false;
-    final savedCredential = auth.credential;
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return false;
-    final url = TextEditingController(
-      text:
-          prefs.getString('last_moodle_url') ??
-          savedCredential?.moodleUrl ??
-          'https://moodle.ufu.br',
-    );
-    final username = TextEditingController(
-      text: savedCredential?.username ?? '',
-    );
-    final password = TextEditingController(
-      text: savedCredential?.password ?? '',
-    );
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Conectar ao Moodle'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: url,
-                  keyboardType: TextInputType.url,
-                  onChanged: (value) =>
-                      prefs.setString('last_moodle_url', value.trim()),
-                  decoration: const InputDecoration(
-                    labelText: 'Endereço do Moodle',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: username,
-                  decoration: const InputDecoration(labelText: 'Usuário'),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: password,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: 'Senha'),
-                  onSubmitted: (_) async {
-                    final ok = await auth.login(
-                      url.text.trim(),
-                      username.text.trim(),
-                      password.text,
-                    );
-                    if (ok && dialogContext.mounted)
-                      Navigator.pop(dialogContext, true);
-                    setDialogState(() {});
-                  },
-                ),
-                if (auth.error != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    auth.error!,
-                    style: const TextStyle(color: AppTheme.danger),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton(
-              onPressed: auth.loading
-                  ? null
-                  : () async {
-                      final ok = await auth.login(
-                        url.text.trim(),
-                        username.text.trim(),
-                        password.text,
-                      );
-                      if (ok) {
-                        await prefs.setString(
-                          'last_moodle_url',
-                          url.text.trim(),
-                        );
-                        if (dialogContext.mounted)
-                          Navigator.pop(dialogContext, true);
-                      } else {
-                        setDialogState(() {});
-                      }
-                    },
-              child: auth.loading
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Entrar'),
-            ),
-          ],
-        ),
-      ),
-    );
-    url.dispose();
-    username.dispose();
-    password.dispose();
-    return result == true;
   }
 
   Future<bool?> _askReplaceOrMerge(

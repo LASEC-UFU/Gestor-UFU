@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/web_table_clipboard.dart';
-import 'package:gestor_ufu/data/word_table_generator.dart';
+import 'package:gestor_ufu/modules/moodle/data/word_table_generator.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;

@@ -7,6 +7,7 @@ import 'package:gestor_ufu/modules/diario/application/diario_service.dart';
 import 'package:gestor_ufu/modules/diario/diario_skill.dart';
 import 'package:gestor_ufu/modules/diario/pages/preenche_diarios_page.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
@@ -17,6 +18,7 @@ class DiarioModule extends GestorModule {
   DiarioModule();
 
   DiarioService? _service;
+  GestorServices? _services;
 
   DiarioService get service => _service ??= DiarioService(
     KeyValueStore(),
@@ -25,6 +27,7 @@ class DiarioModule extends GestorModule {
 
   @override
   Future<void> activate(GestorServices services) async {
+    _services = services;
     _service = DiarioService(services.store, services.terms);
   }
 
@@ -54,7 +57,9 @@ class DiarioModule extends GestorModule {
   List<RouteBase> get routes => [
     GoRoute(
       path: route,
-      builder: (context, state) => const PreencheDiariosPage(),
+      // Planejamento do Config Moodle via contrato (opcional).
+      builder: (context, state) =>
+          PreencheDiariosPage(moodle: _services?.contract<MoodlePlanning>()),
     ),
   ];
 

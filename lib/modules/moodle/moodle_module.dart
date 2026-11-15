@@ -1,15 +1,59 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/presentation/pages/home_page.dart';
-import 'package:gestor_ufu/presentation/pages/sync_preview_page.dart';
-import 'package:gestor_ufu/presentation/pages/table_editor_page.dart';
+import 'package:gestor_ufu/modules/moodle/application/moodle_commands.dart';
+import 'package:gestor_ufu/modules/moodle/application/moodle_planning_impl.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/auth_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
+import 'package:gestor_ufu/modules/moodle/controllers/sync_controller.dart';
+import 'package:gestor_ufu/modules/moodle/data/datasources/local_datasource.dart';
+import 'package:gestor_ufu/modules/moodle/data/datasources/moodle_datasource.dart';
+import 'package:gestor_ufu/modules/moodle/data/repositories/config_repository_impl.dart';
+import 'package:gestor_ufu/modules/moodle/data/repositories/moodle_repository_impl.dart';
+import 'package:gestor_ufu/modules/moodle/moodle_skill.dart';
+import 'package:gestor_ufu/modules/moodle/pages/home_page.dart';
+import 'package:gestor_ufu/modules/moodle/pages/sync_preview_page.dart';
+import 'package:gestor_ufu/modules/moodle/pages/table_editor_page.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
+import 'package:gestor_ufu/platform/services/gestor_services.dart';
 
-/// Módulo Config Moodle.
+/// Módulo Config Moodle: planejamento de disciplinas e sincronização com o
+/// Moodle. Oferece o contrato [MoodlePlanning] aos outros módulos.
 class MoodleModule extends GestorModule {
-  const MoodleModule();
+  MoodleModule();
+
+  final _local = LocalDatasource();
+  late final config = ConfigController(ConfigRepositoryImpl(_local));
+  late final _moodleRepo = MoodleRepositoryImpl(MoodleDatasource());
+  late final auth = AuthController(_moodleRepo);
+  late final sync = SyncController(_moodleRepo);
+
+  @override
+  Future<void> activate(GestorServices services) async {
+    await _local.migrateLegacyTextEncoding();
+    auth.init();
+    services.registerContract<MoodlePlanning>(
+      MoodlePlanningImpl(config, sync, auth),
+    );
+  }
+
+  @override
+  Future<void> onExternalDataChanged() async {
+    _local.invalidateCache();
+    await config.loadAll();
+  }
+
+  @override
+  List<SingleChildWidget> get providers => [
+    ChangeNotifierProvider.value(value: auth),
+    ChangeNotifierProvider.value(value: config),
+    ChangeNotifierProvider.value(value: sync),
+  ];
 
   @override
   String get id => 'moodle';
@@ -50,6 +94,24 @@ class MoodleModule extends GestorModule {
       path: '/sync/:id',
       builder: (context, state) =>
           SyncPreviewPage(courseConfigId: state.pathParameters['id']!),
+    ),
+  ];
+
+  @override
+  ModuleSkill get skill => moodleSkill();
+
+  @override
+  List<ModuleCommand> get commands => moodleCommands(config);
+
+  @override
+  List<ModuleTemplate> get templates => const [
+    ModuleTemplate(
+      id: 'moodle_planilha',
+      description:
+          'Config Moodle → "Novo" → "Importar Planilha": planilha .xlsx de uma '
+          'disciplina (seções e atividades), abas _Datas Especiais e _Trocas '
+          'de Dia.',
+      build: moodleTemplate,
     ),
   ];
 }

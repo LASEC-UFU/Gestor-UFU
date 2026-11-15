@@ -10,15 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/core/router/app_router.dart';
-import 'package:gestor_ufu/data/datasources/local_datasource.dart';
-import 'package:gestor_ufu/data/datasources/moodle_datasource.dart';
-import 'package:gestor_ufu/data/repositories/config_repository_impl.dart';
-import 'package:gestor_ufu/data/repositories/moodle_repository_impl.dart';
-import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
-import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
-import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/data/services/windows_update_service.dart';
 import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
@@ -26,6 +18,7 @@ import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/app/installed_modules.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
+import 'package:gestor_ufu/platform/services/navigation_service.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:window_manager/window_manager.dart';
@@ -99,38 +92,25 @@ Future<void> main(List<String> args) async {
     await windowManager.ensureInitialized();
     await windowManager.setTitle(appTitle);
   }
-  final services = GestorServices();
-  await ModuleRegistry.instance.activateAll(services);
   final preferences = await SharedPreferences.getInstance();
   final sharedDatabase = SharedPreferencesSyncService();
   await sharedDatabase.initialize();
-  // Importa a grade 2026/2 de Controle e Automacao na primeira abertura.
-  await AjustaHorariosStore().load();
+  // Ativa os módulos DEPOIS de trazer o banco compartilhado: as migrações e
+  // os dados iniciais dos módulos não podem sobrescrever o que veio de lá.
+  final services = GestorServices();
+  await ModuleRegistry.instance.activateAll(services);
   final themeCtrl = ThemeController(
     isLight: preferences.getBool(ThemeController.storageKey) ?? false,
   );
 
-  final localDs = LocalDatasource();
-  await localDs.migrateLegacyTextEncoding();
-  final moodleDs = MoodleDatasource();
-  final configRepo = ConfigRepositoryImpl(localDs);
-  final moodleRepo = MoodleRepositoryImpl(moodleDs);
-  final authCtrl = AuthController(moodleRepo)..init();
-  final configCtrl = ConfigController(configRepo);
-  final syncCtrl = SyncController(moodleRepo);
-
   // Ferramentas do Agente de IA executadas nesta janela (banco + desfazer).
   final agentHost = AgentDataHost.instance
-    ..currentRoute = (() {
-      try {
-        return AppRouter.router.routerDelegate.currentConfiguration.uri.path;
-      } catch (_) {
-        return null;
-      }
-    })
+    ..currentRoute = (() => NavigationService.currentRoute)
+    // Dados alterados pelo agente: cada módulo descarta caches e recarrega.
     ..onDataChanged = () async {
-      localDs.invalidateCache();
-      await configCtrl.loadAll();
+      for (final module in ModuleRegistry.instance.modules) {
+        await module.onExternalDataChanged();
+      }
     };
   if (Platform.isWindows) await agentHost.start();
 
@@ -150,11 +130,11 @@ Future<void> main(List<String> args) async {
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider.value(value: authCtrl),
-        ChangeNotifierProvider.value(value: configCtrl),
-        ChangeNotifierProvider.value(value: syncCtrl),
         ChangeNotifierProvider.value(value: themeCtrl),
         ChangeNotifierProvider.value(value: sharedDatabase),
+        // Providers que cada módulo publica para as próprias telas.
+        for (final module in ModuleRegistry.instance.modules)
+          ...module.providers,
       ],
       child: const GestorUfuApp(),
     ),
