@@ -273,6 +273,17 @@ class AiMemoryRuntime {
 
   String? _session;
   int _nextId = 1;
+  String? _authToken;
+
+  /// Token de máquina criado pelo `init` na pasta privada (nunca sai dela;
+  /// não é entregue aos agentes).
+  Future<String?> _token() async {
+    if (_authToken != null) return _authToken;
+    final file = File(p.join(dataDir, 'auth-token'));
+    if (!await file.exists()) return null;
+    final value = (await file.readAsString()).trim();
+    return _authToken = value.isEmpty ? null : value;
+  }
 
   Future<Object?> _rpc(String method, Map<String, dynamic> params) async {
     final url = await ensureServer();
@@ -283,6 +294,10 @@ class AiMemoryRuntime {
         ..contentType = ContentType.json
         ..set('Accept', 'application/json, text/event-stream');
       if (_session != null) request.headers.set('Mcp-Session-Id', _session!);
+      final token = await _token();
+      if (token != null) {
+        request.headers.set('Authorization', 'Bearer $token');
+      }
       final id = _nextId++;
       request.add(
         utf8.encode(
@@ -329,7 +344,10 @@ class AiMemoryRuntime {
         }
       }
     }
-    throw const AiMemoryException('Resposta MCP do AI Memory ilegível.');
+    final snippet = text.length > 300 ? text.substring(0, 300) : text;
+    throw AiMemoryException(
+      'Resposta MCP do AI Memory ilegível: ${snippet.isEmpty ? '(vazia)' : snippet}',
+    );
   }
 
   Future<void> _ensureInitialized() async {
@@ -491,20 +509,43 @@ class AiMemoryBridge implements OrqMemoryBridge {
     }
     final body = '${page?['body'] ?? page?['content'] ?? ''}';
     final verified = page != null && body.contains(marker);
-    final serverMcp = runtime.mcpUrl ?? '';
+    // O Orquestrador lê e grava a memória pelos agentes (o token do AI
+    // Memory não é entregue a eles): o contexto vai no pedido e o relatório
+    // da tentativa é gravado a partir do resultado.
+    final attempts = verified ? await _attemptContext(project, run, task) : '';
     return OrqTaskMemory(
       status: verified ? 'verified' : 'unverified',
       pagePath: path,
-      context: verified ? redactSensitiveText(body, max: 4000) : '',
-      mcpServerUrl: serverMcp,
+      context: verified ? redactSensitiveText('$body$attempts', max: 4000) : '',
       instructions:
-          'Memória compartilhada (AI Memory, opcional): se as ferramentas '
-          'ai_memory estiverem disponíveis, use o escopo workspace=$workspace, '
-          'project=$project; a página da tarefa é $path e o relatório desta '
-          'tentativa vai em ${attemptPage(run, task, task.provider)} '
-          '(crie com create_only e confira lendo de volta). Nunca diga que '
-          'leu ou gravou uma página sem confirmar.',
+          'Memória compartilhada (AI Memory): o Orquestrador mantém a página '
+          'da tarefa ($path, escopo $workspace/$project) e grava o relatório '
+          'desta tentativa a partir do seu relatório final. Você não precisa '
+          'acessar o AI Memory; capriche no relatório final.',
     );
+  }
+
+  /// Relatórios de tentativas anteriores (para quem continua a tarefa).
+  Future<String> _attemptContext(
+    String project,
+    OrqRun run,
+    OrqTask task,
+  ) async {
+    final buffer = StringBuffer();
+    for (var n = 1; n < task.attempts; n++) {
+      for (final provider in const ['claude', 'chatgpt', 'gemini', 'copilot']) {
+        final path =
+            'orquestrador/tarefas/${run.id}/${task.id}/agentes/'
+            '$provider-tentativa-$n.md';
+        final page = await _read(project, path);
+        if (page == null) continue;
+        buffer
+          ..writeln()
+          ..writeln('--- $path ---')
+          ..writeln('${page['body'] ?? page['content'] ?? ''}');
+      }
+    }
+    return buffer.toString();
   }
 
   @override
@@ -526,8 +567,8 @@ class AiMemoryBridge implements OrqMemoryBridge {
         'create_only': true,
         'body': redactSensitiveText(
           '# Tentativa ${task.attempts} · $provider\n\n<!-- $marker -->\n\n'
-          '_Resumo gravado pelo Orquestrador (o agente não registrou o '
-          'relatório)._\n\n${task.result}\n',
+          '_Relatório gravado pelo Orquestrador a partir do resultado do '
+          'agente._\n\n${task.result}\n',
         ),
       });
     } on Object {
