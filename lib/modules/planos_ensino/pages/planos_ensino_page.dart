@@ -338,38 +338,27 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                 icon: Icons.menu_book_rounded,
                 accent: AppTheme.green,
                 onBack: () => context.go('/'),
+                // Só ícones; o texto aparece ao passar o mouse.
                 actions: [
-                  OutlinedButton.icon(
-                    onPressed: _importBackup,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                    ),
-                    icon: const Icon(Icons.file_open_rounded),
-                    label: const Text('Importar backup'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _exportBackup,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                    ),
-                    icon: const Icon(Icons.save_alt_rounded),
-                    label: const Text('Exportar backup'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _importDocx,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                    ),
-                    icon: const Icon(Icons.description_outlined),
-                    label: const Text('Importar Word'),
-                  ),
-                  FilledButton.icon(
+                  IconButton.filled(
                     onPressed: () => _edit(),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 44),
-                    ),
+                    tooltip: 'Novo formulário',
                     icon: const Icon(Icons.add_rounded),
-                    label: const Text('Novo formulário'),
+                  ),
+                  IconButton.outlined(
+                    onPressed: _importBackup,
+                    tooltip: 'Importar backup',
+                    icon: const Icon(Icons.file_open_rounded),
+                  ),
+                  IconButton.outlined(
+                    onPressed: _importDocx,
+                    tooltip: 'Importar Word',
+                    icon: const Icon(Icons.description_outlined),
+                  ),
+                  IconButton.outlined(
+                    onPressed: _exportBackup,
+                    tooltip: 'Exportar backup',
+                    icon: const Icon(Icons.save_alt_rounded),
                   ),
                 ],
               ),
