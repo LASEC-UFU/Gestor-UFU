@@ -179,21 +179,22 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
     return ModuleScaffold(
       moduleId: 'equivalencia-alunos',
       subtitle: 'Análise de transferência por blocos curriculares',
+      // Só ícones; o texto aparece ao passar o mouse.
       actions: [
-        OutlinedButton.icon(
-          onPressed: _curriculumDialog,
-          icon: const Icon(Icons.account_tree_outlined),
-          label: const Text('Currículos'),
-        ),
-        OutlinedButton.icon(
-          onPressed: _importWorkbook,
-          icon: const Icon(Icons.upload_file),
-          label: const Text('Importar planilha'),
-        ),
-        FilledButton.icon(
+        IconButton.filled(
           onPressed: () => _newCase(),
+          tooltip: 'Nova análise',
           icon: const Icon(Icons.add),
-          label: const Text('Nova análise'),
+        ),
+        IconButton.outlined(
+          onPressed: _curriculumDialog,
+          tooltip: 'Currículos',
+          icon: const Icon(Icons.account_tree_outlined),
+        ),
+        IconButton.outlined(
+          onPressed: _importWorkbook,
+          tooltip: 'Importar planilha',
+          icon: const Icon(Icons.upload_file),
         ),
       ],
       body: Center(
