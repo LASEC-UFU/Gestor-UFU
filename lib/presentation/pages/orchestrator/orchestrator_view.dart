@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
+import 'package:gestor_ufu/orchestrator/application/ai_memory.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
@@ -1294,4 +1295,105 @@ class _OrqSettingsDialogState extends State<_OrqSettingsDialog> {
       ],
     );
   }
+}
+
+/// Painel do AI Memory nas configurações do Orquestrador: estado, instalação
+/// da release oficial fixada (com SHA-256) e aviso de licença.
+class AiMemoryPanel extends StatefulWidget {
+  const AiMemoryPanel({required this.bridge, this.onChanged, super.key});
+
+  final AiMemoryBridge bridge;
+  final VoidCallback? onChanged;
+
+  @override
+  State<AiMemoryPanel> createState() => _AiMemoryPanelState();
+}
+
+class _AiMemoryPanelState extends State<AiMemoryPanel> {
+  double? _progress;
+  String _error = '';
+  bool _installed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.bridge.runtime.executable().then((exe) {
+      if (mounted) setState(() => _installed = exe != null);
+    });
+  }
+
+  Future<void> _install() async {
+    setState(() {
+      _progress = 0;
+      _error = '';
+    });
+    try {
+      await widget.bridge.runtime.install(
+        onProgress: (value) {
+          if (mounted) setState(() => _progress = value);
+        },
+      );
+      await widget.bridge.start();
+      _installed = true;
+    } on Object catch (error) {
+      _error = '$error';
+    }
+    if (mounted) setState(() => _progress = null);
+    widget.onChanged?.call();
+  }
+
+  Future<void> _start() async {
+    setState(() => _progress = -1);
+    await widget.bridge.start();
+    if (mounted) setState(() => _progress = null);
+    widget.onChanged?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        'Estado: ${widget.bridge.statusLabel}',
+        style: const TextStyle(fontSize: 12),
+      ),
+      if (_progress != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: LinearProgressIndicator(
+            value: _progress! < 0 ? null : _progress,
+          ),
+        ),
+      if (_error.isNotEmpty)
+        Text(_error, style: const TextStyle(fontSize: 12, color: Colors.red)),
+      Wrap(
+        spacing: 8,
+        children: [
+          if (!_installed)
+            OutlinedButton.icon(
+              onPressed: _progress == null ? _install : null,
+              icon: const Icon(Icons.download_rounded, size: 16),
+              label: Text(
+                'Instalar AI Memory ${AiMemoryRelease.version} '
+                '(${(AiMemoryRelease.sizeBytes / 1048576).toStringAsFixed(0)} MB)',
+              ),
+            )
+          else
+            OutlinedButton.icon(
+              onPressed: _progress == null ? _start : null,
+              icon: const Icon(Icons.play_arrow_rounded, size: 16),
+              label: const Text('Iniciar / verificar'),
+            ),
+        ],
+      ),
+      const SizedBox(height: 4),
+      const Text(
+        'Baixado de github.com/${AiMemoryRelease.repository} (release '
+        '${AiMemoryRelease.version}, SHA-256 conferido) e executado só neste '
+        'computador, numa pasta privada e em 127.0.0.1. Licença MIT, '
+        'Copyright (c) 2026 Fabio Akita.',
+        style: TextStyle(fontSize: 11),
+      ),
+    ],
+  );
 }

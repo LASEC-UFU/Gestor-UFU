@@ -19,6 +19,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   static const _orderKey = 'dashboard.module_order.v1';
   static const _hiddenKey = 'dashboard.hidden_modules.v1';
+
   /// Cartões dos módulos instalados (`app/installed_modules.dart`).
   static List<_ModuleInfo> get _modules => [
     for (final module in ModuleRegistry.instance.modules)

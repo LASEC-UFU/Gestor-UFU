@@ -949,6 +949,8 @@ class ClaudeCliBackend extends CliAgentBackend {
       jsonEncode({
         'mcpServers': {
           AgentMcpServer.serverName: {'type': 'http', 'url': mcp.url},
+          for (final extra in extraMcpServers.entries)
+            extra.key: {'type': 'http', 'url': extra.value},
           if (access != AgentAccess.gestor && access != AgentAccess.bypass)
             AgentMcpServer.permissionServerName: {
               'type': 'http',
@@ -1536,6 +1538,8 @@ class CodexCliBackend extends CliAgentBackend {
     if (model.isNotEmpty) 'model': model,
     'config': {
       'mcp_servers.${AgentMcpServer.serverName}.url': mcp.url,
+      for (final extra in extraMcpServers.entries)
+        'mcp_servers.${extra.key}.url': extra.value,
       if (access != AgentAccess.gestor) 'web_search': 'live',
     },
   };
@@ -1837,6 +1841,8 @@ class GeminiCliBackend extends CliAgentBackend {
         jsonEncode({
           'mcpServers': {
             AgentMcpServer.serverName: {'serverUrl': url},
+            for (final extra in extraMcpServers.entries)
+              extra.key: {'serverUrl': extra.value},
           },
         }),
       );
@@ -2328,6 +2334,13 @@ class CopilotCliBackend extends CliAgentBackend {
       'url': mcp.url,
       'headers': <Object>[],
     },
+    for (final extra in extraMcpServers.entries)
+      {
+        'type': 'http',
+        'name': extra.key,
+        'url': extra.value,
+        'headers': <Object>[],
+      },
   ];
 
   void _readSessionInfo(Map<String, dynamic> result) {

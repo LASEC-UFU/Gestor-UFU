@@ -17,6 +17,7 @@ import 'package:uuid/uuid.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
+import 'package:gestor_ufu/orchestrator/application/ai_memory.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
 import 'package:gestor_ufu/orchestrator/application/project_setup.dart';
 import 'package:gestor_ufu/presentation/pages/orchestrator/orchestrator_view.dart';
@@ -207,7 +208,13 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   /// Orquestrador (primeira aba): coordenador, quadro de tarefas e agentes
   /// trabalhadores criados por [_orqBackend].
-  late final OrqController _orq = OrqController(factory: _orqBackend);
+  late final OrqController _orq = OrqController(
+    factory: _orqBackend,
+    memory: _aiMemory,
+  );
+
+  /// AI Memory oficial gerenciado (instalado só quando o usuário pede).
+  final _aiMemory = AiMemoryBridge(AiMemoryRuntime());
   bool _orqTab = true;
   final _orqMcp = <AgentBackend, AgentMcpServer>{};
 
@@ -264,7 +271,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
     super.initState();
     _input.addListener(_onInputChanged);
     _orq.addListener(_onOrqChanged);
-    unawaited(_orq.load());
+    unawaited(
+      _orq.load().then((_) async {
+        if (_orq.settings.aiMemory) await _aiMemory.start();
+        if (mounted) setState(() {});
+      }),
+    );
     _orq.startWatchingChanges();
     unawaited(_init());
   }
@@ -311,6 +323,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
     for (final mcp in _orqMcp.values) {
       unawaited(mcp.stop());
     }
+    _aiMemory.runtime.stop();
     for (final session in _sessions.values) {
       for (final approval in session.approvals) {
         if (!approval.completer.isCompleted) {
@@ -1883,6 +1896,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
                 child: OrchestratorView(
                   controller: _orq,
                   onPrepareProject: prepareOrchestratorProject,
+                  memoryPanel: (context) => AiMemoryPanel(
+                    bridge: _aiMemory,
+                    onChanged: () {
+                      if (mounted) setState(() {});
+                    },
+                  ),
                 ),
               ),
             ],
