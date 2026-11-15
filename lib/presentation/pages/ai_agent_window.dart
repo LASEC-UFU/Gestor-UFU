@@ -150,7 +150,19 @@ class _Session {
   final toolEntries = <String, AgentEntry>{};
   final approvals = <_Approval>[];
 
+  /// Mensagens escritas enquanto o agente trabalhava: entregues assim que
+  /// o passo atual termina (como na extensão do VS Code).
+  final queue = <_Queued>[];
+
   List<AgentEntry> get entries => conv.entries;
+}
+
+/// Mensagem na fila de uma aba.
+class _Queued {
+  _Queued(this.text, this.attachments);
+
+  final String text;
+  final List<AgentAttachment> attachments;
 }
 
 class AiAgentPage extends StatefulWidget {
@@ -741,12 +753,34 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   Future<void> _send() async {
     final s = _s;
-    final backend = s.backend;
     final text = _input.text.trim();
-    if (backend == null || s.busy || (text.isEmpty && _attachments.isEmpty)) {
+    if (s.backend == null || (text.isEmpty && _attachments.isEmpty)) return;
+    final attachments = List<AgentAttachment>.of(_attachments);
+    if (s.busy) {
+      // O agente está trabalhando: a mensagem entra na fila e é entregue
+      // quando o passo atual terminar.
+      setState(() {
+        s.queue.add(_Queued(text, attachments));
+        _attachments.clear();
+        _input.clear();
+      });
       return;
     }
-    final attachments = List<AgentAttachment>.of(_attachments);
+    setState(() {
+      _attachments.clear();
+      _input.clear();
+    });
+    await _deliver(s, text, attachments);
+  }
+
+  /// Entrega a mensagem ao agente da aba [s] e acompanha a resposta.
+  Future<void> _deliver(
+    _Session s,
+    String text,
+    List<AgentAttachment> attachments,
+  ) async {
+    final backend = s.backend;
+    if (backend == null) return;
     final prompt = text.isEmpty
         ? 'Analise os anexos e proponha como usá-los no Gestor UFU.'
         : text;
@@ -766,8 +800,6 @@ class _AiAgentPageState extends State<AiAgentPage> {
           ],
         ),
       );
-      _attachments.clear();
-      _input.clear();
       s
         ..busy = true
         ..thinking = true
@@ -820,6 +852,43 @@ class _AiAgentPageState extends State<AiAgentPage> {
       await _refreshUndo();
       if (identical(s, _s)) _inputFocus.requestFocus();
     }
+    _deliverQueue(s);
+  }
+
+  /// Entrega de uma vez as mensagens que ficaram na fila da aba.
+  void _deliverQueue(_Session s) {
+    if (!mounted || s.busy || s.queue.isEmpty || s.backend == null) return;
+    final items = List.of(s.queue);
+    setState(s.queue.clear);
+    unawaited(
+      _deliver(
+        s,
+        items.map((q) => q.text).where((t) => t.isNotEmpty).join('\n\n'),
+        [for (final q in items) ...q.attachments],
+      ),
+    );
+  }
+
+  /// "Enviar agora": interrompe o passo atual; a fila é entregue em seguida.
+  Future<void> _sendQueuedNow() async {
+    final s = _s;
+    for (final approval in List.of(s.approvals)) {
+      if (!approval.completer.isCompleted) approval.completer.complete(false);
+    }
+    setState(s.approvals.clear);
+    await s.backend?.cancel();
+  }
+
+  /// Tira da fila e devolve o texto à caixa de mensagem para editar.
+  void _editQueued(_Queued item) {
+    final s = _s;
+    setState(() {
+      s.queue.remove(item);
+      final current = _input.text.trim();
+      _input.text = current.isEmpty ? item.text : '${item.text}\n$current';
+      _attachments.addAll(item.attachments);
+    });
+    _inputFocus.requestFocus();
   }
 
   void _onEvent(_Session s, AgentEvent event) {
@@ -901,6 +970,10 @@ class _AiAgentPageState extends State<AiAgentPage> {
   }
 
   Future<void> _stop() async {
+    // Parar não entrega a fila: as mensagens voltam para a caixa de texto.
+    for (final item in List.of(_s.queue).reversed) {
+      _editQueued(item);
+    }
     for (final approval in List.of(_approvals)) {
       if (!approval.completer.isCompleted) approval.completer.complete(false);
     }
@@ -1991,6 +2064,74 @@ class _AiAgentPageState extends State<AiAgentPage> {
 
   /// Caixa de mensagem no estilo da extensão: texto, anexos e a barra com
   /// +, /, modelo, modo e enviar.
+  /// Mensagens na fila, acima da caixa de texto.
+  Widget _queuePanel(VsColors vs) => Container(
+    padding: const EdgeInsets.fromLTRB(10, 8, 6, 6),
+    decoration: BoxDecoration(
+      border: Border(bottom: BorderSide(color: vs.border)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.schedule_rounded, size: 13, color: vs.muted),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                _s.queue.length == 1
+                    ? 'Na fila: será enviada quando o agente terminar o passo '
+                          'atual'
+                    : '${_s.queue.length} mensagens na fila: serão enviadas '
+                          'juntas quando o agente terminar o passo atual',
+                style: TextStyle(fontSize: 11, color: vs.muted),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: _sendQueuedNow,
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                textStyle: const TextStyle(fontSize: 11),
+              ),
+              icon: const Icon(Icons.bolt_rounded, size: 14),
+              label: const Text('Enviar agora'),
+            ),
+          ],
+        ),
+        for (final item in List.of(_s.queue))
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    [
+                      if (item.text.isNotEmpty) item.text,
+                      if (item.attachments.isNotEmpty)
+                        '(${item.attachments.length} anexo(s))',
+                    ].join(' ').replaceAll(RegExp(r'\s+'), ' '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: vs.text),
+                  ),
+                ),
+                VsIconButton(
+                  icon: Icons.edit_outlined,
+                  tooltip: 'Editar (volta para a caixa de texto)',
+                  onPressed: () => _editQueued(item),
+                ),
+                VsIconButton(
+                  icon: Icons.close_rounded,
+                  tooltip: 'Remover da fila',
+                  onPressed: () => setState(() => _s.queue.remove(item)),
+                ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+
   Widget _composer(VsColors vs) {
     final provider = _settings.provider;
     final skill = AgentSkills.byId(_skill);
@@ -2015,6 +2156,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (_s.queue.isNotEmpty) _queuePanel(vs),
               if (_attachments.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
@@ -2174,27 +2316,42 @@ class _AiAgentPageState extends State<AiAgentPage> {
                       onTap: _openModes,
                     ),
                     const SizedBox(width: 6),
-                    Tooltip(
-                      message: _busy ? 'Parar (Esc)' : 'Enviar (Enter)',
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(5),
-                        onTap: _busy ? _stop : _send,
-                        child: Container(
-                          width: 26,
-                          height: 26,
-                          decoration: BoxDecoration(
-                            color: provider.sendColor,
+                    // Ocupado e sem nada escrito: parar. Com texto: enviar
+                    // (vai para a fila se o agente ainda estiver trabalhando).
+                    ListenableBuilder(
+                      listenable: _input,
+                      builder: (context, _) {
+                        final stop =
+                            _busy &&
+                            _input.text.trim().isEmpty &&
+                            _attachments.isEmpty;
+                        return Tooltip(
+                          message: stop
+                              ? 'Parar (Esc)'
+                              : _busy
+                              ? 'Adicionar à fila (Enter)'
+                              : 'Enviar (Enter)',
+                          child: InkWell(
                             borderRadius: BorderRadius.circular(5),
+                            onTap: stop ? _stop : _send,
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              decoration: BoxDecoration(
+                                color: provider.sendColor,
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: Icon(
+                                stop
+                                    ? Icons.stop_rounded
+                                    : Icons.arrow_upward_rounded,
+                                size: 17,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
-                          child: Icon(
-                            _busy
-                                ? Icons.stop_rounded
-                                : Icons.arrow_upward_rounded,
-                            size: 17,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ],
                 ),
