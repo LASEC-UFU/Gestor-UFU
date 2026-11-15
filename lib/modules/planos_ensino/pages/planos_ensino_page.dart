@@ -3,26 +3,37 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:gestor_ufu/core/utils/macro_resolver.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
-import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
-import 'package:gestor_ufu/data/services/planos_ensino_service.dart';
-import 'package:gestor_ufu/data/services/planos_ensino_automation_service.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/modules/planos_ensino/application/planos_ensino_service.dart';
+import 'package:gestor_ufu/modules/planos_ensino/data/planos_ensino_automation_service.dart';
+import 'package:gestor_ufu/modules/planos_ensino/application/cronograma_do_moodle.dart';
+import 'package:gestor_ufu/platform/contracts/moodle_planning.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 
 class PlanosEnsinoPage extends StatefulWidget {
-  const PlanosEnsinoPage({super.key});
+  const PlanosEnsinoPage({
+    required this.service,
+    required this.automation,
+    this.moodle,
+    super.key,
+  });
+
+  final PlanosEnsinoService service;
+
+  /// Sessão do SEI do módulo (compartilhada com os comandos do agente).
+  final PlanosEnsinoAutomationService automation;
+
+  /// Planejamento do Config Moodle (contrato; opcional).
+  final MoodlePlanning? moodle;
   @override
   State<PlanosEnsinoPage> createState() => _PlanosEnsinoPageState();
 }
 
 class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
-  final _service = PlanosEnsinoService();
-  final _automation = PlanosEnsinoAutomationService();
+  PlanosEnsinoService get _service => widget.service;
+  PlanosEnsinoAutomationService get _automation => widget.automation;
   final _seiUrlController = TextEditingController(text: 'https://sei.ufu.br');
   List<Map<String, dynamic>> _plans = [];
   final List<String> _logs = [];
@@ -53,7 +64,6 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
   @override
   void dispose() {
     _seiUrlController.dispose();
-    _automation.close();
     super.dispose();
   }
 
@@ -171,7 +181,7 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _PlanoEditorDialog(plan: plan),
+      builder: (_) => _PlanoEditorDialog(plan: plan, moodle: widget.moodle),
     );
     if (result == null) return;
     final ident = Map<String, dynamic>.from(result['identificacao'] as Map);
@@ -321,45 +331,14 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 12),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: () => context.go('/'),
-                    icon: const Icon(Icons.arrow_back_rounded),
-                  ),
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: AppTheme.green.withAlpha(35),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(Icons.menu_book_rounded, color: AppTheme.green),
-                  ),
-                  const SizedBox(width: 13),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Planos de Ensino',
-                          style: TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        Text(
-                          'CADASTRO, CRONOGRAMAS E DOCUMENTOS PARA O SEI',
-                          style: TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 10,
-                            letterSpacing: 1.05,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              // Cabeçalho padrão da plataforma (Agente + Tema à direita).
+              child: ModuleHeader(
+                title: 'Planos de Ensino',
+                subtitle: 'Cadastro, cronogramas e documentos para o SEI',
+                icon: Icons.menu_book_rounded,
+                accent: AppTheme.green,
+                onBack: () => context.go('/'),
+                actions: [
                   OutlinedButton.icon(
                     onPressed: _importBackup,
                     style: OutlinedButton.styleFrom(
@@ -368,7 +347,6 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                     icon: const Icon(Icons.file_open_rounded),
                     label: const Text('Importar backup'),
                   ),
-                  const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: _exportBackup,
                     style: OutlinedButton.styleFrom(
@@ -377,7 +355,6 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                     icon: const Icon(Icons.save_alt_rounded),
                     label: const Text('Exportar backup'),
                   ),
-                  const SizedBox(width: 8),
                   OutlinedButton.icon(
                     onPressed: _importDocx,
                     style: OutlinedButton.styleFrom(
@@ -386,7 +363,6 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                     icon: const Icon(Icons.description_outlined),
                     label: const Text('Importar Word'),
                   ),
-                  const SizedBox(width: 8),
                   FilledButton.icon(
                     onPressed: () => _edit(),
                     style: FilledButton.styleFrom(
@@ -395,8 +371,6 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
                     icon: const Icon(Icons.add_rounded),
                     label: const Text('Novo formulário'),
                   ),
-                  const SizedBox(width: 10),
-                  const ThemeSelector(compact: true),
                 ],
               ),
             ),
@@ -629,8 +603,9 @@ class _EmptyPlans extends StatelessWidget {
 }
 
 class _PlanoEditorDialog extends StatefulWidget {
-  const _PlanoEditorDialog({required this.plan});
+  const _PlanoEditorDialog({required this.plan, this.moodle});
   final Map<String, dynamic> plan;
+  final MoodlePlanning? moodle;
   @override
   State<_PlanoEditorDialog> createState() => _PlanoEditorDialogState();
 }
@@ -879,10 +854,8 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
   }
 
   Future<void> _importScheduleFromConfigMoodle() async {
-    final controller = context.read<ConfigController>();
-    await controller.loadAll();
+    final configs = await widget.moodle?.savedConfigs() ?? <CourseConfig>[];
     if (!mounted) return;
-    final configs = controller.configs;
     if (configs.isEmpty) {
       _snack('Nenhuma configuração salva no Config Moodle.');
       return;
@@ -893,61 +866,11 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
     );
     if (config == null || !mounted) return;
 
-    final theoretical = <Map<String, String>>[];
-    final practical = <Map<String, String>>[];
-    for (final section in config.sections.where((item) => item.visible)) {
-      for (final activity in section.activities.where(
-        (item) => item.visibility != 0,
-      )) {
-        final normalizedName = _normalizeScheduleText(activity.name);
-        if (!normalizedName.contains('realizar-se-a')) continue;
-        final modalityText = _normalizeScheduleText(
-          '${activity.modality ?? ''} ${activity.name}',
-        );
-        final target = modalityText.contains('teor')
-            ? theoretical
-            : modalityText.contains('prat')
-            ? practical
-            : null;
-        if (target == null) continue;
-        final resolvedName = MacroResolver.resolve(
-          activity.name,
-          config.semesterStartDate,
-          section.date,
-          activity.computeOpenDate(section.date),
-          activity.computeCloseDate(section.date),
-        );
-        final match = RegExp(
-          r'realizar-se-a\s*:\s*(\d{1,2}/\d{1,2}/\d{4})',
-        ).firstMatch(_normalizeScheduleText(resolvedName));
-        if (match == null) continue;
-        final pieces = match.group(1)!.split('/').map(int.tryParse).toList();
-        if (pieces.length != 3 || pieces.any((part) => part == null)) continue;
-        final date = DateTime(pieces[2]!, pieces[1]!, pieces[0]!);
-        if (date.year != pieces[2] ||
-            date.month != pieces[1] ||
-            date.day != pieces[0]) {
-          continue;
-        }
-        final description = _scheduleDescription(activity.name);
-        if (description.isEmpty) continue;
-        target.add({
-          'data': DateFormat('dd/MM/yyyy').format(date),
-          'atividade': description,
-        });
-      }
-    }
-    int compareRows(Map<String, String> a, Map<String, String> b) {
-      final dateA = DateFormat('dd/MM/yyyy').parseStrict(a['data']!);
-      final dateB = DateFormat('dd/MM/yyyy').parseStrict(b['data']!);
-      final dateOrder = dateA.compareTo(dateB);
-      return dateOrder != 0
-          ? dateOrder
-          : a['atividade']!.compareTo(b['atividade']!);
-    }
-
-    theoretical.sort(compareRows);
-    practical.sort(compareRows);
+    final schedule = CronogramaDoMoodle.extrair(config);
+    final theoretical = schedule.teorico;
+    final practical = schedule.pratico;
+    int compareRows(Map<String, String> a, Map<String, String> b) =>
+        CronogramaDoMoodle.compare(a, b);
     if (theoretical.isEmpty && practical.isEmpty) {
       _snack(
         'Não encontrei aulas teóricas ou práticas com data definida no Config Moodle selecionado.',
@@ -1010,33 +933,6 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
     _snack(
       'Importadas ${theoretical.length} aulas teóricas e ${practical.length} práticas de ${config.name}.',
     );
-  }
-
-  String _normalizeScheduleText(String value) => value
-      .toLowerCase()
-      .replaceAll(RegExp(r'[áàâãä]'), 'a')
-      .replaceAll(RegExp(r'[éèêë]'), 'e')
-      .replaceAll(RegExp(r'[íìîï]'), 'i')
-      .replaceAll(RegExp(r'[óòôõö]'), 'o')
-      .replaceAll(RegExp(r'[úùûü]'), 'u')
-      .replaceAll('ç', 'c');
-
-  String _scheduleDescription(String name) {
-    var value = name.trim();
-    value = value.replaceFirst(
-      RegExp(r'\s*\([^)]*realizar-se-.[^)]*\)\.?\s*$', caseSensitive: false),
-      '',
-    );
-    value = value.replaceFirst(
-      RegExp(r'\s*[-–—]?\s*realizar-se-.:.*$', caseSensitive: false),
-      '',
-    );
-    final separator = value.indexOf(':');
-    if (separator >= 0) value = value.substring(separator + 1);
-    return value
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .replaceAll(RegExp(r'[.\s]+$'), '')
-        .trim();
   }
 
   void _snack(String text) =>

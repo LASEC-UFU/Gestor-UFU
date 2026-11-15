@@ -1,18 +1,24 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:archive/archive.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 import 'package:gestor_ufu/core/utils/text_encoding.dart';
+import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 const _plansKey = 'gestor_ufu_planos_ensino_v1';
 
+/// Planos de ensino: banco (via KeyValueStore da plataforma), formato Word,
+/// cronograma colado e campos obrigatórios.
 class PlanosEnsinoService {
+  PlanosEnsinoService([KeyValueStore? store])
+    : _store = store ?? KeyValueStore();
+
+  final KeyValueStore _store;
+
+  static const key = _plansKey;
+
   Future<List<Map<String, dynamic>>> list() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_plansKey);
-    if (raw == null) return [];
-    final decoded = jsonDecode(raw);
+    final decoded = await _store.readJson(_plansKey);
     if (decoded is! List) return [];
     return decoded.whereType<Map>().map(Map<String, dynamic>.from).toList();
   }
@@ -27,15 +33,13 @@ class PlanosEnsinoService {
     } else {
       plans[index] = copy;
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_plansKey, jsonEncode(plans));
+    await _store.writeJson(_plansKey, plans);
   }
 
   Future<void> remove(String id) async {
     final plans = await list();
     plans.removeWhere((plan) => plan['id'] == id);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_plansKey, jsonEncode(plans));
+    await _store.writeJson(_plansKey, plans);
   }
 
   Map<String, dynamic> emptyPlan(String id) => {

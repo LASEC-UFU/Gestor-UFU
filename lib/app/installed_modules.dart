@@ -20,7 +20,7 @@ void installModules([ModuleRegistry? target]) {
     ..register(MoodleModule())
     ..register(DiarioModule())
     ..register(const SeiModule())
-    ..register(const PlanosEnsinoModule())
+    ..register(PlanosEnsinoModule())
     ..register(const PlanosTrabalhoModule())
     ..register(const AjustaHorariosModule())
     ..register(EquivalenciaModule())
