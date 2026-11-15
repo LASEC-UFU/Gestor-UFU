@@ -36,6 +36,7 @@ class MoodleModule extends GestorModule {
   @override
   Future<void> activate(GestorServices services) async {
     await _local.migrateLegacyTextEncoding();
+    config.useTerms(services.terms);
     auth.init();
     services.registerContract<MoodlePlanning>(
       MoodlePlanningImpl(config, sync, auth),

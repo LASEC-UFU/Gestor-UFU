@@ -14,6 +14,10 @@ class AcademicTermService extends ChangeNotifier {
   /// Período usado quando ainda não há nenhum cadastrado.
   static const defaultTermName = '2º semestre de 2026';
 
+  /// Instância da janela principal, usada pelo seletor do cabeçalho padrão
+  /// (definida em `main.dart`; nula em testes e janelas secundárias).
+  static AcademicTermService? shared;
+
   static const termsKey = 'ajusta_horarios_periodos_letivos';
   static const activeKey = 'ajusta_horarios_periodo_letivo';
 

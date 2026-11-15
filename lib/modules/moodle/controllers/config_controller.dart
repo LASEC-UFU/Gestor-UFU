@@ -9,11 +9,29 @@ import 'package:gestor_ufu/modules/moodle/domain/i_config_repository.dart';
 
 class ConfigController extends ChangeNotifier {
   final IConfigRepository _repo;
-  final AcademicTermService _termService;
+  AcademicTermService _termService;
   final _uuid = const Uuid();
 
   ConfigController(this._repo, {AcademicTermService? terms})
-    : _termService = terms ?? AcademicTermService(KeyValueStore());
+    : _termService = terms ?? AcademicTermService(KeyValueStore()) {
+    _termService.addListener(_onTermChanged);
+  }
+
+  /// Passa a seguir os períodos letivos compartilhados da plataforma (o
+  /// seletor do cabeçalho): trocar o período lá recarrega as configurações.
+  void useTerms(AcademicTermService service) {
+    if (identical(service, _termService)) return;
+    _termService.removeListener(_onTermChanged);
+    _termService = service..addListener(_onTermChanged);
+  }
+
+  void _onTermChanged() {
+    if (_loading) return;
+    if (_termService.active != _activeTerm ||
+        _termService.terms.length != _terms.length) {
+      loadAll();
+    }
+  }
 
   List<CourseConfig> _configs = [];
   CourseConfig? _current;

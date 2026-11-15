@@ -27,7 +27,6 @@ import 'package:gestor_ufu/platform/services/key_value_store.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
-import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
 const _diaryPeriodDataPrefix = 'preenche_diarios_period_data_v1_';
@@ -53,6 +52,7 @@ class PreencheDiariosPage extends StatefulWidget {
 class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   late final AcademicTermService _termService =
       widget.terms ?? AcademicTermService(KeyValueStore());
+  bool _termsReady = false;
   final _urlController = TextEditingController(text: _portalDefaultUrl);
   final Map<String, String> _entries = {};
   final List<String> _logs = [];
@@ -85,6 +85,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   @override
   void initState() {
     super.initState();
+    _termService.addListener(_onSharedTermChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final snapshots =
           await widget.moodle?.snapshots() ?? <MoodleConfigSnapshot>[];
@@ -122,6 +123,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
 
   @override
   void dispose() {
+    _termService.removeListener(_onSharedTermChanged);
     _urlController.dispose();
     unawaited(_automation.close());
     super.dispose();
@@ -133,6 +135,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       await _termService.load();
       _terms = _termService.terms;
       _term = _termService.active;
+      _termsReady = true;
       final migrateLegacy = prefs.getBool(_diaryDataMigrationKey) != true;
       await _loadPeriodWorkspace(
         _term,
@@ -411,89 +414,22 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     );
   }
 
-  Future<void> _changeTerm(String? term) async {
-    if (term == null || term == _term) return;
+  /// O período letivo mudou no seletor do cabeçalho (ou em outra tela):
+  /// salva o período atual e carrega o novo.
+  void _onSharedTermChanged() {
+    if (!mounted || !_termsReady) return;
+    setState(() => _terms = _termService.terms);
+    final active = _termService.active;
+    if (active.isNotEmpty && active != _term) unawaited(_switchTerm(active));
+  }
+
+  Future<void> _switchTerm(String term) async {
     await _persist();
     final prefs = await SharedPreferences.getInstance();
-    await _termService.setActive(term);
+    if (!mounted) return;
     setState(() => _term = term);
     await _loadPeriodWorkspace(term, prefs: prefs);
     _log('Periodo letivo alterado para ${AcademicTerm.displayName(term)}.');
-  }
-
-  Future<void> _createTerm() async {
-    final value = await AcademicTermDialog.show(context);
-    final requested = value?.trim() ?? '';
-    if (requested.isEmpty) return;
-    final existing =
-        AcademicTerm.findEquivalent(_terms, requested) ??
-        _terms.cast<String?>().firstWhere(
-          (term) => term?.toLowerCase() == requested.toLowerCase(),
-          orElse: () => null,
-        );
-    if (existing != null) {
-      await _changeTerm(existing);
-      return;
-    }
-    await _persist();
-    final name = await _termService.create(requested);
-    setState(() {
-      _terms = _termService.terms;
-      _term = name;
-      _entries.clear();
-      _sourceLabel = null;
-      _selectedDiaryId = null;
-      _savedDiaries = [];
-    });
-    await _persist();
-  }
-
-  Future<void> _manageTerms() async {
-    const createNew = '__create_new_academic_term__';
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Períodos letivos'),
-        content: SizedBox(
-          width: 440,
-          height: 360,
-          child: ListView.separated(
-            itemCount: _terms.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final item = _terms[index];
-              final active = item == _term;
-              return ListTile(
-                leading: Icon(
-                  active ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: active ? AppTheme.primary : AppTheme.textSecondary,
-                ),
-                title: Text(AcademicTerm.displayName(item)),
-                subtitle: active ? const Text('Em uso') : null,
-                onTap: () => Navigator.pop(dialogContext, item),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () => Navigator.pop(dialogContext, createNew),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Novo período letivo'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
-    );
-    if (selected == null) return;
-    if (selected == createNew) {
-      await _createTerm();
-    } else {
-      await _changeTerm(selected);
-    }
   }
 
   Future<void> _selectSavedDiary(String? id) async {
@@ -2459,8 +2395,6 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
               _PageHeader(
                 onBack: () => context.go('/'),
                 entryCount: _entries.length,
-                term: _term,
-                onManageTerms: _manageTerms,
               ),
               Expanded(
                 child: _loading
@@ -2580,16 +2514,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
 }
 
 class _PageHeader extends StatelessWidget {
-  const _PageHeader({
-    required this.onBack,
-    required this.entryCount,
-    required this.term,
-    required this.onManageTerms,
-  });
+  const _PageHeader({required this.onBack, required this.entryCount});
   final VoidCallback onBack;
   final int entryCount;
-  final String term;
-  final VoidCallback onManageTerms;
   // Cabeçalho padrão da plataforma (Agente + Tema à direita).
   @override
   Widget build(BuildContext context) => ModuleHeader(
@@ -2598,40 +2525,7 @@ class _PageHeader extends StatelessWidget {
     icon: Icons.edit_calendar_rounded,
     accent: AppTheme.accent,
     onBack: onBack,
-    actions: [
-      InkWell(
-        onTap: onManageTerms,
-        borderRadius: BorderRadius.circular(13),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          decoration: BoxDecoration(
-            color: AppTheme.bgCard.withAlpha(160),
-            borderRadius: BorderRadius.circular(13),
-            border: Border.all(color: AppTheme.divider),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.date_range_rounded,
-                size: 16,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 7),
-              Text(
-                AcademicTerm.displayName(term),
-                style: TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      _StatusPill(count: entryCount),
-    ],
+    actions: [_StatusPill(count: entryCount)],
   );
 }
 

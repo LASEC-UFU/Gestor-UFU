@@ -49,7 +49,8 @@ class AjustaHorariosModule extends GestorModule {
   List<RouteBase> get routes => [
     GoRoute(
       path: '/ajusta-horarios',
-      builder: (context, state) => AjustaHorariosPage(changes: _changes),
+      builder: (context, state) =>
+          AjustaHorariosPage(changes: _changes, terms: _terms),
     ),
   ];
 

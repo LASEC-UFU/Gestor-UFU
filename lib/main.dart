@@ -17,6 +17,7 @@ import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
 import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/app/installed_modules.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/platform/services/navigation_service.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
@@ -98,6 +99,10 @@ Future<void> main(List<String> args) async {
   // Ativa os módulos DEPOIS de trazer o banco compartilhado: as migrações e
   // os dados iniciais dos módulos não podem sobrescrever o que veio de lá.
   final services = GestorServices();
+  // Períodos letivos da janela principal: o seletor do cabeçalho de todos os
+  // módulos usa esta instância; trocar o período vale para todas as telas.
+  await services.terms.load();
+  AcademicTermService.shared = services.terms;
   await ModuleRegistry.instance.activateAll(services);
   final themeCtrl = ThemeController(
     isLight: preferences.getBool(ThemeController.storageKey) ?? false,
@@ -108,6 +113,7 @@ Future<void> main(List<String> args) async {
     ..currentRoute = (() => NavigationService.currentRoute)
     // Dados alterados pelo agente: cada módulo descarta caches e recarrega.
     ..onDataChanged = () async {
+      await services.terms.load();
       for (final module in ModuleRegistry.instance.modules) {
         await module.onExternalDataChanged();
       }

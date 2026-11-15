@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
+import 'package:gestor_ufu/platform/ui/academic_term_selector.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 
 /// Camada obrigatória de toda tela de módulo (docs/arquitetura/decisoes.md,
@@ -85,6 +87,8 @@ class ModuleHeader extends StatelessWidget {
     required this.onBack,
     this.subtitle,
     this.actions = const [],
+    this.showTerm = true,
+    this.onTermCreated,
     super.key,
   });
 
@@ -92,75 +96,95 @@ class ModuleHeader extends StatelessWidget {
   final String? subtitle;
   final IconData icon;
   final Color accent;
+
+  /// Botões e indicadores do módulo, à direita, antes do período letivo.
   final List<Widget> actions;
   final VoidCallback onBack;
 
+  /// Mostra o seletor de período letivo (padrão em todos os módulos).
+  final bool showTerm;
+
+  /// Chamado quando um período novo é criado pelo seletor deste cabeçalho.
+  final AcademicTermCreated? onTermCreated;
+
   @override
   Widget build(BuildContext context) {
+    final terms = showTerm ? AcademicTermService.shared : null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          IconButton(
-            tooltip: 'Voltar',
-            onPressed: onBack,
-            icon: const Icon(Icons.arrow_back_rounded),
-            color: AppTheme.textSecondary,
-          ),
-          const SizedBox(width: 4),
-          Container(
-            padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(
-              color: accent.withAlpha(40),
-              borderRadius: BorderRadius.circular(12),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Voltar',
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back_rounded),
+              color: AppTheme.textSecondary,
             ),
-            child: Icon(icon, color: accent, size: 24),
-          ),
-          const SizedBox(width: 12),
-          // Título e ações dividem o espaço: em janelas estreitas o título
-          // encolhe (reticências) e as ações quebram linha — nunca estoura.
-          Flexible(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 21,
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.textPrimary,
-                  ),
-                ),
-                if (subtitle != null)
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: accent.withAlpha(40),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: accent, size: 24),
+            ),
+            const SizedBox(width: 12),
+            // O título ocupa o espaço livre (reticências se faltar); tudo o
+            // mais fica encostado à direita.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    subtitle!,
+                    title,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 13,
-                      color: AppTheme.textSecondary,
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.textPrimary,
                     ),
                   ),
-              ],
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            flex: 3,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: actions,
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Botões do Gestor: sempre na primeira linha, no canto direito.
-          const ThemeSelector(compact: true),
-        ],
+            if (actions.isNotEmpty) ...[
+              const SizedBox(width: 16),
+              // Em janelas estreitas as ações quebram linha (nunca estouram).
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constraints.maxWidth * 0.5,
+                ),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: actions,
+                ),
+              ),
+            ],
+            if (terms != null) ...[
+              const SizedBox(width: 8),
+              AcademicTermSelector(service: terms, onCreated: onTermCreated),
+            ],
+            const SizedBox(width: 8),
+            // Botões do Gestor: sempre no canto direito.
+            const ThemeSelector(compact: true),
+          ],
+        ),
       ),
     );
   }

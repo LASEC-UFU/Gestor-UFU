@@ -17,11 +17,14 @@ import 'package:gestor_ufu/modules/ajusta_horarios/domain/distribuicao_docente.d
 import 'package:gestor_ufu/modules/ajusta_horarios/data/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/modules/ajusta_horarios/domain/ajusta_horarios.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
+import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
-import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 
 class AjustaHorariosPage extends StatefulWidget {
-  const AjustaHorariosPage({this.changes, super.key});
+  const AjustaHorariosPage({this.changes, this.terms, super.key});
+
+  /// Períodos letivos compartilhados (padrão: os da janela principal).
+  final AcademicTermService? terms;
 
   /// Avisado quando os dados mudam por fora da tela (agente, outro
   /// computador); a tela recarrega.
@@ -109,6 +112,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
       entry.value.addListener(() => _trackScroll(entry.key, entry.value));
     }
     widget.changes?.addListener(_reloadFromOutside);
+    _termService?.addListener(_onSharedTermChanged);
     _load();
   }
 
@@ -119,6 +123,7 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
   @override
   void dispose() {
     widget.changes?.removeListener(_reloadFromOutside);
+    _termService?.removeListener(_onSharedTermChanged);
     _scrollSaveTimer?.cancel();
     _courseVerticalScroll.dispose();
     _courseHorizontalScroll.dispose();
@@ -1013,8 +1018,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
           icon: Icons.calendar_month_rounded,
           accent: AppTheme.primary,
           onBack: () => context.go('/'),
+          onTermCreated: (context, term) => _initializeNewTerm(term),
           actions: [
-            if (!compact) _termSelector(),
             IconButton.filledTonal(
               onPressed: _busy ? null : _importDatabase,
               tooltip: 'Importar base da planilha',
@@ -1032,14 +1037,6 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
             ),
           ],
         ),
-        if (compact)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(
-              padding: const EdgeInsets.only(left: 54, top: 8),
-              child: _termSelector(),
-            ),
-          ),
         const SizedBox(height: 18),
         Row(
           children: [
@@ -1090,127 +1087,74 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     ),
   );
 
-  Widget _termSelector() => InkWell(
-    onTap: _manageTerms,
-    borderRadius: BorderRadius.circular(14),
-    child: _infoPill(Icons.date_range_rounded, AcademicTerm.displayName(_term)),
-  );
+  /// Períodos letivos compartilhados (seletor do cabeçalho padrão).
+  AcademicTermService? get _termService =>
+      widget.terms ?? AcademicTermService.shared;
 
-  Future<void> _manageTerms() async {
-    const createNew = '__create_new_term__';
-    final selected = await showDialog<String>(
+  /// O período mudou no cabeçalho (ou em outra tela): carrega a grade dele.
+  void _onSharedTermChanged() {
+    final service = _termService;
+    if (!mounted || service == null || _loading) return;
+    setState(() => _terms = service.terms);
+    if (service.active.isNotEmpty && service.active != _term) {
+      unawaited(_activateTerm(service.active));
+    }
+  }
+
+  /// Período criado pelo seletor desta tela: pergunta se começa em branco ou
+  /// copiando a grade de outro período.
+  Future<void> _initializeNewTerm(String term) async {
+    final sources = [..._terms.where((t) => t != term)];
+    if (sources.isEmpty || !mounted) return;
+    final copyChoice = await showDialog<_TermCopyChoice>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Per\u00edodos letivos'),
+        title: Text('Como iniciar $term?'),
         content: SizedBox(
           width: 440,
           height: 360,
-          child: ListView.separated(
-            itemCount: _terms.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final term = _terms[index];
-              final active = term == _term;
-              return ListTile(
-                leading: Icon(
-                  active ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: active ? AppTheme.primary : AppTheme.textSecondary,
+          child: ListView(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.note_add_outlined),
+                title: const Text('Começar em branco'),
+                subtitle: const Text('Criar uma grade sem disciplinas.'),
+                onTap: () =>
+                    Navigator.pop(dialogContext, const _TermCopyChoice.blank()),
+              ),
+              const Divider(height: 1),
+              for (final sourceTerm in sources)
+                ListTile(
+                  leading: const Icon(Icons.content_copy_rounded),
+                  title: Text(
+                    'Copiar de ${AcademicTerm.displayName(sourceTerm)}',
+                  ),
+                  subtitle: const Text(
+                    'Usar a grade atual como ponto de partida.',
+                  ),
+                  onTap: () => Navigator.pop(
+                    dialogContext,
+                    _TermCopyChoice.copy(sourceTerm),
+                  ),
                 ),
-                title: Text(AcademicTerm.displayName(term)),
-                subtitle: active ? const Text('Em uso') : null,
-                onTap: () => Navigator.pop(dialogContext, term),
-              );
-            },
+            ],
           ),
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () => Navigator.pop(dialogContext, createNew),
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Novo per\u00edodo letivo'),
-          ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Fechar'),
+            child: const Text('Cancelar'),
           ),
         ],
       ),
     );
-    if (selected == null) return;
-    if (selected != createNew) {
-      await _activateTerm(selected);
-      return;
+    if (copyChoice == null || !mounted) return;
+    if (copyChoice.sourceTerm != null) {
+      await _copyTermData(copyChoice.sourceTerm!, term);
+    } else {
+      await _clearTermData(term);
     }
-    if (!mounted) return;
-
-    final value = await AcademicTermDialog.show(context);
-    final newTerm = value?.trim() ?? '';
-    if (newTerm.isEmpty || !mounted) return;
-
-    final existing =
-        AcademicTerm.findEquivalent(_terms, newTerm) ??
-        _terms.cast<String?>().firstWhere(
-          (term) => term?.toLowerCase() == newTerm.toLowerCase(),
-          orElse: () => null,
-        );
-    final term = existing ?? newTerm;
-    if (existing == null) {
-      final copyChoice = await showDialog<_TermCopyChoice>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text('Como iniciar $term?'),
-          content: SizedBox(
-            width: 440,
-            height: 360,
-            child: ListView(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.note_add_outlined),
-                  title: const Text('Começar em branco'),
-                  subtitle: const Text('Criar uma grade sem disciplinas.'),
-                  onTap: () => Navigator.pop(
-                    dialogContext,
-                    const _TermCopyChoice.blank(),
-                  ),
-                ),
-                const Divider(height: 1),
-                for (final sourceTerm in _terms)
-                  ListTile(
-                    leading: const Icon(Icons.content_copy_rounded),
-                    title: Text(
-                      'Copiar de ${AcademicTerm.displayName(sourceTerm)}',
-                    ),
-                    subtitle: const Text(
-                      'Usar a grade atual como ponto de partida.',
-                    ),
-                    onTap: () => Navigator.pop(
-                      dialogContext,
-                      _TermCopyChoice.copy(sourceTerm),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancelar'),
-            ),
-          ],
-        ),
-      );
-      if (copyChoice == null || !mounted) return;
-      if (copyChoice.sourceTerm != null) {
-        await _copyTermData(copyChoice.sourceTerm!, term);
-      } else {
-        await _clearTermData(term);
-      }
-      final updatedTerms = AcademicTerm.newestFirst([..._terms, term]);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(_termsKey, updatedTerms);
-      if (mounted) setState(() => _terms = updatedTerms);
-    }
-    await _activateTerm(term);
+    await _activateTerm(term, force: true);
   }
 
   Future<void> _copyTermData(String source, String destination) async {
@@ -1311,8 +1255,8 @@ class _AjustaHorariosPageState extends State<AjustaHorariosPage> {
     }
   }
 
-  Future<void> _activateTerm(String term) async {
-    if (term == _term) return;
+  Future<void> _activateTerm(String term, {bool force = false}) async {
+    if (term == _term && !force) return;
     setState(() => _loading = true);
     try {
       final prefs = await SharedPreferences.getInstance();

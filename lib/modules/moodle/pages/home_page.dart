@@ -8,7 +8,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/modules/moodle/data/template_generator.dart';
 import 'package:gestor_ufu/data/web_xlsx_picker.dart';
-import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
 import 'package:gestor_ufu/modules/moodle/controllers/config_controller.dart';
@@ -19,7 +18,6 @@ import 'package:gestor_ufu/modules/moodle/widgets/word_table_dialog.dart';
 import 'package:gestor_ufu/modules/moodle/widgets/moodle_config_history_dialog.dart';
 import 'package:gestor_ufu/modules/moodle/widgets/moodle_login_dialog.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
-import 'package:gestor_ufu/platform/ui/academic_term_dialog.dart';
 import 'package:intl/intl.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 
@@ -69,7 +67,6 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             children: [
               _buildAppBar(context, authCtrl),
-              _buildAcademicTerm(configCtrl),
               if (_importStatus != null) _buildImportStatusBanner(),
               Expanded(
                 child: configCtrl.loading
@@ -147,63 +144,6 @@ class _HomePageState extends State<HomePage> {
         ),
       ],
     );
-  }
-
-  Widget _buildAcademicTerm(ConfigController controller) => Padding(
-    padding: const EdgeInsets.fromLTRB(28, 0, 28, 8),
-    child: Row(
-      children: [
-        Text(
-          'Período letivo',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 330,
-          child: DropdownButtonFormField<String>(
-            key: ValueKey('config-moodle-period-${controller.activeTerm}'),
-            initialValue: controller.terms.contains(controller.activeTerm)
-                ? controller.activeTerm
-                : null,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              isDense: true,
-              prefixIcon: Icon(Icons.date_range_rounded),
-            ),
-            items: controller.terms
-                .map(
-                  (term) => DropdownMenuItem(
-                    value: term,
-                    child: Text(
-                      AcademicTerm.displayName(term),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (term) {
-              if (term != null) controller.setActiveTerm(term);
-            },
-          ),
-        ),
-        const SizedBox(width: 6),
-        IconButton.filledTonal(
-          tooltip: 'Criar período letivo',
-          onPressed: () => _showCreateTermDialog(controller),
-          icon: const Icon(Icons.add_rounded),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          'As configurações e novas disciplinas ficam neste período.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
-        ),
-      ],
-    ),
-  );
-
-  Future<void> _showCreateTermDialog(ConfigController controller) async {
-    final name = await AcademicTermDialog.show(context);
-    if (name != null) await controller.createTerm(name);
   }
 
   Widget _buildImportStatusBanner() {
