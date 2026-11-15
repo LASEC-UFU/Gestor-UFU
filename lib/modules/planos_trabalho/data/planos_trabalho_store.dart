@@ -3,18 +3,23 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
-import 'package:gestor_ufu/domain/entities/plano_trabalho.dart';
+import 'package:gestor_ufu/modules/planos_trabalho/domain/plano_trabalho.dart';
+import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 /// Dados do módulo permanecem no mesmo armazenamento local do Gestor UFU.
+/// Cadastro dos planos de trabalho (banco da plataforma).
 class PlanosTrabalhoStore {
+  PlanosTrabalhoStore([KeyValueStore? store])
+    : _store = store ?? KeyValueStore();
+
+  final KeyValueStore _store;
+
   static const _key = 'gestor_ufu_planos_trabalho_v1';
   static const _uuid = Uuid();
 
   Future<List<PlanoTrabalho>> list() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key);
+    final raw = await _store.readString(_key);
     if (raw == null || raw.isEmpty) return [];
     try {
       final decoded = jsonDecode(raw);
@@ -105,8 +110,7 @@ class PlanosTrabalhoStore {
   }
 
   Future<void> _write(List<PlanoTrabalho> plans) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    await _store.writeString(
       _key,
       jsonEncode(plans.map((plan) => plan.toJson()).toList()),
     );

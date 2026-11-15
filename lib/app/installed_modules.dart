@@ -21,7 +21,7 @@ void installModules([ModuleRegistry? target]) {
     ..register(DiarioModule())
     ..register(const SeiModule())
     ..register(PlanosEnsinoModule())
-    ..register(const PlanosTrabalhoModule())
+    ..register(PlanosTrabalhoModule())
     ..register(const AjustaHorariosModule())
     ..register(EquivalenciaModule())
     ..register(ProgressaoModule())

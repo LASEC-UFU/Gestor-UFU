@@ -6,13 +6,22 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/platform/services/sei_automation_service.dart';
-import 'package:gestor_ufu/data/services/planilha_trabalho_service.dart';
-import 'package:gestor_ufu/data/services/planos_trabalho_store.dart';
-import 'package:gestor_ufu/domain/entities/plano_trabalho.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/modules/planos_trabalho/application/planilha_trabalho_service.dart';
+import 'package:gestor_ufu/modules/planos_trabalho/data/planos_trabalho_store.dart';
+import 'package:gestor_ufu/modules/planos_trabalho/domain/plano_trabalho.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 
 class PlanosTrabalhoPage extends StatefulWidget {
-  const PlanosTrabalhoPage({super.key});
+  const PlanosTrabalhoPage({
+    required this.store,
+    required this.automation,
+    super.key,
+  });
+
+  final PlanosTrabalhoStore store;
+
+  /// Sessão do SEI do módulo (compartilhada com os comandos do agente).
+  final SeiAutomationService automation;
 
   @override
   State<PlanosTrabalhoPage> createState() => _PlanosTrabalhoPageState();
@@ -20,8 +29,8 @@ class PlanosTrabalhoPage extends StatefulWidget {
 
 class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
   static const _urlKey = 'planos_trabalho_sei_url';
-  final _store = PlanosTrabalhoStore();
-  final _automation = SeiAutomationService();
+  PlanosTrabalhoStore get _store => widget.store;
+  SeiAutomationService get _automation => widget.automation;
   final _urlController = TextEditingController(text: 'https://sei.ufu.br');
   final List<String> _logs = [];
   List<PlanoTrabalho> _plans = [];
@@ -88,7 +97,6 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
   @override
   void dispose() {
     _urlController.dispose();
-    _automation.close();
     super.dispose();
   }
 
@@ -401,55 +409,14 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    IconButton(
-                      onPressed: () => context.go('/'),
-                      tooltip: 'Voltar ao início',
-                      icon: const Icon(Icons.arrow_back_rounded),
-                    ),
-                    const SizedBox(width: 10),
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFF7B8B).withAlpha(28),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Icon(
-                        Icons.assignment_turned_in_rounded,
-                        color: Color(0xFFFF7B8B),
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Planos de Trabalho',
-                            style: TextStyle(
-                              color: AppTheme.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 22,
-                            ),
-                          ),
-                          Text(
-                            'CADASTRO, PLANILHAS E ENVIO DE PDF AO SEI',
-                            style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 10,
-                              letterSpacing: 1.1,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _countPill('${_plans.length} planos'),
-                    const SizedBox(width: 10),
-                    const ThemeSelector(compact: true),
-                  ],
+                // Cabeçalho padrão da plataforma (Agente + Tema à direita).
+                ModuleHeader(
+                  title: 'Planos de Trabalho',
+                  subtitle: 'Cadastro, planilhas e envio de PDF ao SEI',
+                  icon: Icons.assignment_turned_in_rounded,
+                  accent: const Color(0xFFFF7B8B),
+                  onBack: () => context.go('/'),
+                  actions: [_countPill('${_plans.length} planos')],
                 ),
                 const SizedBox(height: 22),
                 Expanded(
