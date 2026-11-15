@@ -2,18 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:go_router/go_router.dart';
 import 'package:gestor_ufu/core/utils/debug_options.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/presentation/pages/dashboard_page.dart';
-import 'package:gestor_ufu/presentation/pages/home_page.dart';
-import 'package:gestor_ufu/presentation/pages/sei_tree_page.dart';
-import 'package:gestor_ufu/presentation/pages/table_editor_page.dart';
-import 'package:gestor_ufu/presentation/pages/sync_preview_page.dart';
-import 'package:gestor_ufu/presentation/pages/preenche_diarios_page.dart';
-import 'package:gestor_ufu/presentation/pages/planos_ensino_page.dart';
-import 'package:gestor_ufu/presentation/pages/planos_trabalho_page.dart';
-import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
-import 'package:gestor_ufu/presentation/pages/equivalencia_alunos_page.dart';
-import 'package:gestor_ufu/presentation/pages/progressao_page.dart';
 
+/// Rotas do app: o painel ('/') mais as rotas declaradas por cada módulo
+/// instalado (`app/installed_modules.dart`). Os módulos precisam estar
+/// registrados antes do primeiro acesso a [router].
 class AppRouter {
   static final rootNavigatorKey = GlobalKey<NavigatorState>();
   static final GoRouter router = GoRouter(
@@ -23,47 +17,7 @@ class AppRouter {
         : '/',
     routes: [
       GoRoute(path: '/', builder: (context, state) => const DashboardPage()),
-      GoRoute(path: '/moodle', builder: (context, state) => const HomePage()),
-      GoRoute(path: '/sei', builder: (context, state) => const SeiTreePage()),
-      GoRoute(
-        path: '/diario',
-        builder: (context, state) => const PreencheDiariosPage(),
-      ),
-      GoRoute(
-        path: '/planos-ensino',
-        builder: (context, state) => const PlanosEnsinoPage(),
-      ),
-      GoRoute(
-        path: '/planos-trabalho',
-        builder: (context, state) => const PlanosTrabalhoPage(),
-      ),
-      GoRoute(
-        path: '/ajusta-horarios',
-        builder: (context, state) => const AjustaHorariosPage(),
-      ),
-      GoRoute(
-        path: '/equivalencia-alunos',
-        builder: (context, state) => const EquivalenciaAlunosPage(),
-      ),
-      GoRoute(
-        path: '/progressao',
-        builder: (context, state) => const ProgressaoPage(),
-      ),
-      GoRoute(
-        path: '/editor/:id',
-        builder: (context, state) {
-          final id = state.pathParameters['id']!;
-          final reeval = state.uri.queryParameters['reeval'] == '1';
-          return TableEditorPage(courseConfigId: id, autoEvaluate: reeval);
-        },
-      ),
-      GoRoute(
-        path: '/sync/:id',
-        builder: (context, state) {
-          final id = state.pathParameters['id']!;
-          return SyncPreviewPage(courseConfigId: id);
-        },
-      ),
+      for (final module in ModuleRegistry.instance.modules) ...module.routes,
     ],
   );
 }

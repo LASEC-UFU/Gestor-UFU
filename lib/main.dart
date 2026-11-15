@@ -23,8 +23,9 @@ import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/data/services/windows_update_service.dart';
 import 'package:gestor_ufu/data/services/diary_automation_service.dart';
 import 'package:gestor_ufu/core/utils/debug_options.dart';
-import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
-import 'package:gestor_ufu/presentation/pages/ajusta_horarios_page.dart';
+import 'package:gestor_ufu/app/installed_modules.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
+import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:window_manager/window_manager.dart';
@@ -33,6 +34,8 @@ String _appVersion = 'desconhecida';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Módulos instalados (painel, rotas, agente e janelas leem do registro).
+  installModules();
   final packageInfo = await PackageInfo.fromPlatform();
   _appVersion = packageInfo.version;
   final appTitle = 'Gestor UFU v${packageInfo.version}';
@@ -66,28 +69,22 @@ Future<void> main(List<String> args) async {
         );
         return;
       }
-      if (payload['type'] == 'scheduleEditor') {
-        final isLight = payload['isLight'] as bool? ?? false;
-        AppTheme.isLight = isLight;
-        final entries = (payload['entries'] as List)
-            .map(
-              (item) => HorarioDisciplina.fromJson(
-                Map<String, dynamic>.from(item as Map),
-              ),
-            )
-            .toList();
-        final teachers = (payload['teachers'] as List).cast<String>();
-        final programs = (payload['programs'] as Map).map(
-          (key, value) => MapEntry(int.parse(key as String), value as String),
-        );
+      // Janelas secundárias declaradas pelos módulos (ex.: editores do
+      // Ajusta Horários).
+      final moduleWindow = ModuleRegistry.instance.windowFor(
+        '${payload['type']}',
+      );
+      if (moduleWindow != null) {
+        AppTheme.isLight = payload['isLight'] as bool? ?? false;
+        final window = moduleWindow(payload);
         await windowManager.ensureInitialized();
         unawaited(
           windowManager.waitUntilReadyToShow(
             WindowOptions(
-              size: Size(1100, 780),
-              minimumSize: Size(1000, 760),
+              size: window.size,
+              minimumSize: window.minimumSize,
               center: true,
-              title: 'Editar disciplinas - $appTitle',
+              title: '${window.title} - $appTitle',
             ),
             () async {
               await windowManager.show();
@@ -95,108 +92,15 @@ Future<void> main(List<String> args) async {
             },
           ),
         );
-        runApp(
-          HorarioEditorWindowApp(
-            entries: entries,
-            teachers: teachers,
-            programs: programs,
-            selectedProgram: payload['selectedProgram'] as int,
-            selectedPeriod: payload['selectedPeriod'] as int,
-            channelName: payload['channel'] as String,
-            initialEntryId: payload['initialEntryId'] as String?,
-            term: payload['term'] as String? ?? '',
-            terms: (payload['terms'] as List? ?? const []).cast<String>(),
-            isLight: isLight,
-          ),
-        );
-        return;
-      }
-      if (payload['type'] == 'teacherEditor') {
-        final isLight = payload['isLight'] as bool? ?? false;
-        AppTheme.isLight = isLight;
-        final entries = (payload['entries'] as List)
-            .map(
-              (item) => HorarioDisciplina.fromJson(
-                Map<String, dynamic>.from(item as Map),
-              ),
-            )
-            .toList();
-        final teachers = (payload['teachers'] as List).cast<String>();
-        final programs = (payload['programs'] as Map).map(
-          (key, value) => MapEntry(int.parse(key as String), value as String),
-        );
-        await windowManager.ensureInitialized();
-        unawaited(
-          windowManager.waitUntilReadyToShow(
-            WindowOptions(
-              size: Size(1120, 820),
-              minimumSize: Size(900, 650),
-              center: true,
-              title: 'Editar docentes - $appTitle',
-            ),
-            () async {
-              await windowManager.show();
-              await windowManager.focus();
-            },
-          ),
-        );
-        runApp(
-          TeacherRosterWindowApp(
-            teachers: teachers,
-            entries: entries,
-            programs: programs,
-            channelName: payload['channel'] as String,
-            initialTeacher: payload['initialTeacher'] as String?,
-            isLight: isLight,
-          ),
-        );
-        return;
-      }
-      if (payload['type'] == 'roomEditor') {
-        final isLight = payload['isLight'] as bool? ?? false;
-        AppTheme.isLight = isLight;
-        final entries = (payload['entries'] as List)
-            .map(
-              (item) => HorarioDisciplina.fromJson(
-                Map<String, dynamic>.from(item as Map),
-              ),
-            )
-            .toList();
-        final rooms = (payload['rooms'] as List).cast<String>();
-        final programs = (payload['programs'] as Map).map(
-          (key, value) => MapEntry(int.parse(key as String), value as String),
-        );
-        await windowManager.ensureInitialized();
-        unawaited(
-          windowManager.waitUntilReadyToShow(
-            WindowOptions(
-              size: Size(1120, 820),
-              minimumSize: Size(900, 650),
-              center: true,
-              title: 'Editar salas - $appTitle',
-            ),
-            () async {
-              await windowManager.show();
-              await windowManager.focus();
-            },
-          ),
-        );
-        runApp(
-          RoomRosterWindowApp(
-            rooms: rooms,
-            entries: entries,
-            programs: programs,
-            channelName: payload['channel'] as String,
-            initialRoom: payload['initialRoom'] as String?,
-            isLight: isLight,
-          ),
-        );
+        runApp(window.app);
         return;
       }
     }
     await windowManager.ensureInitialized();
     await windowManager.setTitle(appTitle);
   }
+  final services = GestorServices();
+  await ModuleRegistry.instance.activateAll(services);
   final preferences = await SharedPreferences.getInstance();
   final sharedDatabase = SharedPreferencesSyncService();
   await sharedDatabase.initialize();

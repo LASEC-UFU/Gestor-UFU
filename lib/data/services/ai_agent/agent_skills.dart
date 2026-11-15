@@ -1,5 +1,6 @@
 import 'package:gestor_ufu/domain/entities/ajusta_horarios.dart';
 import 'package:gestor_ufu/domain/progressao/resolucao_condir_03_2017.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 
 /// Conhecimento entregue ao Agente de IA sobre cada funcionalidade do
 /// Gestor UFU: onde fica cada ação na interface, o que cada importação
@@ -623,17 +624,11 @@ do agente (browser_*), com o usuário fazendo o login.
     return null;
   }
 
-  /// Mapeia a rota de uma página do Gestor para a skill correspondente.
+  /// Skill do módulo dono da rota aberta (registro de módulos).
   static String idForRoute(String? route) {
-    if (route == null) return general;
-    final clean = route.replaceFirst('/', '');
-    if (clean.startsWith('moodle') ||
-        clean.startsWith('editor') ||
-        clean.startsWith('sync')) {
-      return 'moodle';
-    }
-    final first = clean.split('/').first;
-    return byId(first)?.id ?? general;
+    final module = ModuleRegistry.instance.byRoute(route);
+    if (module == null) return general;
+    return byId(module.id)?.id ?? general;
   }
 
   static String systemPrompt(String skillId) {

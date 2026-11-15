@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/data/services/preferences_backup_service.dart';
 import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
@@ -18,95 +19,19 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   static const _orderKey = 'dashboard.module_order.v1';
   static const _hiddenKey = 'dashboard.hidden_modules.v1';
-  static const _modules = <_ModuleInfo>[
-    _ModuleInfo(
-      title: 'Config Moodle',
-      description:
-          'Planeje disciplinas, organize atividades e sincronize cursos.',
-      icon: Icons.settings_suggest_rounded,
-      accent: AppTheme.primary,
-      enabled: true,
-      route: '/moodle',
-      category: 'PLANEJAMENTO DE DISCIPLINAS',
-    ),
-    _ModuleInfo(
-      title: 'Preenche Diários',
-      description:
-          'Prepare lançamentos de aula usando planilhas ou dados do Moodle.',
-      icon: Icons.edit_calendar_rounded,
-      accent: AppTheme.accent,
-      enabled: true,
-      route: '/diario',
-      category: 'ROTINA ACADÊMICA',
-    ),
-    _ModuleInfo(
-      title: 'Extrair \u00c1rvore de Processo',
-      description:
-          'Consulte os documentos de um processo e gere um inventário revisável.',
-      icon: Icons.account_tree_rounded,
-      accent: Color(0xFFFFB454),
-      enabled: true,
-      route: '/sei',
-      category: 'PROCESSOS E DOCUMENTOS',
-    ),
-
-    _ModuleInfo(
-      title: 'Planos de Ensino',
-      description:
-          'Cadastre planos, organize cronogramas e prepare documentos para o SEI.',
-      icon: Icons.menu_book_rounded,
-      accent: Color(0xFF5DD39E),
-      enabled: true,
-      route: '/planos-ensino',
-      category: 'ENSINO',
-    ),
-    _ModuleInfo(
-      title: 'Planos de Trabalho',
-      description:
-          'Organize atividades, preencha planilhas e prepare PDFs para o SEI.',
-      icon: Icons.assignment_turned_in_rounded,
-      accent: Color(0xFFFF7B8B),
-      enabled: true,
-      route: '/planos-trabalho',
-      category: 'GESTÃO DO TRABALHO',
-    ),
-    _ModuleInfo(
-      title: 'Ajusta Horários',
-      description: 'Monte grades semanais por curso, período e docente.',
-      icon: Icons.schedule_rounded,
-      accent: AppTheme.primary,
-      enabled: true,
-      route: '/ajusta-horarios',
-      category: 'PLANEJAMENTO DE DISCIPLINAS',
-    ),
-    _ModuleInfo(
-      title: 'Equivalência de Alunos',
-      description:
-          'Organize análises de aproveitamento de disciplinas entre cursos.',
-      icon: Icons.compare_arrows_rounded,
-      accent: Color(0xFF63C9B8),
-      enabled: true,
-      route: '/equivalencia-alunos',
-      category: 'VIDA ACADÊMICA',
-    ),
-    _ModuleInfo(
-      title: 'Progressão / Promoção',
-      description:
-          'Lance atividades do Anexo 1 (Res. 03/2017 CONDIR) e gere requerimento e relatório em PDF.',
-      icon: Icons.trending_up_rounded,
-      accent: Color(0xFF9D97FF),
-      enabled: true,
-      route: '/progressao',
-      category: 'CARREIRA DOCENTE',
-    ),
-    _ModuleInfo(
-      title: 'Inserir Documentos no SEI',
-      description:
-          'Insira fichas de componentes curriculares no processo do SEI.',
-      icon: Icons.topic_rounded,
-      accent: Color(0xFFFFB454),
-      category: 'PROCESSOS E DOCUMENTOS',
-    ),
+  /// Cartões dos módulos instalados (`app/installed_modules.dart`).
+  static List<_ModuleInfo> get _modules => [
+    for (final module in ModuleRegistry.instance.modules)
+      _ModuleInfo(
+        title: module.title,
+        description: module.description,
+        icon: module.icon,
+        accent: module.accent,
+        category: module.category,
+        enabled: module.enabled,
+        route: module.route,
+        key: module.dashboardKey,
+      ),
   ];
 
   late List<_ModuleInfo> _orderedModules = List.of(_modules);
@@ -940,6 +865,7 @@ class _ModuleInfo {
     required this.category,
     this.enabled = false,
     this.route,
+    this.key,
   });
 
   final String title;
@@ -949,6 +875,8 @@ class _ModuleInfo {
   final String category;
   final bool enabled;
   final String? route;
+  final String? key;
 
-  String get id => route ?? 'module:$title';
+  /// Chave das preferências de ordem/ocultos do painel.
+  String get id => key ?? route ?? 'module:$title';
 }

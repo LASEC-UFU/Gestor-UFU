@@ -1,0 +1,29 @@
+import 'package:gestor_ufu/modules/ajusta_horarios/ajusta_horarios_module.dart';
+import 'package:gestor_ufu/modules/diario/diario_module.dart';
+import 'package:gestor_ufu/modules/equivalencia/equivalencia_module.dart';
+import 'package:gestor_ufu/modules/inserir_documentos_sei/inserir_documentos_sei_module.dart';
+import 'package:gestor_ufu/modules/moodle/moodle_module.dart';
+import 'package:gestor_ufu/modules/planos_ensino/planos_ensino_module.dart';
+import 'package:gestor_ufu/modules/planos_trabalho/planos_trabalho_module.dart';
+import 'package:gestor_ufu/modules/progressao/progressao_module.dart';
+import 'package:gestor_ufu/modules/sei/sei_module.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
+
+/// Módulos instalados no Gestor UFU — a única lista que conhece todos.
+/// Para criar um módulo novo: implemente `GestorModule` em
+/// `lib/modules/<id>/` e adicione uma linha aqui (veja
+/// docs/criando-um-modulo.md). A ordem é a padrão do painel.
+void installModules([ModuleRegistry? target]) {
+  final registry = target ?? ModuleRegistry.instance;
+  if (registry.modules.isNotEmpty) return;
+  registry
+    ..register(const MoodleModule())
+    ..register(const DiarioModule())
+    ..register(const SeiModule())
+    ..register(const PlanosEnsinoModule())
+    ..register(const PlanosTrabalhoModule())
+    ..register(const AjustaHorariosModule())
+    ..register(const EquivalenciaModule())
+    ..register(const ProgressaoModule())
+    ..register(const InserirDocumentosSeiModule());
+}
