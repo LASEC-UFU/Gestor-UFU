@@ -17,7 +17,7 @@ void main() {
     expect(registry.modules.map((m) => m.id), [
       'moodle',
       'diario',
-      'construir-relato',
+      'elaborar-relato',
       'planos-ensino',
       'planos-trabalho',
       'ajusta-horarios',
@@ -30,8 +30,8 @@ void main() {
   test('chaves do painel continuam as mesmas das preferências salvas', () {
     expect(registry.byId('diario')!.dashboardKey, '/diario');
     // Renomeado de "Extrair Árvore de Processo" (rota /sei).
-    expect(registry.byId('construir-relato')!.dashboardKey, '/sei');
-    expect(registry.byRoute('/construir-relato')!.id, 'construir-relato');
+    expect(registry.byId('elaborar-relato')!.dashboardKey, '/sei');
+    expect(registry.byRoute('/elaborar-relato')!.id, 'elaborar-relato');
     expect(
       registry.byId('inserir-documentos-sei')!.dashboardKey,
       'module:Inserir Documentos no SEI',

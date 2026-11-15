@@ -5,13 +5,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
-import 'package:gestor_ufu/modules/construir_relato/construir_relato_module.dart';
-import 'package:gestor_ufu/modules/construir_relato/pages/construir_relato_page.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/elaborar_relato_module.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/pages/elaborar_relato_page.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
-import 'package:gestor_ufu/modules/construir_relato/application/construir_relato_commands.dart';
-import 'package:gestor_ufu/modules/construir_relato/domain/sei_documento.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/application/elaborar_relato_commands.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/domain/sei_documento.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 
 void main() {
@@ -77,7 +77,7 @@ void main() {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       service = SeiArvoreService();
-      commands = {for (final c in construirRelatoCommands(service)) c.id: c};
+      commands = {for (final c in elaborarRelatoCommands(service)) c.id: c};
     });
 
     Future<CommandResult> run(String id, Map<String, dynamic> input) =>
@@ -120,18 +120,18 @@ void main() {
     addTearDown(tester.view.reset);
     ModuleRegistry.instance
       ..clear()
-      ..register(ConstruirRelatoModule());
+      ..register(ElaborarRelatoModule());
     addTearDown(ModuleRegistry.instance.clear);
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => ThemeController(isLight: true),
         child: MaterialApp(
-          home: ConstruirRelatoPage(arvore: SeiArvoreService()),
+          home: ElaborarRelatoPage(arvore: SeiArvoreService()),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Construir Relato'), findsOneWidget);
+    expect(find.text('Elaborar Relato'), findsOneWidget);
     expect(find.byType(Tab), findsOneWidget);
     expect(find.text('Extrair árvore de processo'), findsNWidgets(2));
     expect(find.text('Extrair árvore'), findsOneWidget);

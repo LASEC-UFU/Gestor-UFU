@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 
-/// Funcionalidade "Extrair árvore de processo" do módulo Construir Relato:
+/// Funcionalidade "Extrair árvore de processo" do módulo Elaborar Relato:
 /// lê os documentos do processo aberto no SEI e monta o inventário.
 class ExtrairArvoreView extends StatefulWidget {
   const ExtrairArvoreView({required this.service, super.key});

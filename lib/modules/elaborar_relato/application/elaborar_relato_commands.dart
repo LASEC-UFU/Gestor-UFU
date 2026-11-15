@@ -1,9 +1,9 @@
-import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/elaborar_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/gestor_paths.dart';
 
-/// Comandos do módulo Construir Relato (tela, menu "/" e agente).
-List<ModuleCommand> construirRelatoCommands(SeiArvoreService service) => [
+/// Comandos do módulo Elaborar Relato (tela, menu "/" e agente).
+List<ModuleCommand> elaborarRelatoCommands(SeiArvoreService service) => [
   ModuleCommand(
     id: 'relato.abrirSei',
     title: 'Abrir o SEI no Edge',
@@ -78,7 +78,7 @@ List<ModuleCommand> construirRelatoCommands(SeiArvoreService service) => [
       final path = await GestorPaths.outputPath(
         requested,
         'relatorio_arvore_sei.txt',
-        sub: 'construir_relato',
+        sub: 'elaborar_relato',
       );
       await service.salvarRelatorio(path);
       return CommandResult.ok(
