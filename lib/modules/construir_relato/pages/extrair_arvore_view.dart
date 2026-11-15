@@ -1,24 +1,24 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import 'package:gestor_ufu/modules/sei/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
-import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 
-class SeiTreePage extends StatefulWidget {
-  const SeiTreePage({required this.service, super.key});
+/// Funcionalidade "Extrair árvore de processo" do módulo Construir Relato:
+/// lê os documentos do processo aberto no SEI e monta o inventário.
+class ExtrairArvoreView extends StatefulWidget {
+  const ExtrairArvoreView({required this.service, super.key});
 
   final SeiArvoreService service;
 
   @override
-  State<SeiTreePage> createState() => _SeiTreePageState();
+  State<ExtrairArvoreView> createState() => _ExtrairArvoreViewState();
 }
 
-class _SeiTreePageState extends State<SeiTreePage> {
+class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
   final _urlController = TextEditingController(
     text: SeiArvoreService.defaultAddress,
   );
@@ -152,75 +152,54 @@ class _SeiTreePageState extends State<SeiTreePage> {
   Widget build(BuildContext context) {
     context.watch<ThemeController>();
     final canExtract = _browserOpened && !_extracting && !_openingBrowser;
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(gradient: AppTheme.bgGradient),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(context),
-              Expanded(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1380),
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(28, 24, 28, 32),
-                      children: [
-                        _buildIntro(),
-                        const SizedBox(height: 20),
-                        _buildConnectionCard(),
-                        const SizedBox(height: 16),
-                        _buildQueryCard(canExtract),
-                        if (_error != null) ...[
-                          const SizedBox(height: 16),
-                          _buildErrorBanner(_error!),
-                        ],
-                        if (_extracting) ...[
-                          const SizedBox(height: 16),
-                          _buildProgressCard(),
-                        ],
-                        if (_service.documentos.isNotEmpty) ...[
-                          const SizedBox(height: 20),
-                          _buildResults(),
-                        ],
-                        const SizedBox(height: 16),
-                        _buildLogPanel(),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1380),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(28, 16, 28, 32),
+          children: [
+            _buildIntro(),
+            const SizedBox(height: 20),
+            _buildConnectionCard(),
+            const SizedBox(height: 16),
+            _buildQueryCard(canExtract),
+            if (_error != null) ...[
+              const SizedBox(height: 16),
+              _buildErrorBanner(_error!),
             ],
-          ),
+            if (_extracting) ...[
+              const SizedBox(height: 16),
+              _buildProgressCard(),
+            ],
+            if (_service.documentos.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _buildResults(),
+            ],
+            const SizedBox(height: 16),
+            _buildLogPanel(),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 14, 28, 8),
-    child: ModuleHeader(
-      title: 'SEI',
-      subtitle: 'Extrair árvore de processo',
-      icon: Icons.account_tree_rounded,
-      accent: const Color(0xFFFFB454),
-      onBack: () => context.go('/'),
-      actions: [
-        _StatusPill(label: _status, busy: _openingBrowser || _extracting),
-      ],
-    ),
-  );
-
   Widget _buildIntro() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text(
-        'Extrair Árvore de Processo',
-        style: TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 29,
-          fontWeight: FontWeight.w700,
-        ),
+      Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Extrair árvore de processo',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          _StatusPill(label: _status, busy: _openingBrowser || _extracting),
+        ],
       ),
       SizedBox(height: 7),
       Text(

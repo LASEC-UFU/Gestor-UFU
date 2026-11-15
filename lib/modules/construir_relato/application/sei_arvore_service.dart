@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-import 'package:gestor_ufu/modules/sei/domain/sei_documento.dart';
+import 'package:gestor_ufu/modules/construir_relato/domain/sei_documento.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 import 'package:gestor_ufu/platform/services/sei_automation_service.dart';
@@ -78,7 +78,7 @@ class SeiArvoreService extends ChangeNotifier {
     if (!automation.isConnected) {
       throw const CommandException(
         'sei_fechado',
-        'Abra o SEI pelo app (sei.abrir), entre e abra o processo desejado.',
+        'Abra o SEI pelo app (relato.abrirSei), entre e abra o processo desejado.',
       );
     }
     final current = Uri.tryParse(automation.currentUrl ?? '')?.host ?? '';

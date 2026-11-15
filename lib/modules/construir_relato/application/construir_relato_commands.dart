@@ -1,11 +1,11 @@
-import 'package:gestor_ufu/modules/sei/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/gestor_paths.dart';
 
-/// Comandos do módulo Extrair Árvore de Processo (tela, menu "/" e agente).
-List<ModuleCommand> seiCommands(SeiArvoreService service) => [
+/// Comandos do módulo Construir Relato (tela, menu "/" e agente).
+List<ModuleCommand> construirRelatoCommands(SeiArvoreService service) => [
   ModuleCommand(
-    id: 'sei.abrir',
+    id: 'relato.abrirSei',
     title: 'Abrir o SEI no Edge',
     description:
         'Abre o Edge controlado pelo app no SEI (url opcional; padrão o '
@@ -27,7 +27,7 @@ List<ModuleCommand> seiCommands(SeiArvoreService service) => [
     },
   ),
   ModuleCommand(
-    id: 'sei.extrairArvore',
+    id: 'relato.extrairArvore',
     title: 'Extrair árvore do processo',
     description:
         'Lê os documentos do processo aberto no Edge: ordem, nome na árvore, '
@@ -53,7 +53,7 @@ List<ModuleCommand> seiCommands(SeiArvoreService service) => [
     },
   ),
   ModuleCommand(
-    id: 'sei.relatorio',
+    id: 'relato.relatorioArvore',
     title: 'Relatório da última extração',
     description:
         'Inventário da última extração no formato para parecer ("1. Ofício '
@@ -68,7 +68,7 @@ List<ModuleCommand> seiCommands(SeiArvoreService service) => [
       if (service.documentos.isEmpty) {
         throw const CommandException(
           'sem_extracao',
-          'Nenhuma árvore extraída ainda (sei.extrairArvore).',
+          'Nenhuma árvore extraída ainda (relato.extrairArvore).',
         );
       }
       final requested = input.optionalString('path');
@@ -78,7 +78,7 @@ List<ModuleCommand> seiCommands(SeiArvoreService service) => [
       final path = await GestorPaths.outputPath(
         requested,
         'relatorio_arvore_sei.txt',
-        sub: 'sei',
+        sub: 'construir_relato',
       );
       await service.salvarRelatorio(path);
       return CommandResult.ok(

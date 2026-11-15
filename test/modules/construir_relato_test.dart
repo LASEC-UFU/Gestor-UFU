@@ -1,11 +1,17 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:gestor_ufu/modules/sei/application/sei_arvore_service.dart';
-import 'package:gestor_ufu/modules/sei/application/sei_commands.dart';
-import 'package:gestor_ufu/modules/sei/domain/sei_documento.dart';
+import 'package:gestor_ufu/modules/construir_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/construir_relato/construir_relato_module.dart';
+import 'package:gestor_ufu/modules/construir_relato/pages/construir_relato_page.dart';
+import 'package:gestor_ufu/platform/module/module_registry.dart';
+import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
+import 'package:gestor_ufu/modules/construir_relato/application/construir_relato_commands.dart';
+import 'package:gestor_ufu/modules/construir_relato/domain/sei_documento.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 
 void main() {
@@ -71,7 +77,7 @@ void main() {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       service = SeiArvoreService();
-      commands = {for (final c in seiCommands(service)) c.id: c};
+      commands = {for (final c in construirRelatoCommands(service)) c.id: c};
     });
 
     Future<CommandResult> run(String id, Map<String, dynamic> input) =>
@@ -81,10 +87,10 @@ void main() {
         throwsA(isA<CommandException>().having((e) => e.code, 'code', c));
 
     test('extrair sem Edge e relatório sem extração têm código', () {
-      expect(() => run('sei.extrairArvore', {}), code('sei_fechado'));
-      expect(() => run('sei.relatorio', {}), code('sem_extracao'));
+      expect(() => run('relato.extrairArvore', {}), code('sei_fechado'));
+      expect(() => run('relato.relatorioArvore', {}), code('sem_extracao'));
       expect(
-        () => run('sei.abrir', {'url': 'ftp://x'}),
+        () => run('relato.abrirSei', {'url': 'ftp://x'}),
         code('endereco_invalido'),
       );
     });
@@ -95,11 +101,39 @@ void main() {
       ]);
       final dir = await Directory.systemTemp.createTemp('sei_cmd');
       addTearDown(() => dir.delete(recursive: true));
-      final result = await run('sei.relatorio', {'path': '${dir.path}/r.txt'});
+      final result = await run('relato.relatorioArvore', {
+        'path': '${dir.path}/r.txt',
+      });
       expect(
         File(result.data['path'] as String).readAsStringSync(),
         '1. Despacho (7654321)',
       );
     });
+  });
+
+  testWidgets('tela do módulo com a aba Extrair árvore de processo', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    ModuleRegistry.instance
+      ..clear()
+      ..register(ConstruirRelatoModule());
+    addTearDown(ModuleRegistry.instance.clear);
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => ThemeController(isLight: true),
+        child: MaterialApp(
+          home: ConstruirRelatoPage(arvore: SeiArvoreService()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Construir Relato'), findsOneWidget);
+    expect(find.byType(Tab), findsOneWidget);
+    expect(find.text('Extrair árvore de processo'), findsNWidgets(2));
+    expect(find.text('Extrair árvore'), findsOneWidget);
   });
 }

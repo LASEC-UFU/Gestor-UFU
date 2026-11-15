@@ -104,8 +104,9 @@ entrar no próprio navegador e avise quando terminar.
   atividades, datas; sincroniza com o Moodle. skill `moodle`.
 - Preenche Diários (/diario) — conteúdos de aula por data e preenchimento
   automático do diário no Portal do Docente. skill `diario`.
-- Extrair Árvore de Processo (/sei) — inventário dos documentos de um
-  processo SEI. skill `sei`.
+- Construir Relato (/construir-relato) — relatos de processos do SEI; hoje
+  extrai a árvore e gera o inventário dos documentos. skill
+  `construir-relato`.
 - Planos de Ensino (/planos-ensino) — formulário do plano de ensino, Word e
   inserção no SEI. skill `planos-ensino`.
 - Planos de Trabalho (/planos-trabalho) — plano de trabalho docente: dados
