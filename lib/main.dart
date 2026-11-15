@@ -21,7 +21,7 @@ import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 import 'package:gestor_ufu/data/services/windows_update_service.dart';
-import 'package:gestor_ufu/data/services/diary_automation_service.dart';
+import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
 import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/app/installed_modules.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';

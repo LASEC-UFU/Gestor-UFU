@@ -85,3 +85,10 @@ abstract class GestorModule {
   /// Chamado uma vez ao iniciar o app, com os serviços da plataforma.
   Future<void> activate(GestorServices services) async {}
 }
+
+/// Trecho padrão das skills para dados que dependem do período letivo.
+String termScopedSkillNote(String prefix) =>
+    'Chave por período letivo: `$prefix<token>` — obtenha com '
+    '`term_storage_key(prefix: "$prefix", term: <período>)` ou use os '
+    'comandos do módulo. O período ativo vem de `get_app_context` (ex.: '
+    '"2º semestre de 2026").';

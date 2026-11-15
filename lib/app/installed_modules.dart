@@ -18,7 +18,7 @@ void installModules([ModuleRegistry? target]) {
   if (registry.modules.isNotEmpty) return;
   registry
     ..register(const MoodleModule())
-    ..register(const DiarioModule())
+    ..register(DiarioModule())
     ..register(const SeiModule())
     ..register(const PlanosEnsinoModule())
     ..register(const PlanosTrabalhoModule())

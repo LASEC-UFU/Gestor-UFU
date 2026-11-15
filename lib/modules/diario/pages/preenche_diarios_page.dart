@@ -19,14 +19,15 @@ import 'package:gestor_ufu/core/utils/text_encoding.dart';
 import 'package:gestor_ufu/domain/entities/course_config.dart';
 import 'package:gestor_ufu/domain/entities/moodle_config_snapshot.dart';
 import 'package:gestor_ufu/domain/entities/moodle_entities.dart';
-import 'package:gestor_ufu/data/services/diary_automation_service.dart';
+import 'package:gestor_ufu/modules/diario/data/diary_automation_service.dart';
+import 'package:gestor_ufu/modules/diario/application/diario_lancamentos.dart';
 import 'package:gestor_ufu/data/services/ajusta_horarios_store.dart';
 import 'package:gestor_ufu/domain/entities/academic_term.dart';
 import 'package:gestor_ufu/presentation/controllers/auth_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/config_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/sync_controller.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
-import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/presentation/widgets/academic_term_dialog.dart';
 
 const _entriesStorageKey = 'preenche_diarios_entries_v1';
@@ -941,159 +942,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     );
   }
 
-  _ImportResult _parseWorksheet(Sheet sheet) {
-    final rows = sheet.rows;
-    final int? headerIndex = _findHeaderRow(rows);
-    final header = headerIndex == null
-        ? const {'data': 0, 'modality': 1, 'content': 3}
-        : _columnMap(rows[headerIndex]);
-    if (headerIndex == null)
+  DiarioImport _parseWorksheet(Sheet sheet) {
+    final result = DiarioLancamentos.parseWorksheet(sheet);
+    if (result.usedDefaultColumns) {
       _log(
         'Cabeçalho não encontrado nas 10 primeiras linhas; tentando o formato original (colunas A, B e D).',
       );
-    final imported = <String, String>{};
-    final errors = <String, String>{};
-    var skipped = 0;
-    var duplicates = 0;
-    for (
-      var rowIndex = (headerIndex ?? 0) + 1;
-      rowIndex < rows.length;
-      rowIndex++
-    ) {
-      final row = rows[rowIndex];
-      final date = _parseWorksheetDate(_cell(row, header['data']!), rows);
-      final modality = _cellText(_cell(row, header['modality']!)).toLowerCase();
-      final content = _cellText(_cell(row, header['content']!)).trim();
-      final suffix = _stripAccents(modality).contains('teor')
-          ? 'T'
-          : _stripAccents(modality).contains('prat')
-          ? 'P'
-          : null;
-      if (date == null || suffix == null || content.isEmpty) {
-        if (modality.isNotEmpty || content.isNotEmpty) skipped++;
-        continue;
-      }
-      final key = '${_formatDate(date)} -$suffix';
-      if (imported.containsKey(key)) duplicates++;
-      imported[key] = content;
     }
-    final validated = _validateMap(imported);
-    errors.addAll(validated.errors);
-    return _ImportResult(validated.valid, errors, skipped, duplicates);
-  }
-
-  int? _findHeaderRow(List<List<Data?>> rows) {
-    for (var i = 0; i < rows.length && i < 10; i++) {
-      final map = _columnMap(rows[i]);
-      if (map.containsKey('data') &&
-          map.containsKey('modality') &&
-          map.containsKey('content'))
-        return i;
-    }
-    return null;
-  }
-
-  Map<String, int> _columnMap(List<Data?> row) {
-    final map = <String, int>{};
-    for (var i = 0; i < row.length; i++) {
-      final text = _stripAccents(
-        _cellText(row[i]).toLowerCase().trim(),
-      ).replaceAll(RegExp(r'\s+'), ' ');
-      if (text == 'data' || text == 'dia') map['data'] = i;
-      if (text.startsWith('modalidade')) map['modality'] = i;
-      if ({
-        'materia lecionada',
-        'materia',
-        'conteudo',
-        'conteudo lecionado',
-        'descricao',
-      }.contains(text))
-        map['content'] = i;
-    }
-    return map;
-  }
-
-  Data? _cell(List<Data?> row, int column) =>
-      column < row.length ? row[column] : null;
-
-  String _cellText(Data? cell) {
-    final value = cell?.value;
-    if (value == null) return '';
-    if (value is TextCellValue) return value.value.text ?? '';
-    if (value is FormulaCellValue) return value.formula;
-    return value.toString();
-  }
-
-  DateTime? _parseExcelDate(Data? cell) {
-    final value = cell?.value;
-    if (value is DateCellValue) return value.asDateTimeLocal();
-    if (value is DateTimeCellValue) return value.asDateTimeLocal();
-    if (value is IntCellValue)
-      return DateTime(1899, 12, 30).add(Duration(days: value.value));
-    if (value is DoubleCellValue)
-      return DateTime(1899, 12, 30).add(Duration(days: value.value.floor()));
-    final text = _cellText(cell).trim();
-    final match = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{2,4})$').firstMatch(text);
-    if (match == null) return null;
-    final day = int.parse(match.group(1)!);
-    final month = int.parse(match.group(2)!);
-    var year = int.parse(match.group(3)!);
-    if (year < 100) year += 2000;
-    final date = DateTime(year, month, day);
-    return date.year == year && date.month == month && date.day == day
-        ? date
-        : null;
-  }
-
-  DateTime? _parseWorksheetDate(
-    Data? cell,
-    List<List<Data?>> rows, [
-    Set<String>? references,
-  ]) {
-    final value = cell?.value;
-    if (value is! FormulaCellValue) return _parseExcelDate(cell);
-
-    final formula = value.formula
-        .trim()
-        .replaceFirst(RegExp(r'^='), '')
-        .replaceAll(r'$', '')
-        .replaceAll(RegExp(r'\s+'), '')
-        .toUpperCase();
-    final match = RegExp(
-      r'^([A-Z]{1,3})(\d+)(?:([+-])(\d+(?:\.\d+)?))?$',
-    ).firstMatch(formula);
-    if (match == null) return null;
-
-    var column = 0;
-    for (final character in match.group(1)!.codeUnits) {
-      column = column * 26 + character - 64;
-    }
-    final rowIndex = int.parse(match.group(2)!) - 1;
-    final columnIndex = column - 1;
-    if (rowIndex < 0 || rowIndex >= rows.length || columnIndex < 0) {
-      return null;
-    }
-
-    final address = '${match.group(1)}${match.group(2)}';
-    final visited = references ?? <String>{};
-    if (!visited.add(address)) return null;
-    final referencedRows = rows[rowIndex];
-    final baseDate = _parseWorksheetDate(
-      _cell(referencedRows, columnIndex),
-      rows,
-      visited,
-    );
-    visited.remove(address);
-    if (baseDate == null) return null;
-
-    final offset = double.tryParse(match.group(4) ?? '0');
-    if (offset == null) return null;
-    final signedOffset = match.group(3) == '-' ? -offset : offset;
-    return baseDate.add(
-      Duration(
-        microseconds: (signedOffset * Duration.microsecondsPerDay).round(),
-      ),
-    );
+    return result;
   }
 
   Future<void> _importJson() async {
@@ -1165,62 +1021,11 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
     }
   }
 
-  _ValidationResult _validateMap(dynamic raw) {
-    if (raw is! Map)
-      return const _ValidationResult({}, {
-        '__root__':
-            'O JSON precisa ser um objeto {"DD/MM/AAAA -P": "conteúdo"}.',
-      });
-    final valid = <String, String>{};
-    final errors = <String, String>{};
-    for (final entry in raw.entries) {
-      final originalKey = '${entry.key}';
-      if (entry.value is! String) {
-        errors[originalKey] = 'O conteúdo precisa ser texto.';
-        continue;
-      }
-      final normalized = _normalizeKey(originalKey);
-      if (normalized == null) {
-        errors[originalKey] =
-            'Use uma data válida no formato DD/MM/AAAA -P (ou -T).';
-      } else if (valid.containsKey(normalized)) {
-        errors[originalKey] =
-            'A chave duplicou após a normalização: $normalized.';
-      } else {
-        valid[normalized] = entry.value as String;
-      }
-    }
-    return _ValidationResult(valid, errors);
-  }
+  DiarioValidation _validateMap(dynamic raw) => DiarioLancamentos.validate(raw);
 
-  String? _normalizeKey(String key) {
-    final normalized = key
-        .replaceAll(RegExp('[\\u2013\\u2014\\u2212]'), '-')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    final match = RegExp(
-      r'^(\d{1,2})/(\d{1,2})/(\d{2,4})(?:\s*-\s*(.*))?$',
-    ).firstMatch(normalized);
-    if (match == null) return null;
-    final day = int.parse(match.group(1)!);
-    final month = int.parse(match.group(2)!);
-    var year = int.parse(match.group(3)!);
-    if (year < 100) year += 2000;
-    final date = DateTime(year, month, day);
-    if (date.year != year || date.month != month || date.day != day)
-      return null;
-    final suffix = (match.group(4) ?? '').trim();
-    return '${_formatDate(date)} -${suffix.isEmpty ? 'P' : suffix}';
-  }
+  String? _normalizeKey(String key) => DiarioLancamentos.normalizeKey(key);
 
-  String _stripAccents(String value) => repairMojibake(value)
-      .toLowerCase()
-      .replaceAll(RegExp(r'[\u00e1\u00e0\u00e2\u00e3\u00e4]'), 'a')
-      .replaceAll(RegExp(r'[\u00e9\u00e8\u00ea\u00eb]'), 'e')
-      .replaceAll(RegExp(r'[\u00ed\u00ec\u00ee\u00ef]'), 'i')
-      .replaceAll(RegExp(r'[\u00f3\u00f2\u00f4\u00f5\u00f6]'), 'o')
-      .replaceAll(RegExp(r'[\u00fa\u00f9\u00fb\u00fc]'), 'u')
-      .replaceAll('\u00e7', 'c');
+  String _stripAccents(String value) => DiarioLancamentos.stripAccents(value);
 
   String? _lessonModality(ActivityEntry activity) {
     final normalizedName = _stripAccents(activity.name);
@@ -1310,30 +1115,12 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
         .trim();
   }
 
-  String _formatDate(DateTime date) => DateFormat('dd/MM/yyyy').format(date);
+  String _formatDate(DateTime date) => DiarioLancamentos.formatDate(date);
 
-  Map<String, String> _sortMap(Map<String, String> map) {
-    final entries = map.entries.toList()
-      ..sort((a, b) {
-        final aDate = _dateFromKey(a.key);
-        final bDate = _dateFromKey(b.key);
-        if (aDate == null) return bDate == null ? a.key.compareTo(b.key) : 1;
-        if (bDate == null) return -1;
-        final cmp = aDate.compareTo(bDate);
-        return cmp == 0 ? a.key.compareTo(b.key) : cmp;
-      });
-    return Map.fromEntries(entries);
-  }
+  Map<String, String> _sortMap(Map<String, String> map) =>
+      DiarioLancamentos.sortMap(map);
 
-  DateTime? _dateFromKey(String key) {
-    final match = RegExp(r'^(\d{2})/(\d{2})/(\d{4})\s*-').firstMatch(key);
-    if (match == null) return null;
-    return DateTime(
-      int.parse(match.group(3)!),
-      int.parse(match.group(2)!),
-      int.parse(match.group(1)!),
-    );
-  }
+  DateTime? _dateFromKey(String key) => DiarioLancamentos.dateFromKey(key);
 
   DateTime? _parseDateInput(String value) {
     try {
@@ -2932,90 +2719,48 @@ class _PageHeader extends StatelessWidget {
   final int entryCount;
   final String term;
   final VoidCallback onManageTerms;
+  // Cabeçalho padrão da plataforma (Agente + Tema à direita).
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(28, 16, 28, 8),
-    child: Row(
-      children: [
-        IconButton(
-          onPressed: onBack,
-          tooltip: 'Voltar ao início',
-          icon: const Icon(Icons.arrow_back_rounded),
-        ),
-        const SizedBox(width: 10),
-        Container(
-          width: 46,
-          height: 46,
+  Widget build(BuildContext context) => ModuleHeader(
+    title: 'Preenche Diários',
+    subtitle: 'Preparação e lançamento de aulas',
+    icon: Icons.edit_calendar_rounded,
+    accent: AppTheme.accent,
+    onBack: onBack,
+    actions: [
+      InkWell(
+        onTap: onManageTerms,
+        borderRadius: BorderRadius.circular(13),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
           decoration: BoxDecoration(
-            color: AppTheme.accent.withAlpha(27),
-            borderRadius: BorderRadius.circular(15),
+            color: AppTheme.bgCard.withAlpha(160),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: AppTheme.divider),
           ),
-          child: const Icon(
-            Icons.edit_calendar_rounded,
-            color: AppTheme.accent,
-          ),
-        ),
-        const SizedBox(width: 13),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Preenche Diários',
-              style: TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              'PREPARAÇÃO E LANÇAMENTO DE AULAS',
-              style: TextStyle(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.date_range_rounded,
+                size: 16,
                 color: AppTheme.textSecondary,
-                fontSize: 9,
-                letterSpacing: 1.3,
-                fontWeight: FontWeight.w600,
               ),
-            ),
-          ],
-        ),
-        const Spacer(),
-        InkWell(
-          onTap: onManageTerms,
-          borderRadius: BorderRadius.circular(13),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: AppTheme.bgCard.withAlpha(160),
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.date_range_rounded,
-                  size: 16,
+              const SizedBox(width: 7),
+              Text(
+                AcademicTerm.displayName(term),
+                style: TextStyle(
                   color: AppTheme.textSecondary,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
                 ),
-                const SizedBox(width: 7),
-                Text(
-                  AcademicTerm.displayName(term),
-                  style: TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(width: 10),
-        _StatusPill(count: entryCount),
-        const SizedBox(width: 10),
-        const ThemeSelector(compact: true),
-      ],
-    ),
+      ),
+      _StatusPill(count: entryCount),
+    ],
   );
 }
 
@@ -3982,17 +3727,6 @@ class _ConnectionLabel extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ValidationResult {
-  const _ValidationResult(this.valid, this.errors);
-  final Map<String, String> valid;
-  final Map<String, String> errors;
-}
-
-class _ImportResult extends _ValidationResult {
-  const _ImportResult(super.valid, super.errors, this.skipped, this.duplicates);
-  final int skipped, duplicates;
 }
 
 class _ShiftResult {
