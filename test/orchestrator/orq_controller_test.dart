@@ -10,14 +10,16 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/orchestrator/application/git_worktrees.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
+import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/domain/orq_models.dart';
 
 /// Agente falso: responde com [reply] (ou espera [gate] para terminar).
 class FakeBackend extends AgentBackend {
-  FakeBackend(this.request, this.reply, {this.gate, this.onSend});
+  FakeBackend(this.request, this._reply, {this.gate, this.onSend});
 
   final OrqBackendRequest request;
-  final String reply;
+  final String Function() _reply;
+  String get reply => _reply();
   final Completer<void>? gate;
   final void Function(FakeBackend backend, String prompt)? onSend;
   final prompts = <String>[];
@@ -107,7 +109,7 @@ void main() {
       ).firstMatch(request.label)?.group(1);
       final backend = FakeBackend(
         request,
-        isCoordinator ? coordinatorReply : 'feito ${taskId ?? ''}',
+        () => isCoordinator ? coordinatorReply : 'feito ${taskId ?? ''}',
         gate: taskId == null ? null : gates[taskId],
       );
       created.add(backend);
@@ -247,6 +249,69 @@ void main() {
     await reopened.load();
     expect(reopened.runs.single.tasks.single.status, OrqTaskStatus.parked);
     reopened.dispose();
+  });
+
+  test('perfis: conta da tarefa, agente errado e limite por perfil', () async {
+    final orq = controller();
+    await orq.load();
+    orq.settings
+      ..maxParallel = 3
+      ..profiles = [
+        const OrqProfile(id: 'claude-trab', provider: 'claude', name: 'Trab'),
+      ];
+    gates['a'] = Completer<void>();
+    gates['b'] = Completer<void>();
+    coordinatorReply = _plan([
+      {..._task('c', provider: 'chatgpt'), 'profileId': 'claude-trab'},
+    ]);
+    await orq.send('perfil errado');
+    await expectLater(
+      () => orq.approvePlan(orq.runs.first.id),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          contains('não do chatgpt'),
+        ),
+      ),
+    );
+    coordinatorReply = _plan([
+      {..._task('a'), 'profileId': 'claude-trab'},
+      {..._task('b'), 'profileId': 'claude-trab'},
+    ]);
+    await orq.send('perfis');
+    final run = orq.runs.first;
+    await orq.approvePlan(run.id);
+    await _settle(() => run.task('a')!.status == OrqTaskStatus.running);
+    // Limite de 1 por perfil: b espera a terminar.
+    expect(run.task('b')!.status, OrqTaskStatus.queued);
+    final worker = created.firstWhere(
+      (b) => b.request.label.startsWith('Tarefa a '),
+    );
+    expect(
+      worker.request.environment['CLAUDE_CONFIG_DIR'],
+      endsWith('claude-trab'),
+    );
+    gates['a']!.complete();
+    await _settle(() => run.task('b')!.status == OrqTaskStatus.running);
+    gates['b']!.complete();
+    orq.dispose();
+  });
+
+  test('perfil do Codex usa CODEX_HOME com credenciais em arquivo', () async {
+    const profile = OrqProfile(
+      id: 'teste-codex',
+      provider: 'chatgpt',
+      name: 'T',
+    );
+    expect(profile.environment.keys, ['CODEX_HOME']);
+    await profile.prepare();
+    final config = File(p.join(profile.directory, 'config.toml'));
+    expect(
+      config.readAsStringSync(),
+      contains('cli_auth_credentials_store = "file"'),
+    );
+    await Directory(profile.directory).delete(recursive: true);
   });
 
   group('git', () {

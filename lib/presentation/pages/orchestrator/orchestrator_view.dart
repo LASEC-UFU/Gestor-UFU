@@ -21,10 +21,14 @@ class OrchestratorView extends StatefulWidget {
     required this.controller,
     this.onPrepareProject,
     this.memoryPanel,
+    this.onProfileLogin,
     super.key,
   });
 
   final OrqController controller;
+
+  /// Abre o login oficial do CLI para um perfil de conta.
+  final Future<void> Function(OrqProfile profile)? onProfileLogin;
 
   /// "Preparar projeto (.ai)" (cria a pasta .ai com specs e skills).
   final Future<String> Function(String projectPath)? onPrepareProject;
@@ -1021,6 +1025,7 @@ class _OrchestratorViewState extends State<OrchestratorView> {
         settings: _orq.settings,
         onPrepareProject: widget.onPrepareProject,
         memoryPanel: widget.memoryPanel,
+        onProfileLogin: widget.onProfileLogin,
       ),
     );
     if (saved == true) await _orq.saveSettings();
@@ -1032,9 +1037,11 @@ class _OrqSettingsDialog extends StatefulWidget {
     required this.settings,
     this.onPrepareProject,
     this.memoryPanel,
+    this.onProfileLogin,
   });
 
   final OrqSettings settings;
+  final Future<void> Function(OrqProfile profile)? onProfileLogin;
   final Future<String> Function(String projectPath)? onPrepareProject;
   final Widget Function(BuildContext context)? memoryPanel;
 
@@ -1054,10 +1061,46 @@ class _OrqSettingsDialogState extends State<_OrqSettingsDialog> {
     ].join('\n'),
   );
   String _prepareResult = '';
+  final _profileName = TextEditingController();
+  String _profileProvider = 'claude';
+  int _profileParallel = 1;
+
+  void _addProfile() {
+    final name = _profileName.text.trim();
+    if (name.isEmpty) return;
+    final base = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    var id = '$_profileProvider-${base.isEmpty ? 'conta' : base}';
+    var n = 2;
+    while (s.profile(id) != null) {
+      id = '$_profileProvider-${base.isEmpty ? 'conta' : base}-${n++}';
+    }
+    setState(() {
+      s.profiles = [
+        ...s.profiles,
+        OrqProfile(
+          id: id,
+          provider: _profileProvider,
+          name: name,
+          maxParallel: _profileParallel,
+        ),
+      ];
+      _profileName.clear();
+    });
+  }
 
   @override
   void dispose() {
-    for (final c in [_project, _command, _args, _dir, _upstreams]) {
+    for (final c in [
+      _project,
+      _command,
+      _args,
+      _dir,
+      _upstreams,
+      _profileName,
+    ]) {
       c.dispose();
     }
     super.dispose();
@@ -1194,6 +1237,79 @@ class _OrqSettingsDialogState extends State<_OrqSettingsDialog> {
                     ),
                   ),
                 ],
+              ),
+              section('Perfis (outras contas do Claude Code e do Codex)'),
+              for (final profile in s.profiles)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${profile.name} · '
+                        '${profile.provider == 'claude' ? 'Claude Code' : 'Codex'}'
+                        ' · ${profile.id} · até ${profile.maxParallel}',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    if (widget.onProfileLogin != null)
+                      TextButton(
+                        onPressed: () => widget.onProfileLogin!(profile),
+                        child: const Text('Entrar'),
+                      ),
+                    IconButton(
+                      tooltip: 'Remover perfil',
+                      icon: const Icon(Icons.close_rounded, size: 16),
+                      onPressed: () => setState(
+                        () => s.profiles = [
+                          for (final other in s.profiles)
+                            if (other.id != profile.id) other,
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              Row(
+                children: [
+                  DropdownButton<String>(
+                    value: _profileProvider,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'claude',
+                        child: Text('Claude Code'),
+                      ),
+                      DropdownMenuItem(value: 'chatgpt', child: Text('Codex')),
+                    ],
+                    onChanged: (v) =>
+                        setState(() => _profileProvider = v ?? 'claude'),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _profileName,
+                      decoration: const InputDecoration(
+                        hintText: 'Nome da conta (ex.: Trabalho)',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  DropdownButton<int>(
+                    value: _profileParallel,
+                    items: [
+                      for (var i = 1; i <= 4; i++)
+                        DropdownMenuItem(value: i, child: Text('$i×')),
+                    ],
+                    onChanged: (v) => setState(() => _profileParallel = v ?? 1),
+                  ),
+                  TextButton(
+                    onPressed: _addProfile,
+                    child: const Text('Adicionar'),
+                  ),
+                ],
+              ),
+              const Text(
+                'Cada perfil usa uma pasta própria (CLAUDE_CONFIG_DIR ou '
+                'CODEX_HOME). Depois de adicionar, salve e clique em "Entrar" '
+                'para fazer o login oficial do CLI nessa conta.',
+                style: TextStyle(fontSize: 11),
               ),
               section('Projeto (neste computador)'),
               Row(

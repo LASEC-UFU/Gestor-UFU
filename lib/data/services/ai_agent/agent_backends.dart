@@ -106,6 +106,10 @@ abstract class AgentBackend {
   /// Pasta de trabalho dos CLIs fora do modo "Só o Gestor".
   String workDir = '';
 
+  /// Variáveis do perfil de conta (ex.: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`)
+  /// para usar outra conta do mesmo CLI — perfis do Orquestrador.
+  Map<String, String> profileEnvironment = const {};
+
   /// Servidores MCP adicionais (nome → URL HTTP) entregues aos CLIs, além do
   /// servidor do Gestor (ex.: AI Memory nos agentes do Orquestrador).
   Map<String, String> extraMcpServers = const {};
@@ -674,7 +678,7 @@ abstract class CliAgentBackend extends AgentBackend {
       args,
       runInShell: exe.toLowerCase().endsWith('.cmd'),
       workingDirectory: await workingDirectory(),
-      environment: environment,
+      environment: {...environment, ...profileEnvironment},
     );
   }
 
@@ -780,7 +784,7 @@ abstract class CliAgentBackend extends AgentBackend {
       'cmd',
       '/k',
       loginArgs,
-    ], mode: ProcessStartMode.detached);
+    ], mode: ProcessStartMode.detached, environment: profileEnvironment);
   }
 
   String get _instructions => access == AgentAccess.gestor

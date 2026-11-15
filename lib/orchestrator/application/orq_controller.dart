@@ -34,6 +34,7 @@ class OrqBackendRequest {
     this.effort = '',
     this.workDir = '',
     this.extraMcpServers = const {},
+    this.environment = const {},
   });
 
   final AgentProvider provider;
@@ -49,6 +50,9 @@ class OrqBackendRequest {
 
   /// Servidores MCP adicionais (ex.: AI Memory) para os CLIs.
   final Map<String, String> extraMcpServers;
+
+  /// Variáveis do perfil de conta (outra conta do mesmo CLI).
+  final Map<String, String> environment;
 }
 
 typedef OrqBackendFactory =
@@ -265,6 +269,11 @@ class OrqController extends ChangeNotifier {
         allowedWorkers: [for (final w in settings.workers) w.name],
         maxParallel: settings.maxParallel,
         maxAttempts: settings.maxAttempts,
+        profiles: [
+          for (final profile in settings.profiles)
+            '${profile.provider}: ${profile.id} (${profile.name}, até '
+                '${profile.maxParallel} em paralelo)',
+        ],
         runs: runs,
         memoryContext: settings.aiMemory
             ? await memory.coordinatorContext(prompt, project)
@@ -373,6 +382,7 @@ class OrqController extends ChangeNotifier {
           context: handoff.context,
           model: handoff.model,
           effort: handoff.effort,
+          profileId: handoff.profileId,
         );
         chat.add(
           AgentEntry(
@@ -399,6 +409,25 @@ class OrqController extends ChangeNotifier {
   Future<void> approvePlan(String runId, {List<OrqTask>? edited}) async {
     final run = _requireRun(runId);
     if (run.status != OrqRunStatus.proposed) return;
+    final problems = <String>[];
+    for (final task in edited ?? run.tasks) {
+      if (task.profileId.isEmpty) continue;
+      final profile = settings.profile(task.profileId);
+      final provider = task.provider == 'auto'
+          ? settings.defaultWorker.name
+          : task.provider;
+      if (profile == null) {
+        problems.add('${task.id}: perfil ${task.profileId} não existe');
+      } else if (profile.provider != provider) {
+        problems.add(
+          '${task.id}: perfil ${profile.name} é do ${profile.provider}, não '
+          'do $provider',
+        );
+      }
+    }
+    if (problems.isNotEmpty) {
+      throw StateError('Corrija o plano: ${problems.join('; ')}.');
+    }
     if (edited != null) {
       run.tasks
         ..clear()
@@ -574,9 +603,14 @@ class OrqController extends ChangeNotifier {
     String context = '',
     String model = '',
     String effort = '',
+    String profileId = '',
   }) async {
     final run = _requireRun(runId);
     final task = run.task(taskId)!;
+    if (profileId.isNotEmpty &&
+        settings.profile(profileId)?.provider != provider) {
+      throw StateError('O perfil $profileId não pertence ao agente $provider.');
+    }
     if (task.status == OrqTaskStatus.complete) {
       throw StateError('A tarefa já foi concluída.');
     }
@@ -618,6 +652,7 @@ class OrqController extends ChangeNotifier {
     task
       ..log('transferida', '${task.provider} → $provider')
       ..provider = provider
+      ..profileId = profileId
       ..model = model
       ..effort = effort
       ..sessionState = const {}
@@ -665,6 +700,11 @@ class OrqController extends ChangeNotifier {
           continue;
         }
         if (!_dependenciesDone(run, task)) continue;
+        final profile = settings.profile(task.profileId);
+        if (profile != null &&
+            _profileLoad(profile.id) >= profile.maxParallel) {
+          continue;
+        }
         unawaited(_runTask(run, task));
       }
       if (run.tasks.every((t) => t.status == OrqTaskStatus.complete)) {
@@ -673,6 +713,17 @@ class OrqController extends ChangeNotifier {
       }
     }
     _changed();
+  }
+
+  /// Tarefas em execução com o perfil [id].
+  int _profileLoad(String id) {
+    var count = 0;
+    for (final run in runs) {
+      for (final task in run.tasks) {
+        if (task.profileId == id && isWorking(run, task)) count++;
+      }
+    }
+    return count;
   }
 
   AgentProvider _providerFor(OrqTask task) {
@@ -685,6 +736,24 @@ class OrqController extends ChangeNotifier {
       );
     }
     return provider;
+  }
+
+  /// Perfil de conta da tarefa (se indicado): precisa existir e ser do
+  /// mesmo agente.
+  Future<OrqProfile?> _profileFor(OrqTask task, AgentProvider provider) async {
+    if (task.profileId.isEmpty) return null;
+    final profile = settings.profile(task.profileId);
+    if (profile == null) {
+      throw StateError('O perfil ${task.profileId} não existe mais.');
+    }
+    if (profile.provider != provider.name) {
+      throw StateError(
+        'O perfil ${profile.name} é do ${profile.provider}, não do '
+        '${provider.name}.',
+      );
+    }
+    await profile.prepare();
+    return profile;
   }
 
   Future<String> _prepareWorkspace(OrqRun run, OrqTask task) async {
@@ -743,6 +812,7 @@ class OrqController extends ChangeNotifier {
     var lastText = '';
     try {
       final provider = _providerFor(task);
+      final profile = await _profileFor(task, provider);
       final workDir = await _prepareWorkspace(run, task);
       final taskMemory = settings.aiMemory
           ? await memory.prepareTask(run, task)
@@ -782,6 +852,7 @@ class OrqController extends ChangeNotifier {
               'Execute somente a tarefa recebida, dentro da pasta indicada.',
           label: 'Tarefa ${task.id} · ${provider.name}',
           onPermission: permissionFor('Tarefa ${task.id} · ${provider.name}'),
+          environment: profile?.environment ?? const {},
           extraMcpServers: {
             if (taskMemory.mcpServerUrl.isNotEmpty)
               'ai_memory': taskMemory.mcpServerUrl,

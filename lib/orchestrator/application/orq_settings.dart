@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
@@ -29,6 +31,68 @@ class OrqUpstream {
   );
 }
 
+/// Perfil de conta de um agente CLI (port de `workerProfiles.js`): outra
+/// conta do Claude Code (`CLAUDE_CONFIG_DIR`) ou do Codex (`CODEX_HOME` com
+/// credenciais em arquivo na pasta do perfil). O login é feito pelo CLI
+/// oficial; o Gestor não lê credenciais.
+class OrqProfile {
+  const OrqProfile({
+    required this.id,
+    required this.provider,
+    required this.name,
+    this.maxParallel = 1,
+  });
+
+  final String id;
+
+  /// `claude` ou `chatgpt` (Codex).
+  final String provider;
+  final String name;
+  final int maxParallel;
+
+  static const supported = {'claude', 'chatgpt'};
+
+  /// Pasta do perfil (fica só neste computador).
+  String get directory => p.join(
+    Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path,
+    'GestorUFU',
+    'orquestrador',
+    'perfis',
+    id,
+  );
+
+  /// Variáveis que fazem o CLI usar a conta deste perfil.
+  Map<String, String> get environment => provider == 'claude'
+      ? {'CLAUDE_CONFIG_DIR': directory}
+      : {'CODEX_HOME': directory};
+
+  /// Cria a pasta; no Codex, guarda as credenciais em arquivo na pasta do
+  /// perfil (opção documentada), separadas das demais contas.
+  Future<void> prepare() async {
+    await Directory(directory).create(recursive: true);
+    if (provider == 'chatgpt') {
+      final config = File(p.join(directory, 'config.toml'));
+      if (!await config.exists()) {
+        await config.writeAsString('cli_auth_credentials_store = "file"\n');
+      }
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'provider': provider,
+    'name': name,
+    'maxParallel': maxParallel,
+  };
+
+  factory OrqProfile.fromJson(Map<String, dynamic> json) => OrqProfile(
+    id: '${json['id']}',
+    provider: '${json['provider'] ?? 'claude'}',
+    name: '${json['name'] ?? ''}',
+    maxParallel: ((json['maxParallel'] as num?)?.toInt() ?? 1).clamp(1, 6),
+  );
+}
+
 /// Configurações do Orquestrador. Ficam no banco compartilhado (iguais em
 /// todos os computadores), exceto a pasta do projeto, guardada por
 /// computador (`projectPaths[nome do computador]`).
@@ -47,9 +111,11 @@ class OrqSettings {
     this.buildTimeoutMinutes = 20,
     List<OrqUpstream>? upstreams,
     this.aiMemory = true,
+    List<OrqProfile>? profiles,
   }) : workers = workers ?? AgentProvider.values.toSet(),
        projectPaths = projectPaths ?? {},
-       upstreams = upstreams ?? [];
+       upstreams = upstreams ?? [],
+       profiles = profiles ?? [];
 
   static const key = 'orquestrador.config.v1';
 
@@ -73,6 +139,16 @@ class OrqSettings {
   int buildTimeoutMinutes;
   List<OrqUpstream> upstreams;
   bool aiMemory;
+
+  /// Contas extras dos agentes CLI.
+  List<OrqProfile> profiles;
+
+  OrqProfile? profile(String id) {
+    for (final profile in profiles) {
+      if (profile.id == id) return profile;
+    }
+    return null;
+  }
 
   static String get machine => Platform.localHostname;
 
@@ -116,6 +192,10 @@ class OrqSettings {
           if (u is Map) OrqUpstream.fromJson(Map<String, dynamic>.from(u)),
       ],
       aiMemory: raw['aiMemory'] != false,
+      profiles: [
+        for (final item in raw['profiles'] as List? ?? const [])
+          if (item is Map) OrqProfile.fromJson(Map<String, dynamic>.from(item)),
+      ],
     );
   }
 
@@ -134,5 +214,6 @@ class OrqSettings {
         'buildTimeoutMinutes': buildTimeoutMinutes,
         'upstreams': [for (final u in upstreams) u.toJson()],
         'aiMemory': aiMemory,
+        'profiles': [for (final profile in profiles) profile.toJson()],
       });
 }

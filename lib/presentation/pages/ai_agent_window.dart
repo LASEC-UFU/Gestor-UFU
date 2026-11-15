@@ -19,6 +19,7 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_computer.dart';
 import 'package:gestor_ufu/orchestrator/application/ai_memory.dart';
 import 'package:gestor_ufu/orchestrator/application/orq_controller.dart';
+import 'package:gestor_ufu/orchestrator/application/orq_settings.dart';
 import 'package:gestor_ufu/orchestrator/application/project_setup.dart';
 import 'package:gestor_ufu/presentation/pages/orchestrator/orchestrator_view.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
@@ -401,6 +402,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
       ..workDir = request.workDir
       ..onPermission = request.onPermission
       ..extraMcpServers = request.extraMcpServers
+      ..profileEnvironment = request.environment
       // O coordenador só devolve JSON; os trabalhadores recebem também o
       // guia geral do Gestor (ferramentas, dados, navegador, computador).
       ..systemPrompt = coordinator
@@ -413,6 +415,23 @@ class _AiAgentPageState extends State<AiAgentPage> {
         await _orqMcp.remove(backend)?.stop();
       },
     );
+  }
+
+  /// Abre o login oficial do CLI já apontado para a pasta do perfil.
+  Future<void> _orqProfileLogin(OrqProfile profile) async {
+    await profile.prepare();
+    final provider = AgentProvider.values.firstWhere(
+      (p) => p.name == profile.provider,
+    );
+    final backend = cliBackendFor(
+      provider,
+      mcp: AgentMcpServer((name, input) async => '{}'),
+      path: _settings.cliPathFor(provider),
+      model: '',
+    );
+    if (backend is! CliAgentBackend) return;
+    backend.profileEnvironment = profile.environment;
+    await backend.openLoginTerminal();
   }
 
   /// Ferramentas do Gestor para os agentes do Orquestrador, com as mesmas
@@ -1896,6 +1915,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
                 child: OrchestratorView(
                   controller: _orq,
                   onPrepareProject: prepareOrchestratorProject,
+                  onProfileLogin: _orqProfileLogin,
                   memoryPanel: (context) => AiMemoryPanel(
                     bridge: _aiMemory,
                     onChanged: () {
