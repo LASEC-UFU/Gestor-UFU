@@ -2215,9 +2215,13 @@ class _ResumoTab extends StatelessWidget {
         ),
       ),
     );
-    spec.dispose();
-    numero.dispose();
-    interessado.dispose();
+    // O diálogo ainda anima o fechamento usando os controllers; descartá-los
+    // na hora quebra a árvore de widgets (assert `_dependents.isEmpty`).
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      spec.dispose();
+      numero.dispose();
+      interessado.dispose();
+    });
     if (opcoes == null || !context.mounted) return;
     try {
       if (opcoes.criarNovo) {

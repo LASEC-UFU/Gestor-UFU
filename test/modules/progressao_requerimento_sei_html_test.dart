@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gestor_ufu/modules/progressao/application/progressao_requerimento_sei_html.dart';
 import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
@@ -50,6 +52,34 @@ void main() {
       contains('<td><p class="Tabela_Texto_Alinhado_Esquerda">X</p></td>'),
     );
     expect(merged.html, contains('>0</p>'));
+  });
+
+  test('preenche o modelo real do SEI/UFU (caixas em parágrafos e grade)', () {
+    final modelo = File(
+      'test/fixtures/progressao_requerimento_sei_modelo.html',
+    ).readAsStringSync();
+    final processo = ProgressaoDocente(
+      id: 'teste',
+      docente: 'Josué Silva de Morais',
+      siape: '1839411',
+      lotacao: 'Faculdade de Engenharia Elétrica',
+      dataAdmissao: DateTime(2011, 1, 26),
+      dataDocumento: DateTime(2026, 11, 26),
+      alvoId: 'magisterioSuperior|D|IV',
+      intersticioInicio: DateTime(2025, 1, 21),
+      intersticioFim: DateTime(2027, 1, 20),
+      relatorioInicio: DateTime(2025, 1, 21),
+      relatorioFim: DateTime(2026, 11, 26),
+    );
+    final merged = ProgressaoRequerimentoSeiHtml.merge(modelo, processo);
+    expect(merged.ausentes, isEmpty);
+    expect(merged.html, contains('Josué Silva de Morais'));
+    expect(merged.html, contains('(<span>X</span>) <strong>PROGRESSÃO'));
+    expect(merged.html, contains('(<span>X</span>) C (Associado)'));
+    expect(merged.html, contains('(<span>X</span>) 3'));
+    expect(merged.html, isNot(contains('(<span>X</span>) 2')));
+    expect(merged.html, isNot(contains('(<span>X</span>) <strong>PROMOÇÃO')));
+    expect(RegExp(r'\(<span>X</span>\)').allMatches(merged.html).length, 3);
   });
 
   test('não salva modelo incompleto: informa os rótulos faltantes', () {

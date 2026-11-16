@@ -67,7 +67,7 @@ class ProgressaoRequerimentoSeiHtml {
       }
     }
 
-    _marcarTipo(tabelas, p, ausentes);
+    _marcarTipo(fragment, tabelas, p, ausentes);
     _marcarMovimento(tabelas, p, ausentes);
     _preencherPontuacao(tabelas, p, ausentes);
     _preencherDataFinal(fragment, p, ausentes);
@@ -106,11 +106,19 @@ class ProgressaoRequerimentoSeiHtml {
   }
 
   static void _marcarTipo(
+    DocumentFragment fragment,
     List<Element> tabelas,
     ProgressaoDocente p,
     List<String> ausentes,
   ) {
     final alvo = p.promocao ? 'Promocao' : 'Progressao';
+    // Modelo atual do SEI/UFU: parágrafo "(<span>&nbsp; </span>) PROGRESSÃO".
+    final paragrafo = fragment
+        .querySelectorAll('p')
+        .firstWhereOrNull(
+          (e) => _norm(e.text) == _norm(alvo) && e.text.contains('('),
+        );
+    if (paragrafo != null && _marcarCaixa(paragrafo)) return;
     final row = tabelas
         .expand(_rows)
         .firstWhereOrNull(
@@ -124,6 +132,110 @@ class ProgressaoRequerimentoSeiHtml {
     _writeCell(cell, 'X');
   }
 
+  /// Marca a caixa "( )" de [el] com X. No modelo do SEI a caixa é
+  /// `(<span>&nbsp; </span>)`; também aceita `( )` em texto simples.
+  static bool _marcarCaixa(Element el) {
+    for (final span in el.querySelectorAll('span')) {
+      final irmaos = span.parentNode?.nodes;
+      final indice = irmaos?.indexOf(span) ?? -1;
+      final anterior = indice > 0 ? irmaos![indice - 1] : null;
+      if (span.text.replaceAll(' ', ' ').trim().isEmpty &&
+          anterior is Text &&
+          anterior.text.trimRight().endsWith('(')) {
+        span.text = 'X';
+        return true;
+      }
+    }
+    final caixa = RegExp(r'\([\s ]*\)');
+    for (final node in _textNodes(el)) {
+      if (caixa.hasMatch(node.text)) {
+        node.text = node.text.replaceFirst(caixa, '(X)');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static Iterable<Text> _textNodes(Node node) sync* {
+    for (final child in node.nodes) {
+      if (child is Text) {
+        yield child;
+      } else {
+        yield* _textNodes(child);
+      }
+    }
+  }
+
+  /// Grade do modelo atual do SEI/UFU. Progressão: linhas
+  /// `( ) C (Associado) | ( ) 2 | 3` seguidas de `| ( ) 3 | 4` (classe vazia).
+  /// Promoção: `( ) B (Adjunto) | 4 | C (Associado) | 1`.
+  static bool _marcarMovimentoModeloCaixas(
+    List<Element> tabelas,
+    ProgressaoDocente p,
+    PosicaoCarreira origem,
+    List<String> ausentes,
+  ) {
+    bool comCaixa(Element cell) => cell.text.contains('(');
+    final nome = _className(origem.classe);
+    final nivel = switch (origem.nivel) {
+      'I' => '1',
+      'II' => '2',
+      'III' => '3',
+      'IV' => '4',
+      _ => origem.nivel,
+    };
+    if (p.promocao) {
+      final grade = tabelas.firstWhereOrNull(
+        (t) => _rows(t).any((r) {
+          final c = _cells(r);
+          return c.length == 4 && comCaixa(c[0]);
+        }),
+      );
+      if (grade == null) return false;
+      final row = _rows(grade).firstWhereOrNull((r) {
+        final c = _cells(r);
+        return c.length == 4 &&
+            comCaixa(c[0]) &&
+            _norm(c[0].text).contains(nome) &&
+            _norm(c[1].text) == nivel;
+      });
+      if (row == null || !_marcarCaixa(_cells(row)[0])) {
+        ausentes.add('Caixa da promocao ${origem.descricaoClasseNivel}');
+      }
+      return true;
+    }
+    final grade = tabelas.firstWhereOrNull(
+      (t) => _rows(t).any((r) {
+        final c = _cells(r);
+        return c.length == 3 && comCaixa(c[1]);
+      }),
+    );
+    if (grade == null) return false;
+    final linhas = _rows(grade).where((r) => _cells(r).length == 3).toList();
+    final inicio = linhas.indexWhere((r) {
+      final c = _cells(r)[0];
+      return comCaixa(c) && _norm(c.text).contains(nome);
+    });
+    if (inicio < 0 || !_marcarCaixa(_cells(linhas[inicio])[0])) {
+      ausentes.add('Caixa da classe ${origem.classe}');
+      return true;
+    }
+    // O bloco da classe vai até a próxima linha com outra classe.
+    Element? linhaNivel;
+    for (var i = inicio; i < linhas.length; i++) {
+      final c = _cells(linhas[i]);
+      if (i > inicio && _norm(c[0].text).isNotEmpty) break;
+      if (_norm(c[1].text) == nivel) {
+        linhaNivel = linhas[i];
+        break;
+      }
+    }
+    if (linhaNivel == null || !_marcarCaixa(_cells(linhaNivel)[1])) {
+      ausentes.add('Caixa do nível ${origem.nivel}');
+    }
+    return true;
+  }
+
   static void _marcarMovimento(
     List<Element> tabelas,
     ProgressaoDocente p,
@@ -134,6 +246,7 @@ class ProgressaoRequerimentoSeiHtml {
       ausentes.add('Posição de origem');
       return;
     }
+    if (_marcarMovimentoModeloCaixas(tabelas, p, origem, ausentes)) return;
     final grid = _movementGrid(tabelas, p.promocao);
     if (grid == null) {
       ausentes.add(p.promocao ? 'Grade de promoção' : 'Grade de progressão');
@@ -226,7 +339,15 @@ class ProgressaoRequerimentoSeiHtml {
     ProgressaoDocente p,
     List<String> ausentes,
   ) {
-    final table = _tableWithLabel(tabelas, 'Resumo da pontuacao');
+    // No modelo atual o título "Resumo da Pontuação" é um parágrafo fora da
+    // tabela; reconheça a tabela pelas linhas "A 1.1".
+    final table =
+        _tableWithLabel(tabelas, 'Resumo da pontuacao') ??
+        tabelas.firstWhereOrNull(
+          (t) => _rows(t).any(
+            (r) => _norm(_cells(r).firstOrNull?.text ?? '') == 'a11',
+          ),
+        );
     if (table == null) {
       ausentes.add('Tabela Resumo da pontuação');
       return;
@@ -246,9 +367,18 @@ class ProgressaoRequerimentoSeiHtml {
         );
       }
     }
-    final totalRow = _rows(table).firstWhereOrNull(
-      (r) => _norm(r.text).contains('total') && _cells(r).length >= 2,
-    );
+    // O total pode estar numa tabela separada logo abaixo.
+    final totalRow =
+        _rows(table).firstWhereOrNull(
+          (r) => _norm(r.text).contains('total') && _cells(r).length >= 2,
+        ) ??
+        tabelas
+            .expand(_rows)
+            .firstWhereOrNull(
+              (r) =>
+                  _cells(r).length >= 2 &&
+                  _norm(_cells(r).first.text) == 'total',
+            );
     if (totalRow == null) {
       ausentes.add('Pontuação total');
     } else {
@@ -266,7 +396,10 @@ class ProgressaoRequerimentoSeiHtml {
     final dateParagraph = paragrafos.firstWhereOrNull(
       (paragraph) => _norm(paragraph.text).startsWith(alvo),
     );
-    if (dateParagraph == null || p.dataDocumento == null) {
+    // O modelo atual do SEI/UFU não tem linha de data: a assinatura
+    // eletrônica data o documento. Só preencha quando o modelo a tiver.
+    if (dateParagraph == null) return;
+    if (p.dataDocumento == null) {
       ausentes.add('Data por extenso do requerimento');
     } else {
       dateParagraph.text = dataPorExtensoSei(p, p.dataDocumento);

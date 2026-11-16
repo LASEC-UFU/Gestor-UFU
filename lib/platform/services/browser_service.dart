@@ -57,6 +57,21 @@ class BrowserService {
     final portFile = File(p.join(profileDir, 'DevToolsActivePort'));
     final existing = await _tryConnect(portFile);
     if (existing != null) return existing;
+    // O navegador deste perfil ainda pode estar aberto e apenas lento para
+    // responder (muitas abas/janelas de editor). Apagar o arquivo de porta e
+    // abrir de novo o mesmo perfil não libera outra porta e deixa o Gestor
+    // sem conexão; tente de novo com mais tempo antes.
+    if (await _portaAtiva(portFile)) {
+      final retry = await _tryConnect(
+        portFile,
+        timeout: const Duration(seconds: 30),
+      );
+      if (retry != null) return retry;
+      throw StateError(
+        'O navegador da automação está aberto, mas não respondeu. Feche as '
+        'janelas extras (por exemplo, editores do SEI) e tente de novo.',
+      );
+    }
     final exe = await findExecutable();
     if (exe == null) {
       throw StateError('Não encontrei o Microsoft Edge nem o Google Chrome.');
@@ -90,7 +105,35 @@ class BrowserService {
     return pages.isEmpty ? await browser.newPage() : pages.first;
   }
 
-  static Future<Browser?> _tryConnect(File portFile) async {
+  /// O endereço do arquivo de porta ainda responde (navegador vivo)?
+  static Future<bool> _portaAtiva(File portFile) async {
+    try {
+      if (!await portFile.exists()) return false;
+      final port = int.tryParse((await portFile.readAsLines()).first.trim());
+      if (port == null) return false;
+      final client = HttpClient()
+        ..connectionTimeout = const Duration(seconds: 3);
+      try {
+        final request = await client.getUrl(
+          Uri.parse('http://127.0.0.1:$port/json/version'),
+        );
+        final response = await request.close().timeout(
+          const Duration(seconds: 5),
+        );
+        await response.drain<void>();
+        return response.statusCode == 200;
+      } finally {
+        client.close(force: true);
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<Browser?> _tryConnect(
+    File portFile, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     try {
       if (!await portFile.exists()) return null;
       final lines = await portFile.readAsLines();
@@ -103,7 +146,7 @@ class BrowserService {
                 'ws://127.0.0.1:${lines.first.trim()}${lines[1].trim()}',
             defaultViewport: null,
           )
-          .timeout(const Duration(seconds: 5));
+          .timeout(timeout);
     } catch (_) {
       return null;
     }

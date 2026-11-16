@@ -21,7 +21,11 @@ class ProgressaoSeiRequerimento {
     bool Function()? cancelado,
     Duration timeout = const Duration(minutes: 5),
   }) async {
-    _checkReady();
+    // Não use _checkReady() aqui: antes do login o SEI redireciona para o
+    // SIP (sip.ufu.br), e a espera precisa tolerar essa página.
+    if (!sei.isConnected) {
+      throw StateError('Abra o Edge do SEI e entre no portal.');
+    }
     log(
       'SEI: aguardando login manual; depois confirme a unidade antes de criar.',
     );
@@ -33,7 +37,10 @@ class ProgressaoSeiRequerimento {
       if (!sei.isConnected) {
         throw StateError('A conexão com o Edge foi encerrada durante o login.');
       }
-      if (await _anyFrame<bool>(_loggedInScript) == true) return;
+      if (await sei.adotarAbaSei() &&
+          await _anyFrame<bool>(_loggedInScript) == true) {
+        return;
+      }
       await Future<void>.delayed(const Duration(seconds: 1));
     }
     throw TimeoutException('Login no SEI não foi concluído.');
@@ -66,6 +73,11 @@ class ProgressaoSeiRequerimento {
       if (!clicked) throw StateError('Não encontrei Iniciar Processo no SEI.');
       log('SEI: iniciando processo $tipo.');
       final typeSelected = await _wait<bool>(() async {
+        // O clique no tipo navega para o formulário e pode derrubar o retorno
+        // do script; o formulário aberto confirma a escolha.
+        if (await _anyFrame<bool>(_isProcessMetadataScript) == true) {
+          return true;
+        }
         var ok = await _anyFrame<bool>(_chooseProcessTypeScript, args: [tipo]);
         if (ok == true) return true;
         await _anyFrame<bool>(_showAllProcessTypesScript);
@@ -161,6 +173,11 @@ class ProgressaoSeiRequerimento {
     _checkReady();
     const nome = 'Requerimento de Progressão / Promoção Docente';
     if (await sei.existeDocumento([nome])) {
+      final aberto = await _editorDoRequerimentoAberto(nome);
+      if (aberto != null) {
+        log('SEI: requerimento existente com editor aberto; preenchendo.');
+        return _preencherEditor(aberto, processo, log: log, nome: nome);
+      }
       log('SEI: requerimento já existente; mantido sem duplicar.');
       return false;
     }
@@ -225,6 +242,28 @@ class ProgressaoSeiRequerimento {
       'o editor do requerimento',
     );
     if (editor == null) throw StateError('O editor do requerimento não abriu.');
+    return _preencherEditor(editor, processo, log: log, nome: nome);
+  }
+
+  /// Editor aberto de um requerimento já gerado (ex.: execução anterior
+  /// interrompida depois de criar o documento e antes de salvar o conteúdo).
+  Future<(Page, String)?> _editorDoRequerimentoAberto(String nome) async {
+    final editor = await _findEditor();
+    if (editor == null) return null;
+    try {
+      final titulo = await editor.$1.title ?? '';
+      return titulo.contains(nome) ? editor : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _preencherEditor(
+    (Page, String) editor,
+    ProgressaoDocente processo, {
+    required SeiLog log,
+    required String nome,
+  }) async {
     final page = editor.$1;
     final root = editor.$2;
     final model = await page.evaluate<String?>(
@@ -291,23 +330,10 @@ class ProgressaoSeiRequerimento {
     return null;
   }
 
-  Future<T?> _anyFrame<T>(
-    String script, {
-    List<Object?> args = const [],
-  }) async {
-    final browser = sei.browser;
-    if (browser == null) return null;
-    for (final page in await browser.pages) {
-      if (page.isClosed) continue;
-      for (final frame in page.frames) {
-        try {
-          final value = await frame.evaluate<T?>(script, args: args);
-          if (value != null && value != false) return value;
-        } catch (_) {}
-      }
-    }
-    return null;
-  }
+  // Ignora resultados vazios (ex.: número do processo só existe em ifrArvore)
+  // e alcança iframes cujo contexto o puppeteer perdeu.
+  Future<T?> _anyFrame<T>(String script, {List<Object?> args = const []}) =>
+      seiEvaluateAnyFrame<T>(sei.browser, script, args: args);
 
   Future<T> _wait<T>(Future<T?> Function() action, String description) async {
     final deadline = DateTime.now().add(const Duration(seconds: 35));
@@ -335,11 +361,17 @@ const _loggedInScript = r'''() => {
 const _selectInterestedScript = r'''(name) => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
  const target=norm(name);
- const selected=[...document.querySelectorAll('select[id*="nteress"],select[name*="nteress"]')].some(s=>[...s.options].some(o=>o.selected&&norm(o.textContent).includes(target)));
+ // A lista de interessados do SEI não marca as opções como selecionadas.
+ const selected=[...document.querySelectorAll('select[id*="nteress"],select[name*="nteress"]')].some(s=>[...s.options].some(o=>norm(o.textContent).includes(target)));
  if(selected)return true;
  const candidates=[...document.querySelectorAll('.ui-autocomplete li,.ac_results li,[role=listbox] [role=option],.infraAutoCompletar li,[id*="Interessado"] li')];
  const item=candidates.find(e=>(e.offsetWidth||e.offsetHeight||e.getClientRects().length)&&norm(e.textContent).includes(target));
- if(!item)return false;(item.querySelector('a,button')||item).click();return true;
+ if(!item)return false;
+ // infraAjaxAutoCompletar escolhe o item no mousedown do <li>; o <a> só retorna false.
+ item.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+ const after=[...document.querySelectorAll('select[id*="nteress"],select[name*="nteress"]')].some(s=>[...s.options].some(o=>norm(o.textContent).includes(target)));
+ if(!after)(item.querySelector('a,button')||item).click();
+ return false;
 }''';
 const _showAllProcessTypesScript = r'''() => {
  try{if(typeof window.exibirTiposProcedimento==='function'){window.exibirTiposProcedimento('T');return true;}}catch(e){}
@@ -355,10 +387,17 @@ const _chooseProcessTypeScript = r'''(wanted) => {
 }''';
 const _isProcessMetadataScript = r'''() => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
- const body=norm(document.body?.innerText);
+ // A lista "Escolha o Tipo do Processo" contém tipos com a palavra
+ // "Especificação"; exija o campo do formulário, não só o texto da página.
+ // Só a ação atual importa (o formulário traz acao_origem=procedimento_escolher_tipo).
+ if(/[?&]acao=procedimento_escolher_tipo(&|$)/.test(location.href||''))return false;
  const known=document.getElementById('txtEspecificacao')||document.querySelector('[name="txtEspecificacao"]');
- const hasSpecification=body.includes('especificacao');
- return !!known||(body.includes('iniciar processo')&&body.includes('tipo do processo')&&hasSpecification);
+ if(known)return true;
+ // SEI da UFU: formulário procedimento_gerar usa selTipoProcedimento + txtDescricao.
+ if(document.getElementById('selTipoProcedimento')&&document.getElementById('txtDescricao'))return true;
+ const visible=e=>!!(e.offsetWidth||e.offsetHeight||e.getClientRects().length);
+ const label=[...document.querySelectorAll('label')].find(l=>visible(l)&&norm(l.textContent).startsWith('especificacao'));
+ return !!label&&norm(document.body?.innerText).includes('tipo do processo');
 }''';
 const _fillProcessMetadataScript = r'''async (d) => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
@@ -373,19 +412,26 @@ const _fillProcessMetadataScript = r'''async (d) => {
   }
   return null;
  };
- const spec=field('txtEspecificacao')||field('txtDescricao')||byLabel('especificacao');if(!spec)return {error:'Campo Especificação não localizado.'};
+ const spec=field('txtEspecificacao')||field('txtDescricao')||byLabel('especificacao');if(!spec)return null; // formulário está em outro frame
  const fill=(el,v)=>{if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));};
  fill(spec,d.specification);
- const interested=field('txtInteressado')||field('txtInteressados')||document.querySelector('input[name*="Interessado"],input[id*="Interessado"]')||byLabel('interessado');
+ const interested=field('txtInteressadoProcedimento')||field('txtInteressado')||field('txtInteressados')||document.querySelector('input[name*="Interessado"],input[id*="Interessado"]')||byLabel('interessado');
  if(!interested)return {error:'Campo Interessado não localizado.'};
  interested.focus();fill(interested,d.interested);
+ // O autocompletar do SEI (infraAjaxAutoCompletar) só pesquisa no keyup.
+ const keyup=new KeyboardEvent('keyup',{key:'s',bubbles:true});
+ Object.defineProperty(keyup,'keyCode',{get:()=>83});Object.defineProperty(keyup,'which',{get:()=>83});
+ interested.dispatchEvent(keyup);
  const labels=[...document.querySelectorAll('label')];
- const r=[...document.querySelectorAll('input[type=radio]')].find(x=>{const l=x.labels?.[0]||labels.find(y=>y.htmlFor===x.id);return norm(`${l?.textContent||''} ${x.parentElement?.textContent||''}`).includes('restrito');})||field('rdoNivelAcesso1');
+ const r=field('optRestrito')||[...document.querySelectorAll('input[type=radio]')].find(x=>{const l=x.labels?.[0]||labels.find(y=>y.htmlFor===x.id);return norm(`${l?.textContent||''} ${x.parentElement?.textContent||''}`).includes('restrito');})||field('rdoNivelAcesso1');
  if(!r)return {error:'Opção de acesso Restrito não localizada.'};if(!r.checked)r.click();
  let hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');
  for(let i=0;!hypothesis&&i<10;i++){await new Promise(resolve=>setTimeout(resolve,200));hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');}
  if(!hypothesis)return {error:'Campo Hipótese Legal não apareceu após selecionar Restrito.'};
- const option=[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(d.hypothesis)));
+ // O SEI carrega as opções da hipótese depois de marcar Restrito.
+ const findOption=()=>[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(d.hypothesis)));
+ let option=findOption();
+ for(let i=0;!option&&i<40;i++){await new Promise(resolve=>setTimeout(resolve,250));option=findOption();}
  if(!option)return {error:'Hipótese Informação Pessoal (Art. 31) não disponível.'};
  hypothesis.value=option.value;hypothesis.dispatchEvent(new Event('change',{bubbles:true}));
  if(spec.value!==d.specification||!interested.value||!r.checked||hypothesis.value!==option.value)return {error:'O formulário não manteve os dados de autuação.'};
@@ -420,13 +466,14 @@ const _filterDocumentTypeScript =
     r'''(value) => {const n=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();if(!n(document.body?.innerText).includes('escolha o tipo do documento'))return false;const i=[...document.querySelectorAll('input[type=text],input:not([type])')].find(x=>x.offsetWidth||x.offsetHeight);if(!i)return false;const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(i,value);i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));return true;}''';
 const _fillRequestMetadataScript = r'''(d) => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
- const desc=document.getElementById('txtDescricao')||document.querySelector('[name="txtDescricao"]');if(!desc)return {error:'Campo Descrição não localizado.'};
+ const desc=document.getElementById('txtDescricao')||document.querySelector('[name="txtDescricao"]');if(!desc)return null; // formulário está em outro frame
  desc.value=d.description;desc.dispatchEvent(new Event('input',{bubbles:true}));desc.dispatchEvent(new Event('change',{bubbles:true}));
  let access=document.querySelector('#rdoNivelAcesso0,input[name="rdoNivelAcesso"][value="0"],#optPublico');
  if(!access){const label=[...document.querySelectorAll('label')].find(x=>norm(x.textContent)==='publico');if(label)access=(label.htmlFor&&document.getElementById(label.htmlFor))||label.querySelector('input[type=radio]');}
  if(!access)return {error:'Opção de acesso Público do requerimento não localizada.'};if(!access.checked)access.click();
  const input=document.getElementById('txtInteressado')||document.getElementById('txtInteressados')||document.querySelector('input[name*="Interessado"]');
  if(!input)return {error:'Campo Interessado do requerimento não localizado.'};input.focus();input.value=d.interested;input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));
+ const keyup=new KeyboardEvent('keyup',{key:'s',bubbles:true});Object.defineProperty(keyup,'keyCode',{get:()=>83});Object.defineProperty(keyup,'which',{get:()=>83});input.dispatchEvent(keyup);
  const options=[...document.querySelectorAll('.ui-autocomplete li,.ac_results li,[role=listbox] [role=option],.infraAutoCompletar li')].filter(x=>x.offsetWidth||x.offsetHeight);
  const suggestion=options.find(x=>norm(x.textContent).includes(norm(d.interested)));
  if(suggestion)(suggestion.querySelector('a')||suggestion).click();

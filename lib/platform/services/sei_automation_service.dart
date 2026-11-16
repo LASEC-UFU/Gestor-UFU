@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:path/path.dart' as p;
 import 'package:puppeteer/puppeteer.dart';
 
@@ -40,6 +41,69 @@ class SeiLoteResultado {
   final List<String> erros;
 }
 
+bool _seiHasValue(Object? value) =>
+    value != null &&
+    value != false &&
+    value != '' &&
+    !(value is List && value.isEmpty);
+
+/// Executa [script] em todas as abas e frames do navegador e devolve o
+/// primeiro resultado com valor (não nulo, não `false`, não vazio).
+///
+/// O puppeteer-dart perde o contexto de execução dos iframes do SEI que
+/// navegam depois de anexados (`ifrConteudoVisualizacao`, `ifrVisualizacao`):
+/// `frame.evaluate` passa a lançar `ExecutionContextDestroyedException` para
+/// sempre. Por isso, quando nenhum frame responde, o script também é
+/// executado a partir da página principal dentro de cada iframe de mesma
+/// origem, com o `eval` da própria janela do iframe (assim `document` e
+/// `location` apontam para o iframe).
+Future<T?> seiEvaluateAnyFrame<T>(
+  Browser? browser,
+  String script, {
+  List<Object?> args = const [],
+}) async {
+  if (browser == null || !browser.isConnected) return null;
+  final pages = [
+    for (final page in await browser.pages)
+      if (!page.isClosed) page,
+  ];
+  for (final page in pages) {
+    for (final frame in page.frames) {
+      try {
+        final result = await frame
+            .evaluate<T?>(script, args: args)
+            .timeout(const Duration(seconds: 10));
+        if (_seiHasValue(result)) return result;
+      } catch (_) {
+        // A página/frame pode navegar enquanto o SEI atualiza a interface.
+      }
+    }
+  }
+  for (final page in pages) {
+    try {
+      final result = await page
+          .evaluate<T?>(_nestedFramesEvalScript, args: [script, args])
+          .timeout(const Duration(seconds: 10));
+      if (_seiHasValue(result)) return result;
+    } catch (_) {}
+  }
+  return null;
+}
+
+const _nestedFramesEvalScript = r'''async (src, args) => {
+ const wins=[];
+ const walk=w=>{for(const f of w.document.querySelectorAll('iframe,frame')){try{const cw=f.contentWindow;if(cw&&cw.document){wins.push(cw);walk(cw);}}catch(e){}}};
+ walk(window);
+ for(const w of wins){
+  try{
+   const fn=w.eval('('+src+')');
+   const v=await fn(...args);
+   if(v!==null&&v!==undefined&&v!==false&&v!==''&&!(Array.isArray(v)&&!v.length))return v;
+  }catch(e){}
+ }
+ return null;
+}''';
+
 /// Extensões aceitas no envio de documento externo.
 const extensoesDocumentoExterno = {'.pdf', '.jpg', '.jpeg', '.png'};
 
@@ -68,10 +132,25 @@ class SeiAutomationService {
     _browser = await BrowserService.open(
       profileDir: BrowserService.localProfile('EdgePlanoTrabalhoProfile'),
     );
-    _page = await BrowserService.firstPage(_browser!);
+    _page = await _paginaPrincipal(_browser!);
     await _page!.goto(url, wait: Until.domContentLoaded);
     await _page!.bringToFront();
     return _page!.url ?? url;
+  }
+
+  /// Ao reconectar a um Edge já aberto, use a aba principal do SEI e nunca
+  /// uma janela de editor (navegá-la descartaria o texto não salvo).
+  static Future<Page> _paginaPrincipal(Browser browser) async {
+    final pages = [
+      for (final page in await browser.pages)
+        if (!page.isClosed) page,
+    ];
+    bool editor(Page page) => (page.url ?? '').contains('acao=editor_');
+    return pages.firstWhereOrNull(
+          (page) => _isSeiHost(page.url) && !editor(page),
+        ) ??
+        pages.firstWhereOrNull((page) => !editor(page)) ??
+        await BrowserService.firstPage(browser);
   }
 
   Future<void> focus() async {
@@ -449,28 +528,17 @@ class SeiAutomationService {
   }
 
   Future<List<Map<String, dynamic>>> _documentNodes() async {
-    return await _anyFrame<List<Map<String, dynamic>>>(_treeNodesScript) ?? [];
+    // O puppeteer devolve List<dynamic>; pedir List<Map<...>> direto falha no
+    // cast (engolido) e a árvore parecia sempre vazia, duplicando documentos.
+    final nodes = await _anyFrame<List<dynamic>>(_treeNodesScript) ?? const [];
+    return [
+      for (final node in nodes.whereType<Map>())
+        node.map((key, value) => MapEntry('$key', value)),
+    ];
   }
 
-  Future<T?> _anyFrame<T>(
-    String script, {
-    List<Object?> args = const [],
-  }) async {
-    final browser = _browser;
-    if (browser == null) return null;
-    for (final page in await browser.pages) {
-      if (page.isClosed) continue;
-      for (final frame in page.frames) {
-        try {
-          final result = await frame.evaluate<T?>(script, args: args);
-          if (result != null && result != false) return result;
-        } catch (_) {
-          // A página/frame pode navegar enquanto o SEI atualiza a interface.
-        }
-      }
-    }
-    return null;
-  }
+  Future<T?> _anyFrame<T>(String script, {List<Object?> args = const []}) =>
+      seiEvaluateAnyFrame<T>(_browser, script, args: args);
 
   Future<void> _waitUntil(
     Future<bool?> Function() check,
@@ -522,6 +590,27 @@ class SeiAutomationService {
   /// Endereço da aba do SEI controlada pelo app.
   String? get currentUrl => isConnected ? _page!.url : null;
 
+  static bool _isSeiHost(String? url) =>
+      (Uri.tryParse(url ?? '')?.host.toLowerCase() ?? '').contains(
+        'sei.ufu.br',
+      );
+
+  /// Se a aba controlada não estiver no SEI (ex.: ainda no login do SIP ou o
+  /// SEI abriu em outra aba), passa a controlar a aba que estiver no SEI.
+  /// Retorna `true` quando a aba controlada está no SEI.
+  Future<bool> adotarAbaSei() async {
+    if (!isConnected) return false;
+    if (_isSeiHost(_page!.url)) return true;
+    for (final page in await _browser!.pages) {
+      if (page.isClosed) continue;
+      if (_isSeiHost(page.url)) {
+        _page = page;
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Documentos da árvore do processo aberto (abre todas as pastas antes).
   /// Cada item: `text` (nome na árvore) e `href` (endereço absoluto).
   Future<List<({String text, String href})>> treeDocuments() async {
@@ -564,7 +653,7 @@ const _chooseExternalTypeScript = r'''() => {
 const _filterExternalTypeScript = r'''() => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();if(!norm(document.body?.innerText).includes('escolha o tipo do documento'))return false;const input=[...document.querySelectorAll('input[type=text],input:not([type])')].find(e=>e.offsetWidth||e.offsetHeight||e.getClientRects().length);if(!input)return false;const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'Externo');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'o'}));input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }''';
-const _fillMetadataScript = r'''(dados) => {
+const _fillMetadataScript = r'''async (dados) => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
  const field=id=>document.getElementById(id)||document.querySelector(`[name="${id}"]`);
  const serie=field('selSerie'),data=field('txtDataElaboracao'),file=field('filArquivo')||document.querySelector('input[type=file]');
@@ -581,14 +670,17 @@ const _fillMetadataScript = r'''(dados) => {
  if(!nato){const l=[...document.querySelectorAll('label')].find(x=>norm(x.textContent).includes('nato-digital'));if(l)nato=(l.htmlFor&&document.getElementById(l.htmlFor))||l.querySelector('input[type=radio]');}
  if(!nato)return {error:'A opção Nato-digital não foi encontrada.'};if(!nato.checked)nato.click();
  const radios=[...document.querySelectorAll('input[name="rdoNivelAcesso"]')];
- let access=null;
- for(const radio of radios){const label=radio.labels?.[0]||document.querySelector(`label[for="${radio.id}"]`);const text=norm(`${label?.textContent||''} ${radio.parentElement?.textContent||''}`);if(dados.access==='restrito'?text.includes('restrito'):text.includes('publico')){access=radio;break;}}
+ // SEI/UFU: optRestrito/optPublico (rótulos vazios ao lado dos rádios confundem a busca por texto).
+ let access=field(dados.access==='restrito'?'optRestrito':'optPublico');
+ for(const radio of access?[]:radios){const label=radio.labels?.[0]||document.querySelector(`label[for="${radio.id}"]`);const text=norm(`${label?.textContent||''} ${radio.parentElement?.textContent||''}`);if(dados.access==='restrito'?text.includes('restrito'):text.includes('publico')){access=radio;break;}}
  if(!access){const id=dados.access==='restrito'?'rdoNivelAcesso1':'rdoNivelAcesso0';access=field(id)||radios.find(r=>r.value===(dados.access==='restrito'?'1':'0'));}
  if(!access)return {error:`Opção de acesso ${dados.access} não encontrada.`};if(!access.checked)access.click();
  if(dados.access==='restrito'){
    const hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');
    if(!hypothesis)return {error:'O campo Hipótese Legal não foi encontrado para acesso restrito.'};
-   const h=[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(dados.hipoteseLegal)));
+   // As opções da hipótese são carregadas pelo SEI depois de marcar Restrito.
+   const findH=()=>[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(dados.hipoteseLegal)));
+   let h=findH();for(let i=0;!h&&i<40;i++){await new Promise(r=>setTimeout(r,250));h=findH();}
    if(!h)return {error:`Hipótese legal "${dados.hipoteseLegal}" não encontrada.`};
    hypothesis.value=h.value;hypothesis.dispatchEvent(new Event('change',{bubbles:true}));
  }
