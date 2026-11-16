@@ -14,6 +14,7 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_history.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_skills.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_templates.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_workflows.dart';
 import 'package:gestor_ufu/data/services/shared_preferences_sync_service.dart';
 
 /// Executa, na janela principal, as ferramentas pedidas pela janela do
@@ -147,6 +148,51 @@ class AgentDataHost {
   }
 
   Future<Object?> _dispatch(String name, Map<String, dynamic> input) async {
+    if (name == 'workflow_start') {
+      return AgentWorkflows.start(
+        module: '${input['module'] ?? ''}',
+        title: '${input['title'] ?? ''}',
+        goal: '${input['goal'] ?? ''}',
+        steps: [
+          for (final step in input['steps'] as List? ?? const []) '$step',
+        ],
+      );
+    }
+    if (name == 'workflow_checkpoint') {
+      return AgentWorkflows.checkpoint(
+        id: '${input['workflow_id'] ?? ''}',
+        step: '${input['step'] ?? ''}',
+        status: '${input['status'] ?? ''}',
+        detail: '${input['detail'] ?? ''}',
+        evidence: '${input['evidence'] ?? ''}',
+        error: '${input['error'] ?? ''}',
+      );
+    }
+    if (name == 'workflow_request_user') {
+      return AgentWorkflows.requestUser(
+        id: '${input['workflow_id'] ?? ''}',
+        question: '${input['question'] ?? ''}',
+        step: '${input['step'] ?? 'Ação do usuário'}',
+        detail: '${input['detail'] ?? ''}',
+      );
+    }
+    if (name == 'workflow_get') {
+      return AgentWorkflows.get('${input['workflow_id'] ?? ''}');
+    }
+    if (name == 'workflow_list') {
+      return {
+        'workflows': await AgentWorkflows.list(
+          limit: (input['limit'] as num?)?.toInt() ?? 20,
+        ),
+      };
+    }
+    if (name == 'workflow_finish') {
+      return AgentWorkflows.finish(
+        id: '${input['workflow_id'] ?? ''}',
+        outcome: '${input['outcome'] ?? ''}',
+        summary: '${input['summary'] ?? ''}',
+      );
+    }
     // Navegador do agente: roda aqui, na janela principal, para continuar
     // aberto em segundo plano mesmo com a janela do agente fechada.
     // Comandos dos módulos: as mesmas ações dos botões das telas.

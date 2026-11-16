@@ -47,12 +47,26 @@ altere `pastaComprovantes`/`logoPath` (caminhos locais).
 ## Catálogo do Anexo 1 (item: descrição — regra de pontuação)
 ${_anexo1()}
 
+## Diagnóstico assistido da automação do SEI
+- Para investigar o fluxo de criação do processo, inicie um fluxo retomável com
+  `workflow_start` (módulo `progressao`) e registre cada passo com
+  `workflow_checkpoint`. Inspecione a tela antes e depois das ações usando as
+  ferramentas de navegador/computador; registre os rótulos, resultado e erro.
+- Se depender de login, seleção de unidade ou outra ação manual, registre com
+  `workflow_request_user`, pergunte na conversa e retome somente após a resposta.
+- Não repita a mesma abordagem mais de duas vezes. Se não resolver, conclua com
+  `workflow_finish` usando `handoff` e entregue o relatório Markdown gerado para
+  correção do código.
+- Na interface, ao criar processo novo, aguarde o login e a unidade no SEI; só
+  prossiga depois do clique do usuário em **Criar processo e montar dossiê**.
+
 ## Comandos (run_command)
 progressao.listar, progressao.itensAnexo1 (busca no catálogo), progressao.criar,
 progressao.lancar, progressao.removerLancamento, progressao.anexarComprovante,
 progressao.gerarPdf, progressao.duplicar, progressao.excluir (pede
-confirmação), progressao.abrirSei e progressao.enviarComprovantesSei (pede
-confirmação). Prefira os comandos às gravações diretas no banco.
+confirmação), progressao.abrirSei, progressao.enviarComprovantesSei e
+progressao.montarProcessoSei (pedem confirmação). Prefira os comandos às
+gravações diretas no banco.
 ''',
 );
 

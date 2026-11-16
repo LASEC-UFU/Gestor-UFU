@@ -362,7 +362,6 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
         ..._processoId,
         'criarNovo': {'type': 'boolean', 'default': false},
         'numeroProcesso': {'type': 'string'},
-        'tipoProcesso': {'type': 'string'},
         'especificacao': {'type': 'string'},
         'interessado': {'type': 'string'},
         'acessoComprovantes': {
@@ -387,7 +386,6 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
         ProgressaoDossieSeiOpcoes(
           criarNovo: input.flag('criarNovo'),
           numeroProcesso: input.optionalString('numeroProcesso') ?? '',
-          tipoProcesso: input.optionalString('tipoProcesso') ?? '',
           especificacao: input.optionalString('especificacao') ?? '',
           interessado: input.optionalString('interessado') ?? '',
           acessoComprovantes: acesso,

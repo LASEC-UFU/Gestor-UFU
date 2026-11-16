@@ -28,7 +28,6 @@ class ProgressaoDossieSeiOpcoes {
   const ProgressaoDossieSeiOpcoes({
     this.criarNovo = false,
     this.numeroProcesso = '',
-    this.tipoProcesso = '',
     this.especificacao = '',
     this.interessado = '',
     this.acessoComprovantes = AcessoComprovantesSei.restrito,
@@ -41,7 +40,6 @@ class ProgressaoDossieSeiOpcoes {
 
   final bool criarNovo;
   final String numeroProcesso;
-  final String tipoProcesso;
   final String especificacao;
   final String interessado;
   final AcessoComprovantesSei acessoComprovantes;
@@ -80,6 +78,10 @@ class ProgressaoEnvioSei extends ChangeNotifier {
   String url = 'https://sei.ufu.br';
   bool enviando = false;
   bool cancelar = false;
+  bool prontoParaCriarProcesso = false;
+  String unidadeSeiSelecionada = '';
+  String? processoSeiPendenteId;
+  ProgressaoDossieSeiOpcoes? opcoesSeiPendentes;
 
   void log(String mensagem) {
     final agora = DateTime.now();
@@ -365,6 +367,91 @@ class ProgressaoService extends ChangeNotifier {
     return aberto;
   }
 
+  /// Abre o SEI e aguarda o login e a seleção manual da unidade antes de
+  /// oferecer a criação do processo. Nenhum processo é criado nesta etapa.
+  Future<void> prepararMontagemProcessoSei(
+    String id,
+    ProgressaoDossieSeiOpcoes opcoes,
+  ) async {
+    if (!opcoes.criarNovo) {
+      throw ArgumentError('A preparação manual só se aplica a processo novo.');
+    }
+    await _ensure();
+    _require(id);
+    envio
+      ..prontoParaCriarProcesso = false
+      ..processoSeiPendenteId = null
+      ..opcoesSeiPendentes = null
+      ..cancelar = false
+      ..enviando = true
+      ..atualizar();
+    try {
+      if (!envio.automation.isConnected) {
+        await abrirSei('https://sei.ufu.br');
+      } else {
+        await envio.automation.focus();
+      }
+      final seiFlow = ProgressaoSeiRequerimento(envio.automation);
+      envio.log(
+        'Entre no SEI e selecione a unidade onde o processo será criado.',
+      );
+      await seiFlow.aguardarLogin(
+        log: envio.log,
+        cancelado: () => envio.cancelar,
+      );
+      final deadline = DateTime.now().add(const Duration(minutes: 5));
+      var unidade = '';
+      while (DateTime.now().isBefore(deadline)) {
+        if (envio.cancelar) throw StateError('Preparação interrompida.');
+        unidade = (await seiFlow.unidadeAtual()).trim();
+        if (unidade.isNotEmpty) break;
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+      if (unidade.isEmpty) {
+        throw TimeoutException(
+          'Não identifiquei a unidade do SEI. Selecione a unidade e tente novamente.',
+        );
+      }
+      envio
+        ..processoSeiPendenteId = id
+        ..opcoesSeiPendentes = opcoes
+        ..unidadeSeiSelecionada = unidade
+        ..prontoParaCriarProcesso = true;
+      envio.log(
+        'Unidade "$unidade" selecionada. Use o botão para criar o processo.',
+      );
+    } catch (error) {
+      envio.log('Não foi possível preparar a criação do processo: $error');
+      rethrow;
+    } finally {
+      envio
+        ..enviando = false
+        ..atualizar();
+    }
+  }
+
+  Future<ProgressaoDossieSeiResultado> continuarMontagemProcessoSei() async {
+    final id = envio.processoSeiPendenteId;
+    final opcoes = envio.opcoesSeiPendentes;
+    if (!envio.prontoParaCriarProcesso || id == null || opcoes == null) {
+      throw StateError('Faça login no SEI e selecione a unidade primeiro.');
+    }
+    envio
+      ..prontoParaCriarProcesso = false
+      ..enviando = true
+      ..atualizar();
+    try {
+      return await montarProcessoSei(id, opcoes);
+    } finally {
+      envio
+        ..processoSeiPendenteId = null
+        ..opcoesSeiPendentes = null
+        ..prontoParaCriarProcesso = false
+        ..enviando = false
+        ..atualizar();
+    }
+  }
+
   /// Comprovantes do processo que ainda não estão na pasta.
   List<String> comprovantesAusentes(ProgressaoDocente p) => [
     for (final l in lancamentosComComprovante(p))
@@ -381,33 +468,40 @@ class ProgressaoService extends ChangeNotifier {
     final pendencias = <String>[
       if (p.docente.trim().isEmpty) 'Informe o nome do docente.',
       if (p.siape.trim().isEmpty) 'Informe o SIAPE.',
-      if (p.lotacao.trim().isEmpty) 'Informe a lotacao.',
-      if (opcoes.incluirRequerimento && p.dataAdmissao == null)
-        'Informe a data de admissao.',
-      if (opcoes.incluirRequerimento && p.dataDocumento == null)
+      if (p.lotacao.trim().isEmpty) 'Informe a lota\u00e7\u00e3o.',
+      // Em processo existente, o requerimento pode j\u00e1 estar na \u00e1rvore do SEI.
+      // A automa\u00e7\u00e3o verifica isso antes de criar outro; n\u00e3o bloqueie a
+      // inclus\u00e3o dos demais documentos por dados necess\u00e1rios apenas a um novo requerimento.
+      if (opcoes.criarNovo &&
+          opcoes.incluirRequerimento &&
+          p.dataAdmissao == null)
+        'Informe a data de admiss\u00e3o.',
+      if (opcoes.criarNovo &&
+          opcoes.incluirRequerimento &&
+          p.dataDocumento == null)
         'Informe a data do requerimento.',
       if (p.intersticioInicio == null || p.intersticioFim == null)
-        'Informe inicio e fim do intersticio.',
+        'Informe in\u00edcio e fim do interst\u00edcio.',
       if (opcoes.incluirRelatorio &&
           (p.relatorioInicio == null || p.relatorioFim == null))
-        'Informe inicio e fim do relatorio.',
+        'Informe in\u00edcio e fim do relat\u00f3rio.',
       if (opcoes.incluirComprovantes && p.lancamentos.isEmpty)
-        'Nao ha lancamentos para anexar.',
+        'N\u00e3o h\u00e1 lan\u00e7amentos para anexar.',
       if (opcoes.incluirComprovantes &&
           p.lancamentos.any((l) => l.comprovante.trim().isEmpty))
-        'Todos os lancamentos precisam ter comprovante vinculado.',
+        'Todos os lan\u00e7amentos precisam ter comprovante vinculado.',
       if (opcoes.incluirComprovantes && comprovantesAusentes(p).isNotEmpty)
-        'Ha comprovantes ausentes: ${comprovantesAusentes(p).join(', ')}.',
+        'H\u00e1 comprovantes ausentes: ${comprovantesAusentes(p).join(', ')}.',
       if (opcoes.incluirTitulacao && !comprovantes.titulacaoExiste(p))
-        'Selecione o comprovante da ultima titulacao.',
+        'Selecione o comprovante da \u00faltima titula\u00e7\u00e3o.',
       if (opcoes.incluirRelatorio && p.pastaComprovantes.trim().isEmpty)
-        'Escolha a pasta dos comprovantes para gerar o relatorio.',
+        'Escolha a pasta dos comprovantes para gerar o relat\u00f3rio.',
       if (opcoes.incluirRequerimento &&
           p.relatorioInicio != null &&
           p.intersticioInicio != null &&
           p.relatorioInicio!.isBefore(p.intersticioInicio!) &&
           p.justificativaIntersticio.trim().isEmpty)
-        'Informe a justificativa quando o relatorio comeca antes do intersticio.',
+        'Informe a justificativa quando o relat\u00f3rio come\u00e7a antes do interst\u00edcio.',
     ];
     if (pendencias.isNotEmpty) {
       throw StateError('Pré-checagem: ${pendencias.join(' ')}');
@@ -442,9 +536,9 @@ class ProgressaoService extends ChangeNotifier {
       await File(relatorioPath).writeAsBytes(bytes, flush: true);
     }
 
-    final tipo = opcoes.tipoProcesso.trim().isEmpty
+    final tipo = opcoes.criarNovo
         ? tipoProcessoSugeridoSei(p)
-        : opcoes.tipoProcesso.trim();
+        : p.tipoProcessoSei.trim();
     final especificacao = opcoes.especificacao.trim().isEmpty
         ? especificacaoProcessoSei(p)
         : opcoes.especificacao.trim();

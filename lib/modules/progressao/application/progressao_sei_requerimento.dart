@@ -18,12 +18,18 @@ class ProgressaoSeiRequerimento {
   /// Aguarda login humano; não lê nem preenche credenciais.
   Future<void> aguardarLogin({
     required SeiLog log,
+    bool Function()? cancelado,
     Duration timeout = const Duration(minutes: 5),
   }) async {
     _checkReady();
-    log('SEI: aguardando login manual e a opção Iniciar Processo.');
+    log(
+      'SEI: aguardando login manual; depois confirme a unidade antes de criar.',
+    );
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
+      if (cancelado?.call() == true) {
+        throw StateError('A espera pelo login no SEI foi interrompida.');
+      }
       if (!sei.isConnected) {
         throw StateError('A conexão com o Edge foi encerrada durante o login.');
       }
@@ -43,6 +49,11 @@ class ProgressaoSeiRequerimento {
   }) async {
     _checkReady();
     final unidade = await unidadeAtual();
+    if (unidade.trim().isEmpty) {
+      throw StateError(
+        'Selecione uma unidade do SEI antes de criar o processo.',
+      );
+    }
     log(
       'SEI: unidade atual: ${unidade.isEmpty ? "não identificada" : unidade}.',
     );
@@ -342,22 +353,38 @@ const _chooseProcessTypeScript = r'''(wanted) => {
  if(!candidates.length)return false;let el=candidates[0];for(let i=0;i<4&&el;i++,el=el.parentElement){if(el.matches('a,button,[onclick]')){el.click();return true;}}
  candidates[0].click();return true;
 }''';
-const _isProcessMetadataScript =
-    r'''() => !!(document.getElementById('txtEspecificacao')||document.querySelector('[name="txtEspecificacao"]'))''';
-const _fillProcessMetadataScript = r'''(d) => {
+const _isProcessMetadataScript = r'''() => {
+ const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+ const body=norm(document.body?.innerText);
+ const known=document.getElementById('txtEspecificacao')||document.querySelector('[name="txtEspecificacao"]');
+ const hasSpecification=body.includes('especificacao');
+ return !!known||(body.includes('iniciar processo')&&body.includes('tipo do processo')&&hasSpecification);
+}''';
+const _fillProcessMetadataScript = r'''async (d) => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
  const field=id=>document.getElementById(id)||document.querySelector(`[name="${id}"]`);
- const spec=field('txtEspecificacao');if(!spec)return {error:'Campo Especificação não localizado.'};
+ const byLabel=term=>{
+  const label=[...document.querySelectorAll('label')].find(x=>norm(x.innerText||x.textContent).includes(term));
+  if(!label)return null;
+  if(label.htmlFor){const target=document.getElementById(label.htmlFor);if(target)return target;}
+  for(let p=label.parentElement,depth=0;p&&p!==document.body&&depth<4;p=p.parentElement,depth++){
+   const controls=[...p.querySelectorAll('input:not([type=hidden]),textarea')].filter(x=>x.offsetWidth||x.offsetHeight||x.getClientRects().length);
+   if(controls.length===1)return controls[0];
+  }
+  return null;
+ };
+ const spec=field('txtEspecificacao')||field('txtDescricao')||byLabel('especificacao');if(!spec)return {error:'Campo Especificação não localizado.'};
  const fill=(el,v)=>{if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));};
  fill(spec,d.specification);
- const interested=field('txtInteressado')||field('txtInteressados')||document.querySelector('input[name*="Interessado"]');
+ const interested=field('txtInteressado')||field('txtInteressados')||document.querySelector('input[name*="Interessado"],input[id*="Interessado"]')||byLabel('interessado');
  if(!interested)return {error:'Campo Interessado não localizado.'};
  interested.focus();fill(interested,d.interested);
  const labels=[...document.querySelectorAll('label')];
  const r=[...document.querySelectorAll('input[type=radio]')].find(x=>{const l=x.labels?.[0]||labels.find(y=>y.htmlFor===x.id);return norm(`${l?.textContent||''} ${x.parentElement?.textContent||''}`).includes('restrito');})||field('rdoNivelAcesso1');
  if(!r)return {error:'Opção de acesso Restrito não localizada.'};if(!r.checked)r.click();
- const hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');
- if(!hypothesis)return {error:'Campo Hipótese Legal não localizado.'};
+ let hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');
+ for(let i=0;!hypothesis&&i<10;i++){await new Promise(resolve=>setTimeout(resolve,200));hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');}
+ if(!hypothesis)return {error:'Campo Hipótese Legal não apareceu após selecionar Restrito.'};
  const option=[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(d.hypothesis)));
  if(!option)return {error:'Hipótese Informação Pessoal (Art. 31) não disponível.'};
  hypothesis.value=option.value;hypothesis.dispatchEvent(new Event('change',{bubbles:true}));

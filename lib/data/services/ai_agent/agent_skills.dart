@@ -57,6 +57,24 @@ JSON) e é sincronizado entre computadores pelo arquivo compartilhado.
 `path` é sempre uma LISTA de segmentos, ex.: ["savedDiaries", 0, "entries",
 "10/03/2026 -T"] (inteiros indexam listas).
 
+## Fluxos retomáveis do Agente UFU
+- Para tarefas com várias etapas, automação de interface ou possibilidade de
+  erro/intervenção humana, comece com `workflow_start` e registre o plano de
+  etapas. Esse recurso é geral e pode ser usado por qualquer módulo.
+- Antes de cada ação, grave `workflow_checkpoint` como `running`; depois, grave
+  `succeeded` ou `failed` com resultado, evidência e erro observado. Não esconda
+  falhas nem marque uma etapa como concluída sem conferir o efeito.
+- Guarde somente evidências relevantes para o problema. Nunca registre senhas,
+  tokens ou credenciais; evite copiar dados pessoais completos da tela.
+- Em falha, inspecione a tela/estado atual, tente uma correção pequena e
+  registre a nova tentativa. Faça no máximo duas tentativas por abordagem;
+  se precisar de uma pessoa, chame `workflow_request_user`, pergunte na conversa
+  o que precisa ser feito e retome após a resposta.
+- Use `workflow_get`/`workflow_list` para retomar fluxos salvos. Ao concluir,
+  chame `workflow_finish` com `completed`; se ainda depender de correção de
+  código, use `handoff`. O relatório Markdown é salvo em
+  Documentos\\GestorUFU Agente\\fluxos_agente para o repasse ao desenvolvedor.
+
 ## Escolhendo entre gravar no banco e gerar um arquivo
 - Gravar direto no banco é mais rápido e o usuário pode desfazer.
 - Gerar o arquivo (create_template com rows/data) é melhor quando o usuário

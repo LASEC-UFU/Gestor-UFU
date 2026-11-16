@@ -643,7 +643,7 @@ class _DadosTab extends StatelessWidget {
             width: 420,
           ),
           _CampoData(
-            label: 'Data de admissao',
+            label: 'Data de admissão na UFU',
             value: p.dataAdmissao,
             onChanged: (d) => onChanged(p.copyWith(dataAdmissao: d)),
           ),
@@ -1814,11 +1814,18 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
                       ? p.comprovanteTitulacao
                       : 'Ainda não selecionado (ex.: diploma de doutorado)',
                 ),
-                trailing: OutlinedButton.icon(
-                  onPressed: _ocupado ? null : _selecionarComprovanteTitulacao,
-                  icon: const Icon(Icons.attach_file, size: 18),
-                  label: Text(
-                    _comprovantes.titulacaoExiste(p) ? 'Trocar' : 'Selecionar',
+                trailing: SizedBox(
+                  width: 132,
+                  child: OutlinedButton.icon(
+                    onPressed: _ocupado
+                        ? null
+                        : _selecionarComprovanteTitulacao,
+                    icon: const Icon(Icons.attach_file, size: 18),
+                    label: Text(
+                      _comprovantes.titulacaoExiste(p)
+                          ? 'Trocar'
+                          : 'Selecionar',
+                    ),
                   ),
                 ),
               ),
@@ -2047,9 +2054,7 @@ class _ResumoTab extends StatelessWidget {
     final numero = TextEditingController(text: processo.processoSei);
     final interessado = TextEditingController(text: processo.docente);
     var criarNovo = false;
-    var tipo = processo.tipoProcessoSei.isNotEmpty
-        ? processo.tipoProcessoSei
-        : tipoProcessoSugeridoSei(processo);
+    final tipo = tipoProcessoSugeridoSei(processo);
     var acesso = processo.acessoComprovantesSei;
     var requerimento = true;
     var comprovantes = true;
@@ -2086,42 +2091,34 @@ class _ResumoTab extends StatelessWidget {
                       controller: numero,
                       decoration: const InputDecoration(
                         labelText:
-                            'N?mero SEI (vazio usa processo aberto no Edge)',
+                            'N\u00famero SEI (vazio usa processo aberto no Edge)',
                       ),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: tipo,
-                    decoration: const InputDecoration(
-                      labelText: 'Tipo do processo',
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'Pessoal: Progress?o Docente',
-                        child: Text('Pessoal: Progress?o Docente'),
+                  if (criarNovo) ...[
+                    const SizedBox(height: 12),
+                    InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo do processo',
+                        border: OutlineInputBorder(),
                       ),
-                      DropdownMenuItem(
-                        value: 'Pessoal: Promo??o Docente',
-                        child: Text('Pessoal: Promo??o Docente'),
-                      ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setDialogState(() => tipo = v);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: spec,
-                    maxLength: 100,
-                    decoration: const InputDecoration(
-                      labelText: 'Especifica??o',
+                      child: Text(tipo),
                     ),
-                  ),
-                  TextField(
-                    controller: interessado,
-                    decoration: const InputDecoration(labelText: 'Interessado'),
-                  ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: spec,
+                      maxLength: 100,
+                      decoration: const InputDecoration(
+                        labelText: 'Especifica\u00e7\u00e3o',
+                      ),
+                    ),
+                    TextField(
+                      controller: interessado,
+                      decoration: const InputDecoration(
+                        labelText: 'Interessado',
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   DropdownButtonFormField<AcessoComprovantesSei>(
                     initialValue: acesso,
@@ -2131,11 +2128,13 @@ class _ResumoTab extends StatelessWidget {
                     items: const [
                       DropdownMenuItem(
                         value: AcessoComprovantesSei.restrito,
-                        child: Text('Restrito ? Informa??o Pessoal (Art. 31)'),
+                        child: Text(
+                          'Restrito \u2014 Informa\u00e7\u00e3o Pessoal (Art. 31)',
+                        ),
                       ),
                       DropdownMenuItem(
                         value: AcessoComprovantesSei.publico,
-                        child: Text('P?blico'),
+                        child: Text('P\u00fablico'),
                       ),
                     ],
                     onChanged: (v) {
@@ -2160,14 +2159,18 @@ class _ResumoTab extends StatelessWidget {
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: titulacao,
-                    title: const Text('Comprovante da ?ltima titula??o'),
+                    title: const Text(
+                      'Comprovante da \u00faltima titula\u00e7\u00e3o',
+                    ),
                     onChanged: (v) =>
                         setDialogState(() => titulacao = v ?? false),
                   ),
                   CheckboxListTile(
                     contentPadding: EdgeInsets.zero,
                     value: relatorio,
-                    title: const Text('Relat?rio de atividades (?ltimo)'),
+                    title: const Text(
+                      'Relat\u00f3rio de atividades (\u00faltimo)',
+                    ),
                     onChanged: (v) =>
                         setDialogState(() => relatorio = v ?? false),
                   ),
@@ -2176,7 +2179,7 @@ class _ResumoTab extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                       value: confirmarNovo,
                       title: Text(
-                        'Confirmo criar outro; j? existe ${processo.processoSei}',
+                        'Confirmo criar outro; j\u00e1 existe ${processo.processoSei}',
                       ),
                       onChanged: (v) =>
                           setDialogState(() => confirmarNovo = v ?? false),
@@ -2196,7 +2199,6 @@ class _ResumoTab extends StatelessWidget {
                 ProgressaoDossieSeiOpcoes(
                   criarNovo: criarNovo,
                   numeroProcesso: numero.text.trim(),
-                  tipoProcesso: tipo,
                   especificacao: spec.text.trim(),
                   interessado: interessado.text.trim(),
                   acessoComprovantes: acesso,
@@ -2218,18 +2220,41 @@ class _ResumoTab extends StatelessWidget {
     interessado.dispose();
     if (opcoes == null || !context.mounted) return;
     try {
+      if (opcoes.criarNovo) {
+        await service.prepararMontagemProcessoSei(processo.id, opcoes);
+        return;
+      }
       final r = await service.montarProcessoSei(processo.id, opcoes);
       if (context.mounted) {
         _avisar(
           context,
           'Processo ${r.numeroProcesso}: requerimento ${r.requerimento}; '
           '${r.comprovantesNovos} comprovante(s) novo(s), ${r.comprovantesExistentes} existente(s); '
-          'titula??o ${r.titulacao}; relat?rio ${r.relatorio}. Confira e assine no SEI.',
+          'titula\u00e7\u00e3o ${r.titulacao}; relat\u00f3rio ${r.relatorio}. Confira e assine no SEI.',
         );
       }
     } on Object catch (error) {
-      envio.log('Falha ao montar o dossi?: $error');
-      if (context.mounted) _avisar(context, 'Falha ao montar o dossi?: $error');
+      envio.log('Falha ao montar o dossi\u00ea: $error');
+      if (context.mounted) {
+        _avisar(context, 'Falha ao montar o dossi\u00ea: $error');
+      }
+    }
+  }
+
+  Future<void> _continuarMontagemSei(BuildContext context) async {
+    try {
+      final r = await service.continuarMontagemProcessoSei();
+      if (context.mounted) {
+        _avisar(
+          context,
+          'Processo ${r.numeroProcesso} criado e montado. Confira e assine o requerimento no SEI.',
+        );
+      }
+    } on Object catch (error) {
+      envio.log('Falha ao continuar a montagem no SEI: $error');
+      if (context.mounted) {
+        _avisar(context, 'Falha ao continuar a montagem no SEI: $error');
+      }
     }
   }
 
@@ -2366,31 +2391,52 @@ class _ResumoTab extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Abra ou crie o processo no SEI. O envio segue esta ordem: comprovantes dos lancamentos, prova da ultima titulacao e relatorio de atividades separado. O requerimento interno deve ser incluido antes. Itens ja presentes na arvore nao sao repetidos.',
+                'Para criar um processo, a ferramenta abre o Edge e aguarda seu login e a seleção da unidade. Depois, clique em "Criar processo e montar dossiê". Em processo existente, os documentos presentes não são duplicados.',
                 style: TextStyle(color: AppTheme.textSecondary),
               ),
               const SizedBox(height: 12),
               ListenableBuilder(
                 listenable: envio,
-                builder: (context, _) => FilledButton.icon(
-                  onPressed: envio.enviando
-                      ? () {
-                          envio.cancelar = true;
-                          envio.atualizar();
-                        }
-                      : () => _montarDossie(context),
-                  icon: envio.enviando
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.playlist_add_check_circle_outlined),
-                  label: Text(
-                    envio.enviando
-                        ? 'Interromper montagem'
-                        : 'Configurar e montar processo',
-                  ),
+                builder: (context, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (envio.prontoParaCriarProcesso) ...[
+                      Text(
+                        'Login detectado e unidade selecionada: ${envio.unidadeSeiSelecionada}.',
+                        style: TextStyle(color: AppTheme.textSecondary),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: () => _continuarMontagemSei(context),
+                        icon: const Icon(Icons.add_business_outlined),
+                        label: const Text('Criar processo e montar dossiê'),
+                      ),
+                    ] else
+                      FilledButton.icon(
+                        onPressed: envio.enviando
+                            ? () {
+                                envio.cancelar = true;
+                                envio.atualizar();
+                              }
+                            : () => _montarDossie(context),
+                        icon: envio.enviando
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.playlist_add_check_circle_outlined,
+                              ),
+                        label: Text(
+                          envio.enviando
+                              ? 'Interromper preparação'
+                              : 'Configurar processo no SEI',
+                        ),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: 10),

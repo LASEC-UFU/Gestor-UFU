@@ -19,6 +19,16 @@ void main() {
         especificacaoProcessoSei(processo),
         'JOSUÉ SILVA DE MORAIS FEELT D3 - D4 21/01',
       );
+      expect(
+        tipoProcessoSugeridoSei(processo),
+        'Pessoal: Progress\u00e3o Docente',
+      );
+      expect(
+        tipoProcessoSugeridoSei(
+          processo.copyWith(alvoId: 'magisterioSuperior|B|I'),
+        ),
+        'Pessoal: Promo\u00e7\u00e3o Docente',
+      );
     },
   );
 

@@ -63,6 +63,107 @@ const agentTools = <AgentToolSpec>[
     },
   ),
   AgentToolSpec(
+    name: 'workflow_start',
+    description:
+        'Abre um fluxo de trabalho retomável do Agente UFU. Use em tarefas '
+        'com várias etapas, automação de interface, falhas recuperáveis ou '
+        'possível intervenção do usuário. O fluxo e os checkpoints ficam salvos.',
+    mutates: true,
+    schema: {
+      'type': 'object',
+      'properties': {
+        'module': {'type': 'string'},
+        'title': {'type': 'string'},
+        'goal': {'type': 'string'},
+        'steps': {
+          'type': 'array',
+          'items': {'type': 'string'},
+        },
+      },
+      'required': ['module', 'title', 'goal'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'workflow_checkpoint',
+    description:
+        'Salva o resultado de uma etapa: running, succeeded, failed ou '
+        'waiting_user. Registre detalhes, evidência e erro após cada ação.',
+    mutates: true,
+    schema: {
+      'type': 'object',
+      'properties': {
+        'workflow_id': {'type': 'string'},
+        'step': {'type': 'string'},
+        'status': {
+          'type': 'string',
+          'enum': ['running', 'succeeded', 'failed', 'waiting_user'],
+        },
+        'detail': {'type': 'string'},
+        'evidence': {'type': 'string'},
+        'error': {'type': 'string'},
+      },
+      'required': ['workflow_id', 'step', 'status'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'workflow_request_user',
+    description:
+        'Registra uma pergunta ou ação manual necessária. Depois da chamada, '
+        'faça a pergunta ao usuário na conversa e retome o fluxo quando ele responder.',
+    mutates: true,
+    schema: {
+      'type': 'object',
+      'properties': {
+        'workflow_id': {'type': 'string'},
+        'question': {'type': 'string'},
+        'step': {'type': 'string'},
+        'detail': {'type': 'string'},
+      },
+      'required': ['workflow_id', 'question'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'workflow_get',
+    description: 'Retoma um fluxo salvo e lê suas etapas e evidências.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'workflow_id': {'type': 'string'},
+      },
+      'required': ['workflow_id'],
+    },
+  ),
+  AgentToolSpec(
+    name: 'workflow_list',
+    description:
+        'Lista os fluxos recentes do Agente UFU, inclusive os pausados.',
+    schema: {
+      'type': 'object',
+      'properties': {
+        'limit': {'type': 'integer'},
+      },
+    },
+  ),
+  AgentToolSpec(
+    name: 'workflow_finish',
+    description:
+        'Conclui o fluxo ou prepara o repasse para desenvolvimento e salva '
+        'um relatório Markdown com todas as etapas e evidências.',
+    mutates: true,
+    schema: {
+      'type': 'object',
+      'properties': {
+        'workflow_id': {'type': 'string'},
+        'outcome': {
+          'type': 'string',
+          'enum': ['completed', 'handoff'],
+        },
+        'summary': {'type': 'string'},
+      },
+      'required': ['workflow_id', 'outcome', 'summary'],
+    },
+  ),
+  AgentToolSpec(
     name: 'list_keys',
     description:
         'Lista as chaves do banco com tipo e tamanho. Use prefix para filtrar.',
