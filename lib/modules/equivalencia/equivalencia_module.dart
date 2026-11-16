@@ -65,5 +65,10 @@ class EquivalenciaModule extends GestorModule {
   List<ModuleCommand> get commands => equivalenciaCommands(service);
 
   @override
+  Future<void> onExternalDataChanged() async {
+    await service.load();
+  }
+
+  @override
   List<ModuleTemplate> get templates => equivalenciaTemplates();
 }

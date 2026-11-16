@@ -36,7 +36,7 @@ const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
 const _portalAddressKey = 'portal_docente_url';
 
 class PreencheDiariosPage extends StatefulWidget {
-  const PreencheDiariosPage({this.moodle, this.terms, super.key});
+  const PreencheDiariosPage({this.moodle, this.terms, this.changes, super.key});
 
   /// Períodos letivos compartilhados (padrão: lidos do banco local).
   final AcademicTermService? terms;
@@ -44,6 +44,7 @@ class PreencheDiariosPage extends StatefulWidget {
   /// Planejamento do Config Moodle (contrato; ausente se o módulo não estiver
   /// instalado).
   final MoodlePlanning? moodle;
+  final Listenable? changes;
 
   @override
   State<PreencheDiariosPage> createState() => _PreencheDiariosPageState();
@@ -86,6 +87,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   void initState() {
     super.initState();
     _termService.addListener(_onSharedTermChanged);
+    widget.changes?.addListener(_onExternalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final snapshots =
           await widget.moodle?.snapshots() ?? <MoodleConfigSnapshot>[];
@@ -124,9 +126,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   @override
   void dispose() {
     _termService.removeListener(_onSharedTermChanged);
+    widget.changes?.removeListener(_onExternalDataChanged);
     _urlController.dispose();
     unawaited(_automation.close());
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) unawaited(_loadSavedEntries());
   }
 
   Future<void> _loadSavedEntries() async {

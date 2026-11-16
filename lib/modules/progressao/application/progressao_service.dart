@@ -77,8 +77,13 @@ class ProgressaoService extends ChangeNotifier {
       ));
 
   /// Relê o banco (grava antes o que estiver pendente).
-  Future<List<ProgressaoDocente>> load() async {
-    await flush();
+  Future<List<ProgressaoDocente>> load({bool flushPending = true}) async {
+    if (flushPending) {
+      await flush();
+    } else {
+      _saveTimer?.cancel();
+      _saveTimer = null;
+    }
     _items = await _store.list();
     _loaded = true;
     notifyListeners();

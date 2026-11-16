@@ -60,4 +60,9 @@ class ProgressaoModule extends GestorModule {
 
   @override
   List<ModuleCommand> get commands => progressaoCommands(service);
+
+  @override
+  Future<void> onExternalDataChanged() async {
+    await service.load(flushPending: false);
+  }
 }

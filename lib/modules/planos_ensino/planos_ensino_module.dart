@@ -18,6 +18,7 @@ class PlanosEnsinoModule extends GestorModule {
 
   PlanosEnsinoService _service = PlanosEnsinoService();
   final _sei = PlanosEnsinoAutomationService();
+  final _changes = ValueNotifier<int>(0);
   GestorServices? _services;
 
   MoodlePlanning? _moodle() => _services?.contract<MoodlePlanning>();
@@ -58,6 +59,7 @@ class PlanosEnsinoModule extends GestorModule {
         service: _service,
         automation: _sei,
         moodle: _moodle(),
+        changes: _changes,
       ),
     ),
   ];
@@ -71,4 +73,7 @@ class PlanosEnsinoModule extends GestorModule {
 
   @override
   List<ModuleTemplate> get templates => planosEnsinoTemplates();
+
+  @override
+  Future<void> onExternalDataChanged() async => _changes.value++;
 }

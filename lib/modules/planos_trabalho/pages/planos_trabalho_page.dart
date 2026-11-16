@@ -15,6 +15,7 @@ class PlanosTrabalhoPage extends StatefulWidget {
   const PlanosTrabalhoPage({
     required this.store,
     required this.automation,
+    this.changes,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class PlanosTrabalhoPage extends StatefulWidget {
 
   /// Sessão do SEI do módulo (compartilhada com os comandos do agente).
   final SeiAutomationService automation;
+  final Listenable? changes;
 
   @override
   State<PlanosTrabalhoPage> createState() => _PlanosTrabalhoPageState();
@@ -49,6 +51,7 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
   @override
   void initState() {
     super.initState();
+    widget.changes?.addListener(_onExternalDataChanged);
     _reload();
     _loadUrl();
   }
@@ -96,8 +99,13 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
 
   @override
   void dispose() {
+    widget.changes?.removeListener(_onExternalDataChanged);
     _urlController.dispose();
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) _reload();
   }
 
   Future<String?> _pickPdf({String? initial}) async {

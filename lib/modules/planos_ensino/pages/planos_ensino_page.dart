@@ -17,6 +17,7 @@ class PlanosEnsinoPage extends StatefulWidget {
     required this.service,
     required this.automation,
     this.moodle,
+    this.changes,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class PlanosEnsinoPage extends StatefulWidget {
 
   /// Planejamento do Config Moodle (contrato; opcional).
   final MoodlePlanning? moodle;
+  final Listenable? changes;
   @override
   State<PlanosEnsinoPage> createState() => _PlanosEnsinoPageState();
 }
@@ -44,6 +46,7 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
   @override
   void initState() {
     super.initState();
+    widget.changes?.addListener(_onExternalDataChanged);
     _reload();
     _loadSeiAddress();
   }
@@ -63,8 +66,13 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
 
   @override
   void dispose() {
+    widget.changes?.removeListener(_onExternalDataChanged);
     _seiUrlController.dispose();
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) _reload();
   }
 
   void _log(String message) {
