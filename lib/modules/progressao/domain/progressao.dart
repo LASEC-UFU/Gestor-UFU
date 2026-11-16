@@ -1,5 +1,7 @@
 import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
+enum AcessoComprovantesSei { restrito, publico }
+
 /// Uma linha do relatório: atividade comprovada e pontuada por um item do
 /// Anexo 1 da Resolução 03/2017.
 class LancamentoProgressao {
@@ -114,6 +116,13 @@ class ProgressaoDocente {
     this.logoPath = '',
     this.pastaComprovantes = '',
     this.comprovanteTitulacao = '',
+    this.dataAdmissao,
+    this.justificativaIntersticio = '',
+    this.processoSei = '',
+    this.especificacaoSei = '',
+    this.tipoProcessoSei = '',
+    this.acessoComprovantesSei = AcessoComprovantesSei.restrito,
+    this.enviadoSeiEm,
     this.tipoDocumentoSei = tipoDocumentoSeiPadrao,
     this.lancamentos = const [],
     this.atualizadoEm,
@@ -175,6 +184,14 @@ class ProgressaoDocente {
 
   /// Caminho relativo da prova da titulação mais recente dentro da pasta.
   final String comprovanteTitulacao;
+
+  final DateTime? dataAdmissao;
+  final String justificativaIntersticio;
+  final String processoSei;
+  final String especificacaoSei;
+  final String tipoProcessoSei;
+  final AcessoComprovantesSei acessoComprovantesSei;
+  final DateTime? enviadoSeiEm;
 
   /// Tipo do documento externo do SEI para os comprovantes.
   final String tipoDocumentoSei;
@@ -256,6 +273,13 @@ class ProgressaoDocente {
     String? logoPath,
     String? pastaComprovantes,
     String? comprovanteTitulacao,
+    DateTime? dataAdmissao,
+    String? justificativaIntersticio,
+    String? processoSei,
+    String? especificacaoSei,
+    String? tipoProcessoSei,
+    AcessoComprovantesSei? acessoComprovantesSei,
+    DateTime? enviadoSeiEm,
     String? tipoDocumentoSei,
     List<LancamentoProgressao>? lancamentos,
     DateTime? atualizadoEm,
@@ -285,6 +309,14 @@ class ProgressaoDocente {
     logoPath: logoPath ?? this.logoPath,
     pastaComprovantes: pastaComprovantes ?? this.pastaComprovantes,
     comprovanteTitulacao: comprovanteTitulacao ?? this.comprovanteTitulacao,
+    dataAdmissao: dataAdmissao ?? this.dataAdmissao,
+    justificativaIntersticio:
+        justificativaIntersticio ?? this.justificativaIntersticio,
+    processoSei: processoSei ?? this.processoSei,
+    especificacaoSei: especificacaoSei ?? this.especificacaoSei,
+    tipoProcessoSei: tipoProcessoSei ?? this.tipoProcessoSei,
+    acessoComprovantesSei: acessoComprovantesSei ?? this.acessoComprovantesSei,
+    enviadoSeiEm: enviadoSeiEm ?? this.enviadoSeiEm,
     tipoDocumentoSei: tipoDocumentoSei ?? this.tipoDocumentoSei,
     lancamentos: lancamentos ?? this.lancamentos,
     atualizadoEm: atualizadoEm ?? this.atualizadoEm,
@@ -314,6 +346,13 @@ class ProgressaoDocente {
     'logoPath': logoPath,
     'pastaComprovantes': pastaComprovantes,
     'comprovanteTitulacao': comprovanteTitulacao,
+    'dataAdmissao': dataAdmissao?.toIso8601String(),
+    'justificativaIntersticio': justificativaIntersticio,
+    'processoSei': processoSei,
+    'especificacaoSei': especificacaoSei,
+    'tipoProcessoSei': tipoProcessoSei,
+    'acessoComprovantesSei': acessoComprovantesSei.name,
+    'enviadoSeiEm': enviadoSeiEm?.toIso8601String(),
     'tipoDocumentoSei': tipoDocumentoSei,
     'lancamentos': lancamentos.map((l) => l.toJson()).toList(),
     'atualizadoEm': atualizadoEm?.toIso8601String(),
@@ -362,6 +401,18 @@ class ProgressaoDocente {
       logoPath: json['logoPath'] as String? ?? '',
       pastaComprovantes: json['pastaComprovantes'] as String? ?? '',
       comprovanteTitulacao: json['comprovanteTitulacao'] as String? ?? '',
+      dataAdmissao: date('dataAdmissao'),
+      justificativaIntersticio:
+          json['justificativaIntersticio'] as String? ?? '',
+      processoSei: json['processoSei'] as String? ?? '',
+      especificacaoSei: json['especificacaoSei'] as String? ?? '',
+      tipoProcessoSei: json['tipoProcessoSei'] as String? ?? '',
+      acessoComprovantesSei: byName(
+        AcessoComprovantesSei.values,
+        json['acessoComprovantesSei'],
+        AcessoComprovantesSei.restrito,
+      ),
+      enviadoSeiEm: date('enviadoSeiEm'),
       tipoDocumentoSei:
           json['tipoDocumentoSei'] as String? ?? tipoDocumentoSeiPadrao,
       lancamentos: (json['lancamentos'] as List? ?? const [])

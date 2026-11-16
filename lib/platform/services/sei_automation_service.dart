@@ -8,17 +8,23 @@ import 'package:gestor_ufu/platform/services/browser_service.dart';
 
 typedef SeiLog = void Function(String message);
 
+enum SeiNivelAcesso { restrito, publico }
+
 /// Um arquivo a ser incluído como documento externo no SEI.
 class SeiDocumentoExterno {
   const SeiDocumentoExterno({
     required this.caminho,
     required this.nomeArvore,
     this.numero = '',
+    this.nomesAlternativos = const [],
   });
 
   final String caminho;
   final String nomeArvore;
   final String numero;
+  final List<String> nomesAlternativos;
+
+  List<String> get nomesParaConferencia => [nomeArvore, ...nomesAlternativos];
 }
 
 /// Resultado de um envio em lote ao SEI.
@@ -137,6 +143,8 @@ class SeiAutomationService {
     required String numero,
     required String nomeArvore,
     String interessado = '',
+    SeiNivelAcesso nivelAcesso = SeiNivelAcesso.publico,
+    String hipoteseLegal = 'Informação Pessoal (Art. 31 da Lei nº 12.527/2011)',
     required SeiLog log,
   }) async {
     _checkReady();
@@ -179,6 +187,8 @@ class SeiAutomationService {
             'number': cleanNumber,
             'tree': cleanTree,
             'serie': serie,
+            'access': nivelAcesso.name,
+            'hipoteseLegal': hipoteseLegal,
           },
         ],
       ),
@@ -245,6 +255,8 @@ class SeiAutomationService {
     required String serie,
     required SeiLog log,
     bool Function()? cancelado,
+    SeiNivelAcesso nivelAcesso = SeiNivelAcesso.publico,
+    String hipoteseLegal = 'Informação Pessoal (Art. 31 da Lei nº 12.527/2011)',
   }) async {
     _checkReady();
     final criados = <String>[];
@@ -278,7 +290,7 @@ class SeiAutomationService {
     var nodes = await _documentNodes();
     final pendentes = <SeiDocumentoExterno>[];
     for (final doc in documentos) {
-      if (_nodeExists(nodes, doc.nomeArvore)) {
+      if (_nodeExists(nodes, doc)) {
         existentes.add(doc.nomeArvore);
       } else {
         pendentes.add(doc);
@@ -300,6 +312,8 @@ class SeiAutomationService {
           serie: serie,
           numero: doc.numero,
           nomeArvore: doc.nomeArvore,
+          nivelAcesso: nivelAcesso,
+          hipoteseLegal: hipoteseLegal,
           log: log,
         );
         criados.add(doc.nomeArvore);
@@ -318,7 +332,7 @@ class SeiAutomationService {
       nodes = await _documentNodes();
       final faltantes = [
         for (final doc in documentos)
-          if (!_nodeExists(nodes, doc.nomeArvore)) doc.nomeArvore,
+          if (!_nodeExists(nodes, doc)) doc.nomeArvore,
       ];
       if (faltantes.isEmpty) {
         log('SEI: pente-fino final — todos os documentos estão no processo.');
@@ -333,13 +347,35 @@ class SeiAutomationService {
     );
   }
 
-  bool _nodeExists(List<Map<String, dynamic>> nodes, String nomeArvore) {
-    final alvo = _normalize(nomeArvore);
-    if (alvo.isEmpty) return false;
+  bool _nodeExists(List<Map<String, dynamic>> nodes, SeiDocumentoExterno doc) {
+    final alvos = doc.nomesParaConferencia
+        .map(_normalize)
+        .where((name) => name.isNotEmpty)
+        .toList();
+    if (alvos.isEmpty) return false;
     final cancelado = RegExp(r'\bcancelad[oa]\b', caseSensitive: false);
     return nodes.any((node) {
       final text = '${node['text']} ${node['title']}';
-      return !cancelado.hasMatch(text) && _normalize(text).contains(alvo);
+      if (cancelado.hasMatch(text)) return false;
+      final withoutSeiNumber = text.replaceAll(RegExp(r'\s*\(\d+\)\s*$'), '');
+      final norm = _normalize(withoutSeiNumber);
+      return alvos.any((alvo) => norm.contains(alvo));
+    });
+  }
+
+  /// Indica se a árvore possui um documento ativo que corresponda a algum
+  /// dos nomes fornecidos, ignorando o número SEI entre parênteses.
+  Future<bool> existeDocumento(Iterable<String> nomes) async {
+    _checkReady();
+    await _openAllFolders();
+    final nodes = await _documentNodes();
+    final alvos = nomes.map(_normalize).where((e) => e.isNotEmpty).toList();
+    final cancelado = RegExp(r'\bcancelad[oa]\b', caseSensitive: false);
+    return nodes.any((node) {
+      final text = '${node['text']} ${node['title']}';
+      if (cancelado.hasMatch(text)) return false;
+      final norm = _normalize(text.replaceAll(RegExp(r'\s*\(\d+\)\s*$'), ''));
+      return alvos.any(norm.contains);
     });
   }
 
@@ -529,7 +565,35 @@ const _filterExternalTypeScript = r'''() => {
  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();if(!norm(document.body?.innerText).includes('escolha o tipo do documento'))return false;const input=[...document.querySelectorAll('input[type=text],input:not([type])')].find(e=>e.offsetWidth||e.offsetHeight||e.getClientRects().length);if(!input)return false;const set=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;set.call(input,'Externo');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'o'}));input.dispatchEvent(new Event('change',{bubbles:true}));return true;
 }''';
 const _fillMetadataScript = r'''(dados) => {
- const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();const campo=id=>document.getElementById(id)||document.querySelector(`[name="${id}"]`);const serie=campo('selSerie'),data=campo('txtDataElaboracao'),file=campo('filArquivo')||document.querySelector('input[type=file]');if(!serie||!data||!file)return null;const numero=campo('txtNumero'),arvore=campo('txtNomeArvore');if(dados.number&&!numero)return {error:'O campo Número não foi encontrado.'};if(dados.tree&&!arvore)return {error:'O campo Nome na Árvore não foi encontrado.'};const option=[...serie.options].find(o=>norm(o.textContent)===norm(dados.serie));if(!option||option.disabled)return {error:`O tipo de documento externo "${dados.serie}" não está disponível no SEI.`};serie.value=option.value;serie.dispatchEvent(new Event('change',{bubbles:true}));const fill=(el,v)=>{if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));};fill(data,dados.date);fill(numero,dados.number);fill(arvore,dados.tree);let nato=document.querySelector('#divOptNato input[type=radio]');if(!nato){const l=[...document.querySelectorAll('label')].find(x=>norm(x.textContent).includes('nato-digital'));if(l)nato=(l.htmlFor&&document.getElementById(l.htmlFor))||l.querySelector('input[type=radio]');}if(!nato)return {error:'A opção Nato-digital não foi encontrada.'};if(!nato.checked)nato.click();let pub=campo('rdoNivelAcesso0')||document.querySelector('input[name="rdoNivelAcesso"][value="0"]');if(!pub){const l=[...document.querySelectorAll('label')].find(x=>norm(x.textContent)==='publico');if(l)pub=(l.htmlFor&&document.getElementById(l.htmlFor))||l.querySelector('input[type=radio]');}if(!pub)return {error:'A opção de acesso Público não foi encontrada.'};if(!pub.checked)pub.click();if(!nato.checked||!pub.checked||serie.value!==option.value||data.value!==dados.date||(dados.number&&numero.value!==dados.number)||(dados.tree&&arvore.value!==dados.tree))return {error:'O SEI não manteve os dados informados; confira o formulário.'};return {ok:true};
+ const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+ const field=id=>document.getElementById(id)||document.querySelector(`[name="${id}"]`);
+ const serie=field('selSerie'),data=field('txtDataElaboracao'),file=field('filArquivo')||document.querySelector('input[type=file]');
+ if(!serie||!data||!file)return null;
+ const numero=field('txtNumero'),arvore=field('txtNomeArvore');
+ if(dados.number&&!numero)return {error:'O campo Número não foi encontrado.'};
+ if(dados.tree&&!arvore)return {error:'O campo Nome na Árvore não foi encontrado.'};
+ const option=[...serie.options].find(o=>norm(o.textContent)===norm(dados.serie));
+ if(!option||option.disabled)return {error:`O tipo de documento externo "${dados.serie}" não está disponível no SEI.`};
+ serie.value=option.value;serie.dispatchEvent(new Event('change',{bubbles:true}));
+ const fill=(el,v)=>{if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));};
+ fill(data,dados.date);fill(numero,dados.number);fill(arvore,dados.tree);
+ let nato=document.querySelector('#divOptNato input[type=radio]');
+ if(!nato){const l=[...document.querySelectorAll('label')].find(x=>norm(x.textContent).includes('nato-digital'));if(l)nato=(l.htmlFor&&document.getElementById(l.htmlFor))||l.querySelector('input[type=radio]');}
+ if(!nato)return {error:'A opção Nato-digital não foi encontrada.'};if(!nato.checked)nato.click();
+ const radios=[...document.querySelectorAll('input[name="rdoNivelAcesso"]')];
+ let access=null;
+ for(const radio of radios){const label=radio.labels?.[0]||document.querySelector(`label[for="${radio.id}"]`);const text=norm(`${label?.textContent||''} ${radio.parentElement?.textContent||''}`);if(dados.access==='restrito'?text.includes('restrito'):text.includes('publico')){access=radio;break;}}
+ if(!access){const id=dados.access==='restrito'?'rdoNivelAcesso1':'rdoNivelAcesso0';access=field(id)||radios.find(r=>r.value===(dados.access==='restrito'?'1':'0'));}
+ if(!access)return {error:`Opção de acesso ${dados.access} não encontrada.`};if(!access.checked)access.click();
+ if(dados.access==='restrito'){
+   const hypothesis=field('selHipoteseLegal')||document.querySelector('select[name*="Hipotese"]');
+   if(!hypothesis)return {error:'O campo Hipótese Legal não foi encontrado para acesso restrito.'};
+   const h=[...hypothesis.options].find(o=>norm(o.textContent).includes(norm(dados.hipoteseLegal)));
+   if(!h)return {error:`Hipótese legal "${dados.hipoteseLegal}" não encontrada.`};
+   hypothesis.value=h.value;hypothesis.dispatchEvent(new Event('change',{bubbles:true}));
+ }
+ if(!nato.checked||!access.checked||serie.value!==option.value||data.value!==dados.date||(dados.number&&numero.value!==dados.number)||(dados.tree&&arvore.value!==dados.tree))return {error:'O SEI não manteve os metadados informados; confira o formulário.'};
+ return {ok:true};
 }''';
 const _interestedSelectedScript =
     r'''(name) => {const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim(),target=norm(name);return [...document.querySelectorAll('select[id*="nteress"],select[name*="nteress"]')].some(s=>[...s.options].some(o=>norm(o.textContent)===target));}''';

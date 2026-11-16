@@ -346,4 +346,81 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
       );
     },
   ),
+  ModuleCommand(
+    id: 'progressao.montarProcessoSei',
+    title: 'Montar dossiê de progressão/promoção no SEI',
+    description:
+        'Cria um processo docente no SEI ou usa um existente; preenche o '
+        'requerimento, inclui comprovantes e titulação e envia o relatório '
+        'por último. Requer confirmação do usuário antes de qualquer gravação '
+        'externa. O usuário precisa estar logado no Edge controlado.',
+    approval: CommandApproval.required,
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        ..._processoId,
+        'criarNovo': {'type': 'boolean', 'default': false},
+        'numeroProcesso': {'type': 'string'},
+        'tipoProcesso': {'type': 'string'},
+        'especificacao': {'type': 'string'},
+        'interessado': {'type': 'string'},
+        'acessoComprovantes': {
+          'type': 'string',
+          'enum': ['restrito', 'publico'],
+          'default': 'restrito',
+        },
+        'incluirRequerimento': {'type': 'boolean', 'default': true},
+        'incluirComprovantes': {'type': 'boolean', 'default': true},
+        'incluirTitulacao': {'type': 'boolean', 'default': true},
+        'incluirRelatorio': {'type': 'boolean', 'default': true},
+        'confirmarNovoComProcessoSalvo': {'type': 'boolean', 'default': false},
+      },
+      'required': ['processoId'],
+    },
+    run: (input, origin) async {
+      final acesso = input.optionalString('acessoComprovantes') == 'publico'
+          ? AcessoComprovantesSei.publico
+          : AcessoComprovantesSei.restrito;
+      final r = await service.montarProcessoSei(
+        input.requireString('processoId'),
+        ProgressaoDossieSeiOpcoes(
+          criarNovo: input.flag('criarNovo'),
+          numeroProcesso: input.optionalString('numeroProcesso') ?? '',
+          tipoProcesso: input.optionalString('tipoProcesso') ?? '',
+          especificacao: input.optionalString('especificacao') ?? '',
+          interessado: input.optionalString('interessado') ?? '',
+          acessoComprovantes: acesso,
+          incluirRequerimento: input.flag(
+            'incluirRequerimento',
+            fallback: true,
+          ),
+          incluirComprovantes: input.flag(
+            'incluirComprovantes',
+            fallback: true,
+          ),
+          incluirTitulacao: input.flag('incluirTitulacao', fallback: true),
+          incluirRelatorio: input.flag('incluirRelatorio', fallback: true),
+          confirmarNovoComProcessoSalvo: input.flag(
+            'confirmarNovoComProcessoSalvo',
+          ),
+        ),
+      );
+      return CommandResult.ok(
+        message:
+            'Processo ${r.numeroProcesso} montado: requerimento ${r.requerimento}; '
+            '${r.comprovantesNovos} comprovantes novos, ${r.comprovantesExistentes} já existentes; '
+            'titulação ${r.titulacao}; relatório ${r.relatorio}. '
+            'O requerimento não foi assinado; o docente deve conferir e assinar no SEI.',
+        data: {
+          'numeroProcesso': r.numeroProcesso,
+          'requerimento': r.requerimento,
+          'comprovantesNovos': r.comprovantesNovos,
+          'comprovantesExistentes': r.comprovantesExistentes,
+          'titulacao': r.titulacao,
+          'relatorio': r.relatorio,
+        },
+      );
+    },
+  ),
 ];

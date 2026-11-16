@@ -6,6 +6,8 @@ import 'package:uuid/uuid.dart';
 
 import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/modules/progressao/application/progressao_pdf_service.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_sei_requerimento.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_sei_text.dart';
 import 'package:gestor_ufu/modules/progressao/data/progressao_store.dart';
 import 'package:gestor_ufu/modules/progressao/domain/comprovantes.dart';
 import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
@@ -14,6 +16,61 @@ import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/sei_automation_service.dart';
 
 const _uuid = Uuid();
+
+String _nomeArvoreCurto(String nome) {
+  final limpo = nome.trim();
+  return limpo.length <= limiteNomeArvoreSei
+      ? limpo
+      : limpo.substring(0, limiteNomeArvoreSei);
+}
+
+class ProgressaoDossieSeiOpcoes {
+  const ProgressaoDossieSeiOpcoes({
+    this.criarNovo = false,
+    this.numeroProcesso = '',
+    this.tipoProcesso = '',
+    this.especificacao = '',
+    this.interessado = '',
+    this.acessoComprovantes = AcessoComprovantesSei.restrito,
+    this.incluirRequerimento = true,
+    this.incluirComprovantes = true,
+    this.incluirTitulacao = true,
+    this.incluirRelatorio = true,
+    this.confirmarNovoComProcessoSalvo = false,
+  });
+
+  final bool criarNovo;
+  final String numeroProcesso;
+  final String tipoProcesso;
+  final String especificacao;
+  final String interessado;
+  final AcessoComprovantesSei acessoComprovantes;
+  final bool incluirRequerimento;
+  final bool incluirComprovantes;
+  final bool incluirTitulacao;
+  final bool incluirRelatorio;
+  final bool confirmarNovoComProcessoSalvo;
+}
+
+class ProgressaoDossieSeiResultado {
+  const ProgressaoDossieSeiResultado({
+    required this.numeroProcesso,
+    required this.requerimento,
+    required this.comprovantesNovos,
+    required this.comprovantesExistentes,
+    required this.titulacao,
+    required this.relatorio,
+    this.pendencias = const [],
+  });
+
+  final String numeroProcesso;
+  final String requerimento;
+  final int comprovantesNovos;
+  final int comprovantesExistentes;
+  final String titulacao;
+  final String relatorio;
+  final List<String> pendencias;
+}
 
 /// Estado do envio de comprovantes ao SEI: o Edge controlado e o log
 /// continuam disponíveis ao trocar de aba ou de tela (e para o agente).
@@ -313,6 +370,291 @@ class ProgressaoService extends ChangeNotifier {
     for (final l in lancamentosComComprovante(p))
       if (!comprovantes.existe(p, l)) l.rotuloComprovante,
   ];
+
+  /// Fluxo completo e retomável de autuação e montagem do dossiê no SEI.
+  Future<ProgressaoDossieSeiResultado> montarProcessoSei(
+    String id,
+    ProgressaoDossieSeiOpcoes opcoes,
+  ) async {
+    await _ensure();
+    var p = _require(id);
+    final pendencias = <String>[
+      if (p.docente.trim().isEmpty) 'Informe o nome do docente.',
+      if (p.siape.trim().isEmpty) 'Informe o SIAPE.',
+      if (p.lotacao.trim().isEmpty) 'Informe a lotacao.',
+      if (opcoes.incluirRequerimento && p.dataAdmissao == null)
+        'Informe a data de admissao.',
+      if (opcoes.incluirRequerimento && p.dataDocumento == null)
+        'Informe a data do requerimento.',
+      if (p.intersticioInicio == null || p.intersticioFim == null)
+        'Informe inicio e fim do intersticio.',
+      if (opcoes.incluirRelatorio &&
+          (p.relatorioInicio == null || p.relatorioFim == null))
+        'Informe inicio e fim do relatorio.',
+      if (opcoes.incluirComprovantes && p.lancamentos.isEmpty)
+        'Nao ha lancamentos para anexar.',
+      if (opcoes.incluirComprovantes &&
+          p.lancamentos.any((l) => l.comprovante.trim().isEmpty))
+        'Todos os lancamentos precisam ter comprovante vinculado.',
+      if (opcoes.incluirComprovantes && comprovantesAusentes(p).isNotEmpty)
+        'Ha comprovantes ausentes: ${comprovantesAusentes(p).join(', ')}.',
+      if (opcoes.incluirTitulacao && !comprovantes.titulacaoExiste(p))
+        'Selecione o comprovante da ultima titulacao.',
+      if (opcoes.incluirRelatorio && p.pastaComprovantes.trim().isEmpty)
+        'Escolha a pasta dos comprovantes para gerar o relatorio.',
+      if (opcoes.incluirRequerimento &&
+          p.relatorioInicio != null &&
+          p.intersticioInicio != null &&
+          p.relatorioInicio!.isBefore(p.intersticioInicio!) &&
+          p.justificativaIntersticio.trim().isEmpty)
+        'Informe a justificativa quando o relatorio comeca antes do intersticio.',
+    ];
+    if (pendencias.isNotEmpty) {
+      throw StateError('Pré-checagem: ${pendencias.join(' ')}');
+    }
+    if (p.pastaComprovantes.trim().isEmpty &&
+        (opcoes.incluirComprovantes || opcoes.incluirTitulacao)) {
+      throw StateError(
+        'Escolha a pasta dos comprovantes na aba Comprovantes / SEI.',
+      );
+    }
+    if (opcoes.criarNovo &&
+        p.processoSei.trim().isNotEmpty &&
+        !opcoes.confirmarNovoComProcessoSalvo) {
+      throw StateError(
+        'Já há o processo ${p.processoSei} salvo. Confirme explicitamente a criação de outro processo.',
+      );
+    }
+
+    // Gera e grava o PDF antes de qualquer mudança no SEI.
+    String? relatorioPath;
+    if (opcoes.incluirRelatorio) {
+      final bytes = await ProgressaoPdfService().gerarRelatorio(p);
+      final pasta = Directory(p.pastaComprovantes);
+      await pasta.create(recursive: true);
+      final base = p.docente
+          .trim()
+          .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
+          .replaceAll(RegExp(r'\s+'), '_');
+      relatorioPath =
+          '${pasta.path}${Platform.pathSeparator}'
+          'Relatorio_Atividades_${base.isEmpty ? 'docente' : base}.pdf';
+      await File(relatorioPath).writeAsBytes(bytes, flush: true);
+    }
+
+    final tipo = opcoes.tipoProcesso.trim().isEmpty
+        ? tipoProcessoSugeridoSei(p)
+        : opcoes.tipoProcesso.trim();
+    final especificacao = opcoes.especificacao.trim().isEmpty
+        ? especificacaoProcessoSei(p)
+        : opcoes.especificacao.trim();
+    final interessado = opcoes.interessado.trim().isEmpty
+        ? p.docente.trim()
+        : opcoes.interessado.trim();
+    p = (await save(
+      p.copyWith(
+        tipoProcessoSei: tipo,
+        especificacaoSei: especificacao,
+        processoSei: opcoes.criarNovo
+            ? p.processoSei
+            : opcoes.numeroProcesso.trim(),
+        acessoComprovantesSei: opcoes.acessoComprovantes,
+      ),
+    ));
+
+    envio
+      ..enviando = true
+      ..cancelar = false
+      ..atualizar();
+    final seiFlow = ProgressaoSeiRequerimento(envio.automation);
+    var requestStatus = 'não solicitado';
+    var novos = 0;
+    var existentes = 0;
+    var titulacaoStatus = 'não solicitada';
+    var relatorioStatus = 'não solicitado';
+    try {
+      if (!envio.automation.isConnected) {
+        await abrirSei('https://sei.ufu.br');
+      } else {
+        await envio.automation.focus();
+      }
+      await seiFlow.aguardarLogin(log: envio.log);
+
+      String numero;
+      if (opcoes.criarNovo) {
+        numero = await seiFlow.iniciarProcesso(
+          p,
+          tipo: tipo,
+          especificacao: especificacao,
+          interessado: interessado,
+          hipoteseLegal: ProgressaoSeiRequerimento.hipotesePessoal,
+          log: envio.log,
+        );
+        p = await save(p.copyWith(processoSei: numero));
+        envio.log(
+          'SEI: número $numero gravado no cadastro; a execução pode ser retomada neste processo.',
+        );
+      } else {
+        final alvo = opcoes.numeroProcesso.trim();
+        if (alvo.isNotEmpty) await seiFlow.abrirProcesso(alvo);
+        numero = await seiFlow.numeroProcessoAtual();
+        if (numero.isEmpty) {
+          throw StateError(
+            'Abra a árvore do processo no SEI ou informe o número do processo existente.',
+          );
+        }
+        if (alvo.isNotEmpty && numero != alvo) {
+          throw StateError(
+            'O processo aberto é $numero, diferente do informado $alvo.',
+          );
+        }
+        p = await save(p.copyWith(processoSei: numero));
+        envio.log('SEI: processo existente confirmado: $numero.');
+      }
+
+      if (opcoes.incluirRequerimento) {
+        requestStatus = await seiFlow.inserirRequerimento(p, log: envio.log)
+            ? 'novo'
+            : 'existente';
+        if (envio.cancelar)
+          throw StateError('Execução interrompida após o requerimento.');
+      }
+
+      if (opcoes.incluirComprovantes) {
+        final lista = lancamentosComComprovante(p);
+        final lote = await envio.automation.insertExternalBatch(
+          documentos: [
+            for (final l in lista)
+              SeiDocumentoExterno(
+                caminho: comprovantes.caminhoAbsoluto(p, l)!,
+                nomeArvore: _nomeArvoreCurto(l.rotuloComprovante),
+              ),
+          ],
+          serie: p.tipoDocumentoSei.trim().isEmpty
+              ? ProgressaoDocente.tipoDocumentoSeiPadrao
+              : p.tipoDocumentoSei.trim(),
+          nivelAcesso:
+              opcoes.acessoComprovantes == AcessoComprovantesSei.restrito
+              ? SeiNivelAcesso.restrito
+              : SeiNivelAcesso.publico,
+          log: envio.log,
+          cancelado: () => envio.cancelar,
+        );
+        novos += lote.criados.length;
+        existentes += lote.existentes.length;
+        if (lote.erros.isNotEmpty)
+          throw StateError('Envio interrompido: ${lote.erros.join('; ')}');
+      }
+
+      if (opcoes.incluirTitulacao) {
+        final diploma = 'Diploma de ${p.titulacao.rotulo}';
+        final lote = await envio.automation.insertExternalBatch(
+          documentos: [
+            SeiDocumentoExterno(
+              caminho: comprovantes.caminhoTitulacao(p)!,
+              nomeArvore: '- $diploma',
+              nomesAlternativos: [
+                diploma,
+                'Comprovante - $diploma',
+                'Comprovante da ultima titulacao - ${p.titulacao.rotulo}',
+              ],
+            ),
+          ],
+          serie: 'Comprovante',
+          nivelAcesso: SeiNivelAcesso.publico,
+          log: envio.log,
+          cancelado: () => envio.cancelar,
+        );
+        novos += lote.criados.length;
+        existentes += lote.existentes.length;
+        if (lote.erros.isNotEmpty)
+          throw StateError('Falha ao anexar diploma: ${lote.erros.join('; ')}');
+        titulacaoStatus = lote.criados.isEmpty ? 'existente' : 'incluída';
+      }
+
+      if (opcoes.incluirRelatorio) {
+        final nome = 'de Atividades - ${p.docente.trim()}';
+        final lote = await envio.automation.insertExternalBatch(
+          documentos: [
+            SeiDocumentoExterno(
+              caminho: relatorioPath!,
+              nomeArvore: nome.length > limiteNomeArvoreSei
+                  ? nome.substring(0, limiteNomeArvoreSei)
+                  : nome,
+              nomesAlternativos: [
+                'Relatório de Atividades - ${p.docente.trim()}',
+              ],
+            ),
+          ],
+          serie: 'Relatório',
+          nivelAcesso: SeiNivelAcesso.publico,
+          log: envio.log,
+          cancelado: () => envio.cancelar,
+        );
+        novos += lote.criados.length;
+        existentes += lote.existentes.length;
+        if (lote.erros.isNotEmpty)
+          throw StateError(
+            'Falha ao anexar relatório: ${lote.erros.join('; ')}',
+          );
+        relatorioStatus = lote.criados.isEmpty ? 'existente' : 'incluído';
+        if (lote.existentes.isNotEmpty) {
+          envio.log(
+            'SEI: relatório ativo já existe. Para substituir, cancele-o no SEI e execute novamente.',
+          );
+        }
+      }
+
+      await envio.automation.treeDocuments();
+      final verificacoes = <String, List<String>>{
+        if (opcoes.incluirRequerimento)
+          'requerimento': ['Requerimento de Progressão / Promoção Docente'],
+        if (opcoes.incluirComprovantes)
+          for (final l in lancamentosComComprovante(p))
+            l.rotuloComprovante: [l.rotuloComprovante],
+        if (opcoes.incluirTitulacao)
+          'titulação': [
+            'Diploma de ${p.titulacao.rotulo}',
+            'Comprovante - Diploma de ${p.titulacao.rotulo}',
+            'Comprovante da ultima titulacao',
+          ],
+        if (opcoes.incluirRelatorio)
+          'relatório': [
+            'de Atividades - ${p.docente.trim()}',
+            'Relatório de Atividades - ${p.docente.trim()}',
+          ],
+      };
+      final faltantes = <String>[];
+      for (final entry in verificacoes.entries) {
+        if (!await envio.automation.existeDocumento(entry.value)) {
+          faltantes.add(entry.key);
+        }
+      }
+      if (faltantes.isNotEmpty) {
+        throw StateError(
+          'Conferência final: ausentes na árvore: ${faltantes.join(', ')}.',
+        );
+      }
+      p = await save(
+        p.copyWith(processoSei: numero, enviadoSeiEm: DateTime.now()),
+      );
+      envio.log(
+        'Concluído: Processo $numero; requerimento $requestStatus; $novos comprovantes incluídos e $existentes já existentes; titulação $titulacaoStatus; relatório $relatorioStatus. Pendente: conferir e assinar o requerimento no SEI.',
+      );
+      return ProgressaoDossieSeiResultado(
+        numeroProcesso: numero,
+        requerimento: requestStatus,
+        comprovantesNovos: novos,
+        comprovantesExistentes: existentes,
+        titulacao: titulacaoStatus,
+        relatorio: relatorioStatus,
+      );
+    } finally {
+      envio
+        ..enviando = false
+        ..atualizar();
+    }
+  }
 
   /// Inclui os comprovantes como documentos externos no processo aberto no
   /// Edge (os que já estão na árvore são mantidos).
