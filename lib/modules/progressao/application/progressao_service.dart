@@ -373,6 +373,130 @@ class ProgressaoService extends ChangeNotifier {
     }
   }
 
+  /// Envia ao processo já aberto os comprovantes, a prova da última
+  /// titulação e, por último, o relatório de atividades separado.
+  Future<SeiLoteResultado> enviarDossieSei(String id) async {
+    await _ensure();
+    final p = _require(id);
+    if (!envio.automation.isConnected) {
+      throw const CommandException(
+        'sei_fechado',
+        'Abra o SEI e deixe aberto o processo de destino.',
+      );
+    }
+    if (!comprovantes.titulacaoExiste(p)) {
+      throw const CommandException(
+        'titulacao_ausente',
+        'Selecione e arquive o comprovante da última titulação.',
+      );
+    }
+    final ausentes = comprovantesAusentes(p);
+    if (ausentes.isNotEmpty) {
+      throw CommandException(
+        'comprovantes_ausentes',
+        'Arquivos não encontrados: ${ausentes.join(', ')}',
+      );
+    }
+    if (p.relatorioInicio == null || p.relatorioFim == null) {
+      throw const CommandException(
+        'periodo_relatorio_ausente',
+        'Informe o período do relatório antes de enviar ao SEI.',
+      );
+    }
+
+    envio
+      ..enviando = true
+      ..cancelar = false
+      ..atualizar();
+    try {
+      final comprovantesLista = lancamentosComComprovante(p);
+      final loteComprovantes = await envio.automation.insertExternalBatch(
+        documentos: [
+          for (final l in comprovantesLista)
+            SeiDocumentoExterno(
+              caminho: comprovantes.caminhoAbsoluto(p, l)!,
+              nomeArvore: l.rotuloComprovante,
+            ),
+        ],
+        serie: p.tipoDocumentoSei.trim().isEmpty
+            ? ProgressaoDocente.tipoDocumentoSeiPadrao
+            : p.tipoDocumentoSei.trim(),
+        log: envio.log,
+        cancelado: () => envio.cancelar,
+      );
+      if (loteComprovantes.erros.isNotEmpty || envio.cancelar) {
+        return loteComprovantes;
+      }
+
+      final titulacaoPath = comprovantes.caminhoTitulacao(p)!;
+      final loteTitulacao = await envio.automation.insertExternalBatch(
+        documentos: [
+          SeiDocumentoExterno(
+            caminho: titulacaoPath,
+            nomeArvore:
+                'Comprovante da última titulação - ${p.titulacao.rotulo}',
+          ),
+        ],
+        serie: 'Comprovante',
+        log: envio.log,
+        cancelado: () => envio.cancelar,
+      );
+      if (loteTitulacao.erros.isNotEmpty || envio.cancelar) {
+        return SeiLoteResultado(
+          criados: [...loteComprovantes.criados, ...loteTitulacao.criados],
+          existentes: [
+            ...loteComprovantes.existentes,
+            ...loteTitulacao.existentes,
+          ],
+          erros: loteTitulacao.erros,
+        );
+      }
+
+      final bytes = await ProgressaoPdfService().gerarRelatorio(p);
+      final pasta = Directory(p.pastaComprovantes);
+      await pasta.create(recursive: true);
+      final nomeBase = p.docente
+          .trim()
+          .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
+          .replaceAll(RegExp(r'\s+'), '_');
+      final relatorioPath =
+          '${pasta.path}${Platform.pathSeparator}'
+          'Relatorio_Atividades_${nomeBase.isEmpty ? 'docente' : nomeBase}.pdf';
+      await File(relatorioPath).writeAsBytes(bytes, flush: true);
+      final nomeArvoreRelatorio = 'de Atividades - ${p.docente.trim()}';
+      final loteRelatorio = await envio.automation.insertExternalBatch(
+        documentos: [
+          SeiDocumentoExterno(
+            caminho: relatorioPath,
+            nomeArvore: nomeArvoreRelatorio.length > limiteNomeArvoreSei
+                ? nomeArvoreRelatorio.substring(0, limiteNomeArvoreSei)
+                : nomeArvoreRelatorio,
+          ),
+        ],
+        serie: 'Relatório',
+        log: envio.log,
+        cancelado: () => envio.cancelar,
+      );
+      return SeiLoteResultado(
+        criados: [
+          ...loteComprovantes.criados,
+          ...loteTitulacao.criados,
+          ...loteRelatorio.criados,
+        ],
+        existentes: [
+          ...loteComprovantes.existentes,
+          ...loteTitulacao.existentes,
+          ...loteRelatorio.existentes,
+        ],
+        erros: loteRelatorio.erros,
+      );
+    } finally {
+      envio
+        ..enviando = false
+        ..atualizar();
+    }
+  }
+
   @override
   void dispose() {
     unawaited(flush());

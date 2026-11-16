@@ -113,6 +113,7 @@ class ProgressaoDocente {
     this.textoAvaliacaoConclusao = textoAvaliacaoConclusaoPadrao,
     this.logoPath = '',
     this.pastaComprovantes = '',
+    this.comprovanteTitulacao = '',
     this.tipoDocumentoSei = tipoDocumentoSeiPadrao,
     this.lancamentos = const [],
     this.atualizadoEm,
@@ -171,6 +172,9 @@ class ProgressaoDocente {
   /// Pasta escolhida ao criar o processo; os comprovantes são copiados para
   /// subpastas dela, já renomeados.
   final String pastaComprovantes;
+
+  /// Caminho relativo da prova da titulação mais recente dentro da pasta.
+  final String comprovanteTitulacao;
 
   /// Tipo do documento externo do SEI para os comprovantes.
   final String tipoDocumentoSei;
@@ -251,6 +255,7 @@ class ProgressaoDocente {
     String? textoAvaliacaoConclusao,
     String? logoPath,
     String? pastaComprovantes,
+    String? comprovanteTitulacao,
     String? tipoDocumentoSei,
     List<LancamentoProgressao>? lancamentos,
     DateTime? atualizadoEm,
@@ -279,6 +284,7 @@ class ProgressaoDocente {
         textoAvaliacaoConclusao ?? this.textoAvaliacaoConclusao,
     logoPath: logoPath ?? this.logoPath,
     pastaComprovantes: pastaComprovantes ?? this.pastaComprovantes,
+    comprovanteTitulacao: comprovanteTitulacao ?? this.comprovanteTitulacao,
     tipoDocumentoSei: tipoDocumentoSei ?? this.tipoDocumentoSei,
     lancamentos: lancamentos ?? this.lancamentos,
     atualizadoEm: atualizadoEm ?? this.atualizadoEm,
@@ -307,6 +313,7 @@ class ProgressaoDocente {
     'textoAvaliacaoConclusao': textoAvaliacaoConclusao,
     'logoPath': logoPath,
     'pastaComprovantes': pastaComprovantes,
+    'comprovanteTitulacao': comprovanteTitulacao,
     'tipoDocumentoSei': tipoDocumentoSei,
     'lancamentos': lancamentos.map((l) => l.toJson()).toList(),
     'atualizadoEm': atualizadoEm?.toIso8601String(),
@@ -354,6 +361,7 @@ class ProgressaoDocente {
           textoAvaliacaoConclusaoPadrao,
       logoPath: json['logoPath'] as String? ?? '',
       pastaComprovantes: json['pastaComprovantes'] as String? ?? '',
+      comprovanteTitulacao: json['comprovanteTitulacao'] as String? ?? '',
       tipoDocumentoSei:
           json['tipoDocumentoSei'] as String? ?? tipoDocumentoSeiPadrao,
       lancamentos: (json['lancamentos'] as List? ?? const [])

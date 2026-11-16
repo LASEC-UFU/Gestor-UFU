@@ -423,7 +423,7 @@ class _Editor extends StatelessWidget {
                         envio: envio,
                         service: service,
                       ),
-                      _ResumoTab(processo: p),
+                      _ResumoTab(processo: p, service: service, envio: envio),
                     ],
                   ),
                 ),
@@ -1613,6 +1613,30 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
     }
   }
 
+  Future<void> _selecionarComprovanteTitulacao() async {
+    if (p.pastaComprovantes.isEmpty) {
+      _avisar(context, 'Escolha a pasta dos comprovantes primeiro.');
+      return;
+    }
+    final resultado = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Selecione o comprovante da última titulação',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+    );
+    final origem = resultado?.files.single.path;
+    if (origem == null) return;
+    try {
+      final relativo = await _comprovantes.importarTitulacao(
+        processo: p,
+        origem: origem,
+      );
+      widget.onChanged(p.copyWith(comprovanteTitulacao: relativo));
+      if (mounted) _avisar(context, 'Comprovante da titulação arquivado.');
+    } on Object catch (error) {
+      if (mounted) _avisar(context, 'Não foi possível arquivar: $error');
+    }
+  }
+
   Future<void> _reorganizar() async {
     setState(() => _ocupado = true);
     try {
@@ -1764,6 +1788,25 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
                 ],
               ),
               const SizedBox(height: 10),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.school_outlined),
+                title: Text(
+                  'Comprovante da última titulação (${p.titulacao.rotulo})',
+                ),
+                subtitle: Text(
+                  _comprovantes.titulacaoExiste(p)
+                      ? p.comprovanteTitulacao
+                      : 'Ainda não selecionado (ex.: diploma de doutorado)',
+                ),
+                trailing: OutlinedButton.icon(
+                  onPressed: _ocupado ? null : _selecionarComprovanteTitulacao,
+                  icon: const Icon(Icons.attach_file, size: 18),
+                  label: Text(
+                    _comprovantes.titulacaoExiste(p) ? 'Trocar' : 'Selecionar',
+                  ),
+                ),
+              ),
               Text(
                 '${lista.length} comprovante(s) arquivado(s)'
                 '${ausentes > 0 ? ' · $ausentes não encontrado(s) na pasta' : ''}'
@@ -1970,9 +2013,79 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
 
 // ------------------------------------------------------------------ Resumo
 class _ResumoTab extends StatelessWidget {
-  const _ResumoTab({required this.processo});
+  const _ResumoTab({
+    required this.processo,
+    required this.service,
+    required this.envio,
+  });
 
   final ProgressaoDocente processo;
+  final ProgressaoService service;
+  final ProgressaoEnvioSei envio;
+
+  Future<void> _montarDossie(BuildContext context) async {
+    if (!envio.automation.isConnected) {
+      final abrir = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Abrir o SEI'),
+          content: const Text(
+            'Crie um processo novo no SEI ou abra um existente. Depois que a árvore do processo estiver aberta no Edge, volte aqui para enviar os documentos.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Abrir SEI'),
+            ),
+          ],
+        ),
+      );
+      if (abrir != true) return;
+      try {
+        await service.abrirSei('https://sei.ufu.br');
+        envio.log('Edge aberto. Crie ou abra o processo e retorne ao Resumo.');
+      } on Object catch (error) {
+        envio.log('Falha ao abrir o SEI: $error');
+      }
+      return;
+    }
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enviar documentos ao SEI'),
+        content: const Text(
+          'Confira se o processo correto está aberto. Serão enviados os comprovantes, a prova da última titulação e, por último, o relatório de atividades em PDF. Itens já presentes na árvore serão ignorados. Inclua o requerimento interno antes desta etapa.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      final r = await service.enviarDossieSei(processo.id);
+      if (context.mounted) {
+        _avisar(
+          context,
+          '${r.criados.length} incluído(s), ${r.existentes.length} existente(s), ${r.erros.length} erro(s).',
+        );
+      }
+    } on Object catch (error) {
+      envio.log('Falha ao montar o dossiê: $error');
+      if (context.mounted) _avisar(context, 'Falha ao enviar: $error');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2001,6 +2114,8 @@ class _ResumoTab extends StatelessWidget {
         'Escolha a pasta dos comprovantes (aba Comprovantes / SEI).',
       if (p.lancamentos.any((l) => l.comprovante.trim().isEmpty))
         '${p.lancamentos.where((l) => l.comprovante.trim().isEmpty).length} lançamento(s) sem comprovante.',
+      if (!_comprovantes.titulacaoExiste(p))
+        'Selecione o comprovante da ultima titulacao na aba Comprovantes / SEI.',
       if (lancamentosComComprovante(p).any((l) => !_comprovantes.existe(p, l)))
         'Há comprovantes que não estão mais na pasta do processo.',
     ];
@@ -2072,7 +2187,7 @@ class _ResumoTab extends StatelessWidget {
                   children: [
                     Icon(Icons.check_circle_outline, color: AppTheme.green),
                     const SizedBox(width: 8),
-                    const Text('Tudo pronto para gerar o PDF.'),
+                    const Text('Dados e comprovantes conferidos.'),
                   ],
                 ),
               for (final a in avisos)
@@ -2091,6 +2206,44 @@ class _ResumoTab extends StatelessWidget {
                     ],
                   ),
                 ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        _cartao(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Montar processo no SEI',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Abra ou crie o processo no SEI. O envio segue esta ordem: comprovantes dos lancamentos, prova da ultima titulacao e relatorio de atividades separado. O requerimento interno deve ser incluido antes. Itens ja presentes na arvore nao sao repetidos.',
+                style: TextStyle(color: AppTheme.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              ListenableBuilder(
+                listenable: envio,
+                builder: (context, _) => FilledButton.icon(
+                  onPressed: envio.enviando
+                      ? null
+                      : () => _montarDossie(context),
+                  icon: envio.enviando
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.playlist_add_check_circle_outlined),
+                  label: Text(
+                    envio.enviando
+                        ? 'Enviando...'
+                        : 'Preparar e enviar documentos',
+                  ),
+                ),
+              ),
             ],
           ),
         ),

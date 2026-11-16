@@ -29,7 +29,11 @@ class ProgressaoPdfService {
     'dezembro',
   ];
 
-  Future<Uint8List> gerar(ProgressaoDocente p, {DateTime? hoje}) async {
+  Future<Uint8List> gerar(
+    ProgressaoDocente p, {
+    DateTime? hoje,
+    bool incluirRequerimento = true,
+  }) async {
     final fonts = await _Fonts.load();
     final logo = await _logo(p.logoPath);
     final doc = pw.Document(
@@ -43,7 +47,9 @@ class ProgressaoPdfService {
       ),
     );
     final b = _Builder(p, fonts, logo, hoje ?? DateTime.now());
-    doc.addPage(b.pagina((ctx) => b.requerimento(), mostrarNome: false));
+    if (incluirRequerimento) {
+      doc.addPage(b.pagina((ctx) => b.requerimento(), mostrarNome: false));
+    }
     doc.addPage(b.pagina((ctx) => b.capa(), mostrarNome: false));
     doc.addPage(b.pagina((ctx) => b.sumario()));
     doc.addPage(
@@ -56,6 +62,11 @@ class ProgressaoPdfService {
     );
     return doc.save();
   }
+
+  /// Gera somente o relatório de atividades para anexá-lo ao SEI como último
+  /// documento, separado do requerimento interno do sistema.
+  Future<Uint8List> gerarRelatorio(ProgressaoDocente p, {DateTime? hoje}) =>
+      gerar(p, hoje: hoje, incluirRequerimento: false);
 
   Future<pw.ImageProvider?> _logo(String path) async {
     if (path.trim().isEmpty) return null;
