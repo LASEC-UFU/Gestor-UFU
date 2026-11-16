@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/elabora_relato_module.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/elabora_relato_page.dart';
@@ -77,7 +78,13 @@ void main() {
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       service = SeiArvoreService();
-      commands = {for (final c in elaboraRelatoCommands(service)) c.id: c};
+      commands = {
+        for (final c in elaboraRelatoCommands(
+          service,
+          ParecerService(arvore: service),
+        ))
+          c.id: c,
+      };
     });
 
     Future<CommandResult> run(String id, Map<String, dynamic> input) =>
@@ -125,13 +132,22 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => ThemeController(isLight: true),
-        child: MaterialApp(home: ElaboraRelatoPage(arvore: SeiArvoreService())),
+        child: MaterialApp(
+          home: ElaboraRelatoPage(
+            parecer: ParecerService(arvore: SeiArvoreService()),
+          ),
+        ),
       ),
     );
-    await tester.pumpAndSettle();
-    expect(find.text('Elabora Relato'), findsOneWidget);
-    expect(find.byType(Tab), findsOneWidget);
-    expect(find.text('Extrair árvore de processo'), findsNWidgets(2));
+    // O editor (WebView2) não existe em testes: só alguns quadros.
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Parecer / Relato'), findsOneWidget);
+    expect(find.byType(Tab), findsNWidgets(3));
+    expect(find.text('II. FUNDAMENTAÇÃO E ANÁLISE'), findsOneWidget);
+    expect(find.text('III. CONCLUSÃO'), findsOneWidget);
+    expect(find.text('1 · Extrair árvore'), findsOneWidget);
     expect(find.text('Extrair árvore'), findsOneWidget);
   });
 }

@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   flutter_secure_storage_windows
   pasteboard
   screen_retriever_windows
+  webview_windows
   window_manager
 )
 

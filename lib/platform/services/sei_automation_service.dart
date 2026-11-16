@@ -46,6 +46,13 @@ class SeiAutomationService {
   bool get isConnected =>
       _browser?.isConnected == true && _page != null && !_page!.isClosed;
 
+  /// Navegador conectado (para automações específicas dos módulos, ex.:
+  /// preencher o editor de um documento interno).
+  Browser? get browser => isConnected ? _browser : null;
+
+  /// Aba principal do SEI controlada pelo app.
+  Page? get page => isConnected ? _page : null;
+
   Future<String> openBrowser(String url) async {
     if (isConnected) {
       await _page!.goto(url, wait: Until.domContentLoaded);

@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
-import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
-import 'package:gestor_ufu/modules/elabora_relato/pages/extrair_arvore_view.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/parecer_secao_view.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 
-/// Uma funcionalidade do Elabora Relato (uma aba da tela).
+/// Uma aba do módulo Parecer / Relato.
 class _Funcionalidade {
   const _Funcionalidade(this.titulo, this.icone, this.builder);
 
@@ -16,19 +17,42 @@ class _Funcionalidade {
   final WidgetBuilder builder;
 }
 
-/// Tela do módulo Elabora Relato. Cada funcionalidade é uma aba; para
-/// acrescentar uma nova, crie a vista em `pages/` e inclua-a em
-/// [_funcionalidades].
-class ElaboraRelatoPage extends StatelessWidget {
-  const ElaboraRelatoPage({required this.arvore, super.key});
+/// Tela do módulo Parecer / Relato: uma aba por seção do parecer (modelo
+/// "Parecer" do SEI). A extração da árvore do processo é a etapa 1 da aba
+/// I. RELATÓRIO.
+class ElaboraRelatoPage extends StatefulWidget {
+  const ElaboraRelatoPage({required this.parecer, super.key});
 
-  final SeiArvoreService arvore;
+  final ParecerService parecer;
+
+  @override
+  State<ElaboraRelatoPage> createState() => _ElaboraRelatoPageState();
+}
+
+class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
+  @override
+  void initState() {
+    super.initState();
+    widget.parecer.carregar();
+  }
+
+  ParecerService get parecer => widget.parecer;
 
   List<_Funcionalidade> get _funcionalidades => [
     _Funcionalidade(
-      'Extrair árvore de processo',
-      Icons.account_tree_rounded,
-      (_) => ExtrairArvoreView(service: arvore),
+      ParecerSecao.relatorio.titulo,
+      Icons.list_alt_rounded,
+      (_) => RelatorioView(service: parecer),
+    ),
+    _Funcionalidade(
+      ParecerSecao.fundamentacao.titulo,
+      Icons.gavel_rounded,
+      (_) => ParecerSecaoView(secao: ParecerSecao.fundamentacao, service: parecer),
+    ),
+    _Funcionalidade(
+      ParecerSecao.conclusao.titulo,
+      Icons.task_alt_rounded,
+      (_) => ParecerSecaoView(secao: ParecerSecao.conclusao, service: parecer),
     ),
   ];
 
@@ -40,7 +64,7 @@ class ElaboraRelatoPage extends StatelessWidget {
       length: itens.length,
       child: ModuleScaffold(
         moduleId: 'elabora-relato',
-        subtitle: 'Relatos de processos do SEI',
+        subtitle: 'Pareceres e relatos de processos do SEI',
         body: Column(
           children: [
             Padding(

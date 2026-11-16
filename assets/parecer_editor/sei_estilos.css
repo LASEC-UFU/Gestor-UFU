@@ -1,0 +1,43 @@
+/*
+ * Estilos de parágrafo do editor do SEI (padrão embutido). Na primeira
+ * inserção de um parecer o Gestor captura o CSS real do editor do SEI e o
+ * usa no lugar deste (ver ParecerService.estilosCss).
+ */
+.ck-content { counter-reset: item-n1 item-n2 item-n3 item-n4 paragrafo-n1 paragrafo-n2 paragrafo-n3 paragrafo-n4 romano_maiusculo letra_minuscula; }
+.ck-content p { font-family: Calibri, Carlito, "Segoe UI", sans-serif; font-size: 12pt; margin: 6pt; }
+
+.ck-content p.Citacao { font-size: 10pt; margin: 4pt 0 4pt 160px; text-align: justify; word-wrap: normal; }
+.ck-content p.Item_Alinea_Letra { text-indent: 0; text-align: justify; margin: 6pt 6pt 6pt 120px; counter-increment: letra_minuscula; }
+.ck-content p.Item_Alinea_Letra::before { content: counter(letra_minuscula, lower-latin) ") "; display: inline-block; width: 5mm; font-weight: normal; }
+.ck-content p.Item_Inciso_Romano { text-indent: 0; text-align: justify; margin: 6pt 6pt 6pt 120px; counter-increment: romano_maiusculo; counter-reset: letra_minuscula; }
+.ck-content p.Item_Inciso_Romano::before { content: counter(romano_maiusculo, upper-roman) " - "; display: inline-block; width: 15mm; font-weight: normal; }
+.ck-content p.Item_Nivel1 { text-transform: none; text-indent: 0; text-align: justify; margin: 6pt; counter-increment: item-n1; counter-reset: item-n2 item-n3 item-n4 romano_maiusculo letra_minuscula; }
+.ck-content p.Item_Nivel1::before { content: counter(item-n1) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Item_Nivel2 { text-indent: 0; text-align: justify; margin: 6pt; counter-increment: item-n2; counter-reset: item-n3 item-n4 romano_maiusculo letra_minuscula; }
+.ck-content p.Item_Nivel2::before { content: counter(item-n1) "." counter(item-n2) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Item_Nivel3 { text-indent: 0; text-align: justify; margin: 6pt; counter-increment: item-n3; counter-reset: item-n4 romano_maiusculo letra_minuscula; }
+.ck-content p.Item_Nivel3::before { content: counter(item-n1) "." counter(item-n2) "." counter(item-n3) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Item_Nivel4 { text-indent: 0; text-align: justify; margin: 6pt; counter-increment: item-n4; counter-reset: romano_maiusculo letra_minuscula; }
+.ck-content p.Item_Nivel4::before { content: counter(item-n1) "." counter(item-n2) "." counter(item-n3) "." counter(item-n4) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Paragrafo_Numerado_Nivel1 { text-indent: 0; text-align: justify; margin: 6pt; counter-increment: paragrafo-n1; counter-reset: paragrafo-n2 paragrafo-n3 paragrafo-n4 romano_maiusculo letra_minuscula; }
+.ck-content p.Paragrafo_Numerado_Nivel1::before { content: counter(paragrafo-n1) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Paragrafo_Numerado_Nivel2 { text-indent: 0; text-align: justify; margin: 6pt; counter-increment: paragrafo-n2; counter-reset: paragrafo-n3 paragrafo-n4 romano_maiusculo letra_minuscula; }
+.ck-content p.Paragrafo_Numerado_Nivel2::before { content: counter(paragrafo-n1) "." counter(paragrafo-n2) "."; display: inline-block; width: 25mm; font-weight: normal; }
+.ck-content p.Tabela_Texto_8 { font-size: 8pt; margin: 0 3pt; }
+.ck-content p.Tabela_Texto_Alinhado_Direita { text-align: right; margin: 0 3pt; }
+.ck-content p.Tabela_Texto_Alinhado_Esquerda { text-align: left; margin: 0 3pt; }
+.ck-content p.Tabela_Texto_Centralizado { text-align: center; margin: 0 3pt; }
+.ck-content p.Texto_Alinhado_Direita { text-align: right; margin: 6pt; }
+.ck-content p.Texto_Alinhado_Esquerda { text-align: left; margin: 6pt; }
+.ck-content p.Texto_Alinhado_Esquerda_Espacamento_Simples { text-align: left; margin: 0; }
+.ck-content p.Texto_Alinhado_Esquerda_Espacamento_Simples_Maiusc { text-align: left; margin: 0; text-transform: uppercase; }
+.ck-content p.Texto_Centralizado { text-align: center; margin: 6pt; }
+.ck-content p.Texto_Centralizado_Maiusculas { text-align: center; margin: 6pt; text-transform: uppercase; }
+.ck-content p.Texto_Centralizado_Maiusculas_Negrito { text-align: center; margin: 6pt; text-transform: uppercase; font-weight: bold; }
+.ck-content p.Texto_Espaco_Duplo_Recuo_Primeira_Linha { text-align: justify; text-indent: 25mm; line-height: 2; margin: 6pt; }
+.ck-content p.Texto_Fundo_Cinza_Maiusculas_Negrito { text-align: justify; text-transform: uppercase; font-weight: bold; background-color: #e6e6e6; margin: 6pt; }
+.ck-content p.Texto_Fundo_Cinza_Negrito { text-align: justify; font-weight: bold; background-color: #e6e6e6; margin: 6pt; }
+.ck-content p.Texto_Justificado { text-align: justify; margin: 6pt; }
+.ck-content p.Texto_Justificado_Maiusculas { text-align: justify; text-transform: uppercase; margin: 6pt; }
+.ck-content p.Texto_Justificado_Recuo_Primeira_Linha { text-align: justify; text-indent: 25mm; margin: 6pt; }
+.ck-content p.Texto_Justificado_Recuo_Primeira_Linha_Esp_Simples { text-align: justify; text-indent: 25mm; margin: 0 0 0 6pt; }

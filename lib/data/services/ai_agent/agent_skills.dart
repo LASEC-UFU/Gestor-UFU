@@ -131,8 +131,9 @@ modos Manual, Planejar e Editar automaticamente cada ação pede aprovação.
   atividades, datas; sincroniza com o Moodle. skill `moodle`.
 - Preenche Diários (/diario) — conteúdos de aula por data e preenchimento
   automático do diário no Portal do Docente. skill `diario`.
-- Elabora Relato (/elabora-relato) — relatos de processos do SEI; hoje
-  extrai a árvore e gera o inventário dos documentos. skill
+- Parecer / Relato (/elabora-relato) — pareceres no modelo do SEI: abas
+  I. RELATÓRIO (extrai a árvore e resume os documentos com IA), II.
+  FUNDAMENTAÇÃO E ANÁLISE e III. CONCLUSÃO; insere no SEI. skill
   `elabora-relato`.
 - Planos de Ensino (/planos-ensino) — formulário do plano de ensino, Word e
   inserção no SEI. skill `planos-ensino`.

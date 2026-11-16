@@ -10,9 +10,20 @@ import 'package:gestor_ufu/presentation/controllers/theme_controller.dart';
 /// Funcionalidade "Extrair árvore de processo" do módulo Elabora Relato:
 /// lê os documentos do processo aberto no SEI e monta o inventário.
 class ExtrairArvoreView extends StatefulWidget {
-  const ExtrairArvoreView({required this.service, super.key});
+  const ExtrairArvoreView({
+    required this.service,
+    this.onEnviarAoRelatorio,
+    this.compacto = false,
+    super.key,
+  });
 
   final SeiArvoreService service;
+
+  /// Envia o inventário ao editor do relatório (etapa 2 do I. RELATÓRIO).
+  final VoidCallback? onEnviarAoRelatorio;
+
+  /// Dentro da aba do relatório: sem o título grande.
+  final bool compacto;
 
   @override
   State<ExtrairArvoreView> createState() => _ExtrairArvoreViewState();
@@ -34,6 +45,7 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
   void initState() {
     super.initState();
     _service.addListener(_refresh);
+    _service.carregarInventario();
     _service.enderecoSalvo().then((url) {
       if (mounted) _urlController.text = url;
     });
@@ -54,6 +66,7 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
   String get _status {
     if (_openingBrowser) return 'Abrindo o Edge…';
     if (_extracting) return 'Consultando documentos do processo';
+    if (_service.resumindo) return 'Resumindo com o Agente de IA';
     if (_browserOpened) return 'Edge conectado';
     return 'Navegador não conectado';
   }
@@ -137,6 +150,109 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
     }
   }
 
+  Future<void> _resumirComIa() async {
+    final docs = _service.documentos;
+    if (docs.isEmpty) return;
+    final semTexto = docs.where((d) => d.texto.trim().isEmpty).length;
+    final comResumo = docs.where((d) => d.resumo.trim().isNotEmpty).length;
+    final escolha = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Resumir documentos com o Agente de IA'),
+        content: SizedBox(
+          width: 520,
+          child: Text(
+            'O agente configurado na janela do Agente de IA lê o texto de '
+            'cada documento e escreve um resumo curto no estilo do relatório '
+            '("encaminhamento do processo pela PROGRAD à SEGER…").\n\n'
+            '${docs.length} documento(s); $comResumo já com resumo.'
+            '${semTexto > 0 ? '\n$semTexto sem texto lido (PDFs/anexos ou inventário de outra sessão): o resumo sai só pelo nome — extraia de novo para ler o conteúdo.' : ''}',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx, 'vazios'),
+            child: const Text('Só os sem resumo'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, 'todos'),
+            icon: const Icon(Icons.auto_awesome_rounded, size: 17),
+            label: const Text('Resumir todos'),
+          ),
+        ],
+      ),
+    );
+    if (escolha == null || !mounted) return;
+    setState(() => _error = null);
+    try {
+      final n = await _service.resumirComIa(apenasVazios: escolha == 'vazios');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$n resumo(s) gerados. Revise antes de usar.')),
+      );
+    } catch (error) {
+      _service.log('Erro nos resumos com IA: ${_message(error)}');
+      if (mounted) setState(() => _error = _message(error));
+    }
+  }
+
+  Future<void> _editarDocumento(int ordem) async {
+    final doc = _service.documentos.where((d) => d.ordem == ordem).firstOrNull;
+    if (doc == null) return;
+    final data = TextEditingController(text: doc.data);
+    final resumo = TextEditingController(text: doc.resumo);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('${doc.ordem}. ${doc.nomeArvore}'),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: data,
+                decoration: const InputDecoration(
+                  labelText: 'Data (dd/mm/aaaa)',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: resumo,
+                minLines: 2,
+                maxLines: 6,
+                decoration: const InputDecoration(labelText: 'Resumo'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await _service.atualizarDocumento(
+        ordem,
+        data: data.text,
+        resumo: resumo.text,
+      );
+    }
+    data.dispose();
+    resumo.dispose();
+  }
+
   Future<void> _copyReport() async {
     if (_service.documentos.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: _service.relatorio()));
@@ -158,8 +274,19 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(28, 16, 28, 32),
           children: [
-            _buildIntro(),
-            const SizedBox(height: 20),
+            if (!widget.compacto) ...[
+              _buildIntro(),
+              const SizedBox(height: 20),
+            ] else ...[
+              Align(
+                alignment: Alignment.centerRight,
+                child: _StatusPill(
+                  label: _status,
+                  busy: _openingBrowser || _extracting || _service.resumindo,
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             _buildConnectionCard(),
             const SizedBox(height: 16),
             _buildQueryCard(canExtract),
@@ -167,7 +294,7 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
               const SizedBox(height: 16),
               _buildErrorBanner(_error!),
             ],
-            if (_extracting) ...[
+            if (_extracting || _service.resumindo) ...[
               const SizedBox(height: 16),
               _buildProgressCard(),
             ],
@@ -432,13 +559,40 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
                 runSpacing: 8,
                 children: [
                   FilledButton.icon(
+                    onPressed: _service.resumindo || _extracting
+                        ? null
+                        : _resumirComIa,
+                    icon: _service.resumindo
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded, size: 17),
+                    label: Text(
+                      _service.resumindo ? 'Resumindo…' : 'Resumir com IA',
+                    ),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                  if (widget.onEnviarAoRelatorio != null)
+                    FilledButton.icon(
+                      onPressed: _service.resumindo || _extracting
+                          ? null
+                          : widget.onEnviarAoRelatorio,
+                      icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                      label: const Text('Enviar ao relatório'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.green,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  OutlinedButton.icon(
                     onPressed: _copyReport,
                     icon: const Icon(Icons.copy_rounded, size: 17),
-                    label: const Text('Copiar relatório'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFB454),
-                      foregroundColor: const Color(0xFF241606),
-                    ),
+                    label: const Text('Copiar texto'),
                   ),
                   OutlinedButton.icon(
                     onPressed: _saveReport,
@@ -465,7 +619,8 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Os campos foram inferidos do texto visível. Revise antes de usar em um parecer.',
+                  'Datas e resumos são inferidos do texto (ou gerados pela IA). '
+                  'Clique na data ou no resumo de um documento para corrigir.',
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
                 ),
               ),
@@ -504,8 +659,9 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
             ),
           ),
           ExpansionTile(
+            initiallyExpanded: widget.compacto,
             title: Text(
-              'Ver campos identificados por documento',
+              'Campos por documento (clique para editar data e resumo)',
               style: TextStyle(color: AppTheme.textPrimary, fontSize: 12),
             ),
             collapsedIconColor: AppTheme.textSecondary,
@@ -550,8 +706,22 @@ class _ExtrairArvoreViewState extends State<ExtrairArvoreView> {
                   DataCell(
                     Text(document.codigoSei.isEmpty ? '—' : document.codigoSei),
                   ),
-                  DataCell(_LimitedCell(document.data, width: 150)),
-                  DataCell(_LimitedCell(document.resumo, width: 320)),
+                  DataCell(
+                    _LimitedCell(
+                      document.data.isEmpty ? '—' : document.data,
+                      width: 110,
+                    ),
+                    showEditIcon: true,
+                    onTap: () => _editarDocumento(document.ordem),
+                  ),
+                  DataCell(
+                    _LimitedCell(
+                      document.resumo.isEmpty ? '—' : document.resumo,
+                      width: 420,
+                    ),
+                    showEditIcon: true,
+                    onTap: () => _editarDocumento(document.ordem),
+                  ),
                 ],
               );
             }).toList(),

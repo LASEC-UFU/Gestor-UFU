@@ -23,6 +23,8 @@ import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/platform/services/navigation_service.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
+import 'package:gestor_ufu/data/services/ai_agent/agent_text_service.dart';
+import 'package:gestor_ufu/platform/contracts/ai_text.dart';
 import 'package:window_manager/window_manager.dart';
 
 String _appVersion = 'desconhecida';
@@ -104,6 +106,8 @@ Future<void> main(List<String> args) async {
   // módulos usa esta instância; trocar o período vale para todas as telas.
   await services.terms.load();
   AcademicTermService.shared = services.terms;
+  // Ponte com o Agente de IA para os módulos (ex.: resumos de documentos).
+  services.registerContract<AiTextService>(const AgentTextService());
   await ModuleRegistry.instance.activateAll(services);
   final themeCtrl = ThemeController(
     isLight: preferences.getBool(ThemeController.storageKey) ?? false,

@@ -37,6 +37,7 @@ dependencies:
   crypto: ^3.0.7
   image: ^4.3.0
   win32: ^5.15.0
+  webview_windows: 0.4.0
 
 dev_dependencies:
   flutter_test:
@@ -63,3 +64,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/adjust_schedule/seed.json
+    - assets/parecer_editor/

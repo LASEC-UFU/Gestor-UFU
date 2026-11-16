@@ -7,6 +7,8 @@ class SeiDocumento {
     this.tipoNumero = '',
     this.data = '',
     this.resumo = '',
+    this.texto = '',
+    this.idDocumento = '',
   });
 
   final int ordem;
@@ -16,6 +18,24 @@ class SeiDocumento {
   final String data;
   final String resumo;
 
+  /// Texto visível do documento (só em memória; base do resumo pela IA).
+  final String texto;
+
+  /// Id interno do documento no SEI (`id_documento` do endereço da árvore),
+  /// usado no link SEI: `<a class="ancora_sei" id="lnkSei{id}">{código}</a>`.
+  final String idDocumento;
+
+  SeiDocumento copyWith({String? data, String? resumo}) => SeiDocumento(
+    ordem: ordem,
+    nomeArvore: nomeArvore,
+    codigoSei: codigoSei,
+    tipoNumero: tipoNumero,
+    data: data ?? this.data,
+    resumo: resumo ?? this.resumo,
+    texto: texto,
+    idDocumento: idDocumento,
+  );
+
   factory SeiDocumento.fromJson(Map<String, dynamic> json) => SeiDocumento(
     ordem: (json['ordem'] as num?)?.toInt() ?? 0,
     nomeArvore: json['nome_arvore']?.toString() ?? '',
@@ -23,6 +43,7 @@ class SeiDocumento {
     tipoNumero: json['tipo_numero']?.toString() ?? '',
     data: json['data']?.toString() ?? '',
     resumo: json['resumo']?.toString() ?? '',
+    idDocumento: json['id_documento']?.toString() ?? '',
   );
 
   Map<String, dynamic> toJson() => {
@@ -32,6 +53,7 @@ class SeiDocumento {
     'tipo_numero': tipoNumero,
     'data': data,
     'resumo': resumo,
+    'id_documento': idDocumento,
   };
 
   /// Monta o documento a partir do texto do nó da árvore e, quando houver,
@@ -40,6 +62,7 @@ class SeiDocumento {
     int ordem,
     String nomeArvore, {
     String texto = '',
+    String href = '',
   }) {
     final (tipo, codigo) = SeiArvoreTexto.dividirNome(nomeArvore);
     return SeiDocumento(
@@ -49,6 +72,9 @@ class SeiDocumento {
       tipoNumero: tipo,
       data: SeiArvoreTexto.data(texto),
       resumo: SeiArvoreTexto.resumo(texto),
+      texto: texto,
+      idDocumento:
+          RegExp(r'id_documento=(\d+)').firstMatch(href)?.group(1) ?? '',
     );
   }
 }
@@ -141,4 +167,31 @@ class SeiArvoreTexto {
         return '${doc.ordem}. $ident$code$date$summary';
       })
       .join('\n');
+
+  static const _nomesMeses = [
+    'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', //
+    'agosto', 'setembro', 'outubro', 'novembro', 'dezembro',
+  ];
+
+  /// "03/03/2025" → "03 de março de 2025" (outros formatos ficam iguais).
+  static String dataPorExtenso(String data) {
+    final m = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{4})$').firstMatch(data.trim());
+    if (m == null) return data.trim();
+    final mes = int.parse(m.group(2)!);
+    if (mes < 1 || mes > 12) return data.trim();
+    return '${m.group(1)!.padLeft(2, '0')} de ${_nomesMeses[mes - 1]} de '
+        '${m.group(3)}';
+  }
+
+  /// Item do relatório no estilo dos pareceres: "Ofício 12 (1234567) – de
+  /// 03 de março de 2025, resumo" (sem número nem pontuação final).
+  static String itemParecer(SeiDocumento doc) {
+    final ident = doc.tipoNumero.isNotEmpty ? doc.tipoNumero : doc.nomeArvore;
+    final code = doc.codigoSei.isNotEmpty ? ' (${doc.codigoSei})' : '';
+    final partes = [
+      if (doc.data.isNotEmpty) 'de ${dataPorExtenso(doc.data)}',
+      if (doc.resumo.isNotEmpty) doc.resumo.replaceAll(RegExp(r'[;.]+$'), ''),
+    ];
+    return partes.isEmpty ? '$ident$code' : '$ident$code – ${partes.join(', ')}';
+  }
 }

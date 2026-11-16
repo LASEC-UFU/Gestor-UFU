@@ -2,41 +2,54 @@ import 'package:gestor_ufu/platform/module/gestor_module.dart';
 
 /// Guia do módulo entregue ao Agente de IA.
 ModuleSkill elaboraRelatoSkill() => const ModuleSkill(
-  title: 'Elabora Relato',
-  summary: 'Relatos de processos do SEI (árvore de documentos e inventário).',
+  title: 'Parecer / Relato',
+  summary:
+      'Pareceres no modelo "Parecer" do SEI: relatório (árvore do processo '
+      'e resumos), fundamentação, conclusão e inserção no SEI.',
   body: '''
 ## Para que serve
-Reúne ferramentas para montar o relato de um processo do SEI (ex.: para um
-parecer). Hoje tem uma funcionalidade; outras virão.
+Monta um parecer no estilo dos pareceres de conselho da UFU (ex.: Parecer
+93/2026/CONGRAD) e o insere no SEI no tipo de documento "Parecer", como os
+Planos de Ensino. A tela (`/elabora-relato`) tem três abas, cada uma com um
+editor HTML igual ao do SEI (CKEditor 5 com os estilos do SEI):
+- I. RELATÓRIO — etapa 1 "Extrair árvore" (inventário do processo) e etapa
+  2 "Redigir relatório" (editor);
+- II. FUNDAMENTAÇÃO E ANÁLISE;
+- III. CONCLUSÃO ("CONSIDERANDO…" e o voto).
+"Dados do parecer": assunto, ementa, vocativo, abertura, fecho e signatário.
+PARECER Nº, PROCESSO Nº e INTERESSADO(S) são preenchidos pelo SEI.
 
-## Funcionalidade: Extrair árvore de processo
-Lê a árvore de um processo aberto no SEI (no Edge controlado pelo app) e
-monta o inventário dos documentos: ordem, nome na árvore, tipo/número,
-código SEI, data e resumo.
+## Etapa 1 do relatório: árvore do processo
+1. `relato.abrirSei` {url?}: abre o Edge no SEI; o usuário entra e abre o
+   processo. Espere ele confirmar.
+2. `relato.extrairArvore` {lerConteudo?}: lê a árvore (ordem, nome, tipo/
+   número, código SEI, id interno, data e resumo estimados).
+3. Resumos: `relato.resumirComIa` {apenasVazios?} pede ao provedor
+   configurado; ou escreva você mesmo lendo `relato.textoDocumento` {ordem}
+   e gravando com `relato.atualizarResumos` {itens:[{ordem,resumo,data?}]}.
+   Estilo do resumo: uma frase curta, minúscula, sem tipo/número/data e sem
+   ponto final ("encaminhamento do processo pela SEGER à relatora
+   solicitando apreciação, análise e parecer").
+4. `parecer.inserirInventario` {porPastas?, introducao?}: insere no
+   relatório "1. Ofício 12 (link SEI) – de 03 de março de 2025, resumo;".
+`relato.relatorioArvore` {path?} devolve o inventário em texto.
 
-Comandos (run_command):
-1. `relato.abrirSei` {url?}: abre o Edge no SEI. O usuário faz o login e
-   abre o processo; espere ele confirmar.
-2. `relato.extrairArvore` {lerConteudo?}: lê a árvore (abre todas as
-   pastas). Com lerConteudo (padrão) busca o texto de cada documento para
-   estimar a data (assinatura eletrônica, data por extenso ou numérica) e o
-   resumo (linha "Assunto:"/"Objeto:" ou primeiro parágrafo). PDFs externos
-   ficam sem data/resumo. Avise que esses campos precisam de revisão.
-3. `relato.relatorioArvore` {path?}: texto no formato para parecer
-   ("1. Ofício 12 (1234567), de 03/03/2025 – resumo"); com path salva .txt
-   (padrão Documentos/GestorUFU Agente/elabora_relato).
+## Redigir e inserir
+- `parecer.ler` / `parecer.definir` (campos e HTML das seções relatorio,
+  fundamentacao, conclusao). Use parágrafos `<p class="Texto_Justificado_
+  Recuo_Primeira_Linha">`; links SEI `<a class="ancora_sei"
+  id="lnkSei{id_documento}">{número SEI}</a>` (id interno ≠ número SEI).
+- `parecer.inserirSei`: só após confirmação do usuário. Gera o documento
+  "Parecer" no processo aberto (ou preenche o editor de Parecer aberto) e
+  salva sem assinar.
 
-Códigos de erro: endereco_invalido, sei_fechado (Edge não aberto pelo app),
-fora_do_sei (aba saiu do SEI), arvore_vazia (nenhum processo aberto),
-em_andamento, sem_extracao.
-
-Na tela (`/elabora-relato`, aba "Extrair árvore de processo"): "Abrir
-Edge"/"Ir para o SEI", depois "Extrair árvore"; "Copiar relatório" ou
-"Exportar .txt".
+Códigos de erro: endereco_invalido, sei_fechado, fora_do_sei, arvore_vazia,
+em_andamento, sem_extracao, ia_indisponivel, documento_inexistente,
+falha_sei, tempo_esgotado.
 
 ## Banco
-Só guarda o último endereço do SEI (`sei_tree_address_url`). Ajude o usuário
-a interpretar e organizar o inventário (ex.: listar só os comprovantes,
-conferir numeração, montar o texto do relato); só grave algo se ele pedir.
+`sei_tree_address_url` (endereço do SEI), `parecer_relato_inventario`
+(último inventário), `parecer_relato_rascunho` (rascunho) e
+`parecer_relato_estilos_sei` (estilos capturados do editor do SEI).
 ''',
 );
