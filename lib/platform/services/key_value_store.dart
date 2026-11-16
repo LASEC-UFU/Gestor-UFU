@@ -14,6 +14,10 @@ class KeyValueStore {
 
   final Future<SharedPreferences> Function() _open;
 
+  /// Atualiza o cache desta janela antes de ler dados alterados por outro
+  /// engine Flutter (por exemplo, a janela do Agente de IA).
+  Future<void> reload() async => (await _open()).reload();
+
   /// Lê um texto JSON e decodifica; `null` se ausente ou inválido.
   Future<Object?> readJson(String key) async {
     final raw = (await _open()).getString(key);

@@ -162,6 +162,7 @@ class OrqController extends ChangeNotifier {
   bool coordinatorBusy = false;
   AgentBackend? _coordinator;
   AgentProvider? _coordinatorProvider;
+  String? _coordinatorWorkDir;
   Map<String, dynamic> _coordinatorState = const {};
 
   /// Computador onde a sessão do coordenador foi salva (a sessão do CLI só
@@ -265,7 +266,8 @@ class OrqController extends ChangeNotifier {
 
   Future<void> saveSettings() async {
     await settings.save(_store);
-    if (_coordinatorProvider != settings.coordinator) {
+    if (_coordinatorProvider != settings.coordinator ||
+        _coordinatorWorkDir != settings.projectPath) {
       await _dropCoordinator();
     }
     _changed();
@@ -447,6 +449,7 @@ class OrqController extends ChangeNotifier {
     final backend = _coordinator;
     _coordinator = null;
     _coordinatorProvider = null;
+    _coordinatorWorkDir = null;
     _coordinatorState = const {};
     _sentContext = '';
     await backend?.dispose();
@@ -617,7 +620,9 @@ class OrqController extends ChangeNotifier {
 
   Future<AgentBackend> _ensureCoordinator() async {
     final current = _coordinator;
-    if (current != null && _coordinatorProvider == settings.coordinator) {
+    if (current != null &&
+        _coordinatorProvider == settings.coordinator &&
+        _coordinatorWorkDir == settings.projectPath) {
       return current;
     }
     await _dropCoordinator();
@@ -640,6 +645,7 @@ class OrqController extends ChangeNotifier {
     }
     _coordinator = backend;
     _coordinatorProvider = settings.coordinator;
+    _coordinatorWorkDir = settings.projectPath;
     return backend;
   }
 
@@ -1211,12 +1217,16 @@ class OrqController extends ChangeNotifier {
 
   Future<String> _prepareWorkspace(OrqRun run, OrqTask task) async {
     if (task.target == OrqTarget.gestor) return '';
-    final project = run.projectPath.isNotEmpty
-        ? run.projectPath
-        : settings.projectPath;
+    // O caminho absoluto do quadro pode ter sido salvo em outro computador.
+    // Prefira sempre o caminho configurado localmente neste computador.
+    final project = settings.projectPath.trim().isNotEmpty
+        ? settings.projectPath.trim()
+        : run.projectPath.trim();
     if (project.isEmpty || !await Directory(project).exists()) {
       throw StateError(
-        'Configure a pasta do projeto nas configurações do Orquestrador.',
+        project.isEmpty
+            ? 'Configure a pasta do projeto nas configurações do Orquestrador.'
+            : 'A pasta do projeto não existe neste computador: $project',
       );
     }
     if (task.worktree == 'current') return project;
