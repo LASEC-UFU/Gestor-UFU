@@ -393,8 +393,9 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
     description:
         'Executa só a etapa indicada no processo salvo (processo, '
         'requerimento, comprovantes, titulacao, relatorio) — ou "pendentes" '
-        'para todas as que faltam, em ordem. Documentos presentes não são '
-        'duplicados. Pede confirmação.',
+        'para todas as que faltam, em ordem, ou "atualizarRelatorio" para gerar '
+        'de novo o relatório e trocar o PDF do documento já existente no SEI. '
+        'Documentos presentes não são duplicados. Pede confirmação.',
     approval: CommandApproval.required,
     mutates: true,
     inputSchema: {
@@ -403,7 +404,11 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
         ..._processoId,
         'etapa': {
           'type': 'string',
-          'enum': [...EtapaSei.values.map((e) => e.name), 'pendentes'],
+          'enum': [
+            ...EtapaSei.values.map((e) => e.name),
+            'pendentes',
+            'atualizarRelatorio',
+          ],
         },
       },
       'required': ['processoId', 'etapa'],
@@ -413,6 +418,8 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
       final nome = input.requireString('etapa');
       if (nome == 'pendentes') {
         await service.executarEtapasPendentes(id);
+      } else if (nome == 'atualizarRelatorio') {
+        await service.atualizarRelatorioSei(id);
       } else {
         final etapa = EtapaSei.values.where((e) => e.name == nome).firstOrNull;
         if (etapa == null) {

@@ -78,6 +78,5 @@ class ElaboraRelatoModule extends GestorModule {
   ModuleSkill get skill => elaboraRelatoSkill();
 
   @override
-  List<ModuleCommand> get commands =>
-      elaboraRelatoCommands(_arvore, _parecer);
+  List<ModuleCommand> get commands => elaboraRelatoCommands(_arvore, _parecer);
 }

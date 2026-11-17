@@ -90,6 +90,31 @@ Future<T?> seiEvaluateAnyFrame<T>(
   return null;
 }
 
+const _clickTreeDocumentScript = r'''(alvos) => {
+ const norm=s=>(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ if(!/acao=procedimento_visualizar/.test(location.href))return false;
+ const a=[...document.querySelectorAll('a[id^="anchor"]')].filter(x=>/^anchor\d+$/.test(x.id)).find(x=>{const t=norm(x.textContent+' '+(x.title||''));return !/cancelad/.test(t)&&alvos.some(n=>t.includes(n));});
+ if(!a)return false;a.click();return true;
+}''';
+const _clickAlterExternalScript = r'''() => {
+ const a=[...document.querySelectorAll('a[href]')].find(x=>(x.getAttribute('href')||'').includes('documento_alterar_recebido'));
+ if(!a)return false;a.click();return true;
+}''';
+const _isAlterExternalFormScript =
+    r'''() => /acao=documento_alterar_recebido/.test(location.href) && !!document.getElementById('selSerie')''';
+const _removeAttachmentScript = r'''() => {
+ if(!/acao=documento_alterar_recebido/.test(location.href))return false;
+ const img=[...document.querySelectorAll('#tblAnexos img')].find(i=>/remover/i.test(i.title||i.alt||''));
+ if(!img)return false;img.click();return true;
+}''';
+const _attachmentRemovedScript = r'''() => {
+ if(!/acao=documento_alterar_recebido/.test(location.href))return false;
+ const t=document.getElementById('tblAnexos');
+ const linhas=t?[...t.rows].filter(r=>r.querySelector('td')).length:0;
+ const visivel=t&&(t.offsetWidth||t.offsetHeight);
+ return linhas===0||!visivel;
+}''';
+
 const _framesSnapshotScript = r'''() => {
  const out=[];const walk=(w,d)=>{try{out.push(d+':'+w.location.href+':'+w.document.readyState);for(const f of w.document.querySelectorAll('iframe,frame'))walk(f.contentWindow,d+1);}catch(e){out.push(d+':x');}};
  walk(window,0);return out.join('|');
@@ -477,6 +502,76 @@ class SeiAutomationService {
 
   /// Indica se a árvore possui um documento ativo que corresponda a algum
   /// dos nomes fornecidos, ignorando o número SEI entre parênteses.
+  /// Troca o arquivo anexado de um documento externo já existente (o
+  /// primeiro nó ativo da árvore com algum dos [nomes]) por [filePath],
+  /// pelo "Consultar/Alterar Documento Externo". O número SEI e a posição
+  /// na árvore são mantidos. Não funciona em documento assinado/autenticado.
+  Future<void> substituirAnexoDocumentoExterno({
+    required List<String> nomes,
+    required String filePath,
+    required SeiLog log,
+  }) async {
+    _checkReady();
+    final file = await _checkFile(filePath);
+    final browser = _browser!;
+    var alertText = '';
+    final dialogs = <StreamSubscription<Dialog>>[];
+    for (final page in await browser.pages) {
+      dialogs.add(
+        page.onDialog.listen((dialog) async {
+          final message = dialog.message ?? '';
+          // "Remover Item" pede confirmação; outros alertas são erros.
+          if (!_normalize(message).contains('confirma')) alertText = message;
+          await dialog.accept();
+        }),
+      );
+    }
+    try {
+      await _openAllFolders();
+      final alvos = nomes.map(_normalize).where((n) => n.isNotEmpty).toList();
+      final selecionado = await _anyFrame<bool>(
+        _clickTreeDocumentScript,
+        args: [alvos],
+      );
+      if (selecionado != true) {
+        throw StateError('Documento não encontrado na árvore: ${nomes.first}.');
+      }
+      log('SEI: documento selecionado na árvore; abrindo a alteração.');
+      await _aguardarSeiEstavel();
+      await _waitUntil(
+        () => _anyFrame<bool>(_clickAlterExternalScript),
+        'o comando Consultar/Alterar Documento Externo',
+      );
+      await _waitUntil(
+        () => _anyFrame<bool>(_removeAttachmentScript),
+        'a lista de anexos do documento',
+      );
+      await _waitUntil(
+        () => _anyFrame<bool>(_attachmentRemovedScript),
+        'a remoção do anexo anterior',
+      );
+      log('SEI: anexo anterior removido do formulário.');
+      await _attachPdf(file);
+      log('SEI: novo arquivo anexado.');
+      final saved = await _anyFrame<bool>(_saveExternalScript);
+      if (saved != true) {
+        throw StateError('Não encontrei o botão Salvar da alteração.');
+      }
+      await _waitUntil(() async {
+        if (alertText.isNotEmpty) return true;
+        return await _anyFrame<bool>(_isAlterExternalFormScript) != true;
+      }, 'a gravação da alteração do documento');
+      if (alertText.isNotEmpty) {
+        throw StateError('O SEI exibiu um alerta ao salvar: $alertText');
+      }
+      log('SEI: documento atualizado (${p.basename(file.path)}).');
+    } finally {
+      for (final subscription in dialogs) {
+        await subscription.cancel();
+      }
+    }
+  }
+
   /// Lê a árvore uma única vez e devolve, para cada grupo de nomes
   /// alternativos, se há um documento ativo (não cancelado) com algum deles.
   Future<List<bool>> documentosPresentes(List<List<String>> grupos) async {

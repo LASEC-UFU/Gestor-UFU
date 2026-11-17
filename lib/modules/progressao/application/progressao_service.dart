@@ -536,6 +536,64 @@ class ProgressaoService extends ChangeNotifier {
 
   // ------------------------------------------------- SEI em etapas
 
+  /// Gera o relatório de atividades em PDF na pasta dos comprovantes.
+  Future<String> _gravarRelatorioPdf(ProgressaoDocente p) async {
+    final bytes = await ProgressaoPdfService().gerarRelatorio(p);
+    final pasta = Directory(p.pastaComprovantes);
+    await pasta.create(recursive: true);
+    final base = p.docente
+        .trim()
+        .replaceAll(RegExp(r'[<>:"/\|?*]'), '')
+        .replaceAll(RegExp(r'\s+'), '_');
+    final caminho =
+        '${pasta.path}${Platform.pathSeparator}'
+        'Relatorio_Atividades_${base.isEmpty ? 'docente' : base}.pdf';
+    await File(caminho).writeAsBytes(bytes, flush: true);
+    return caminho;
+  }
+
+  /// Gera de novo o relatório e troca o PDF do documento que já está no SEI
+  /// (mesmo número SEI), em vez de incluir um segundo relatório.
+  Future<void> atualizarRelatorioSei(String id) async {
+    await _ensure();
+    final p = _require(id);
+    if (p.processoSei.trim().isEmpty) {
+      throw StateError('Abra ou crie o processo no SEI primeiro (etapa 1).');
+    }
+    if (p.pastaComprovantes.trim().isEmpty) {
+      throw StateError('Escolha a pasta dos comprovantes.');
+    }
+    envio
+      ..etapaEmExecucao = EtapaSei.relatorio
+      ..enviando = true
+      ..cancelar = false
+      ..atualizar();
+    try {
+      if (!envio.automation.isConnected) await abrirSei('https://sei.ufu.br');
+      final seiFlow = ProgressaoSeiRequerimento(envio.automation);
+      await seiFlow.aguardarLogin(log: envio.log);
+      await seiFlow.abrirProcesso(p.processoSei.trim());
+      final caminho = await _gravarRelatorioPdf(p);
+      envio.log('Relatório gerado de novo: $caminho');
+      await envio.automation.substituirAnexoDocumentoExterno(
+        nomes: _nomesRelatorioSei(p),
+        filePath: caminho,
+        log: envio.log,
+      );
+      envio.log(
+        'Concluído: relatório de atividades atualizado no processo ${p.processoSei}.',
+      );
+    } finally {
+      envio
+        ..etapaEmExecucao = null
+        ..enviando = false
+        ..atualizar();
+      try {
+        await verificarSei(id);
+      } catch (_) {}
+    }
+  }
+
   static const nomeRequerimentoSei =
       'Requerimento de Progressão / Promoção Docente';
 
@@ -559,7 +617,11 @@ class ProgressaoService extends ChangeNotifier {
   Future<SituacaoSei> verificarSei(String id) async {
     await _ensure();
     final p = _require(id);
-    final lista = lancamentosComComprovante(p);
+    // Comprovantes dos lançamentos + consultas da avaliação didática.
+    final lista = [
+      for (final l in lancamentosComComprovante(p)) l.rotuloComprovante,
+      for (final a in comprovantes.avaliacoesDidaticas(p)) a.rotulo,
+    ];
     envio
       ..verificando = true
       ..atualizar();
@@ -607,16 +669,15 @@ class ProgressaoService extends ChangeNotifier {
       }
       final grupos = <List<String>>[
         [nomeRequerimentoSei],
-        for (final l in lista)
-          [_nomeArvoreCurto(l.rotuloComprovante), l.rotuloComprovante],
+        for (final nome in lista) [_nomeArvoreCurto(nome), nome],
         _nomesTitulacaoSei(p),
         _nomesRelatorioSei(p),
       ];
       final presentes = await envio.automation.documentosPresentes(grupos);
       final comprovantesPresentes = presentes.sublist(1, 1 + lista.length);
       final faltantes = [
-        for (final (i, l) in lista.indexed)
-          if (!comprovantesPresentes[i]) l.rotuloComprovante,
+        for (final (i, nome) in lista.indexed)
+          if (!comprovantesPresentes[i]) nome,
       ];
       final situacao = SituacaoSei(
         logado: true,
@@ -776,19 +837,7 @@ class ProgressaoService extends ChangeNotifier {
 
     // Gera e grava o PDF antes de qualquer mudança no SEI.
     String? relatorioPath;
-    if (opcoes.incluirRelatorio) {
-      final bytes = await ProgressaoPdfService().gerarRelatorio(p);
-      final pasta = Directory(p.pastaComprovantes);
-      await pasta.create(recursive: true);
-      final base = p.docente
-          .trim()
-          .replaceAll(RegExp(r'[<>:"/\\|?*]'), '')
-          .replaceAll(RegExp(r'\s+'), '_');
-      relatorioPath =
-          '${pasta.path}${Platform.pathSeparator}'
-          'Relatorio_Atividades_${base.isEmpty ? 'docente' : base}.pdf';
-      await File(relatorioPath).writeAsBytes(bytes, flush: true);
-    }
+    if (opcoes.incluirRelatorio) relatorioPath = await _gravarRelatorioPdf(p);
 
     final tipo = opcoes.criarNovo
         ? tipoProcessoSugeridoSei(p)
@@ -877,6 +926,12 @@ class ProgressaoService extends ChangeNotifier {
                 caminho: comprovantes.caminhoAbsoluto(p, l)!,
                 nomeArvore: _nomeArvoreCurto(l.rotuloComprovante),
               ),
+            // Consultas da avaliação didática citadas no relatório.
+            for (final a in comprovantes.avaliacoesDidaticas(p))
+              SeiDocumentoExterno(
+                caminho: a.caminho,
+                nomeArvore: _nomeArvoreCurto(a.rotulo),
+              ),
           ],
           serie: p.tipoDocumentoSei.trim().isEmpty
               ? ProgressaoDocente.tipoDocumentoSeiPadrao
@@ -960,6 +1015,9 @@ class ProgressaoService extends ChangeNotifier {
         if (opcoes.incluirComprovantes)
           for (final l in lancamentosComComprovante(p))
             l.rotuloComprovante: [l.rotuloComprovante],
+        if (opcoes.incluirComprovantes)
+          for (final a in comprovantes.avaliacoesDidaticas(p))
+            a.rotulo: [a.rotulo],
         if (opcoes.incluirTitulacao)
           'titulação': [
             'Diploma de ${p.titulacao.rotulo}',

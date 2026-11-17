@@ -2514,10 +2514,19 @@ class _EtapasSeiCartao extends StatelessWidget {
     EtapaSei.comprovantes =>
       concluida ? 'Conferir comprovantes' : 'Enviar comprovantes',
     EtapaSei.titulacao => concluida ? 'Conferir titulação' : 'Enviar titulação',
-    EtapaSei.relatorio => concluida ? 'Conferir relatório' : 'Enviar relatório',
+    EtapaSei.relatorio =>
+      concluida ? 'Atualizar relatório' : 'Enviar relatório',
   };
 
   VoidCallback? _acao(BuildContext context, EtapaSei etapa, SituacaoSei? s) {
+    // Relatório já no SEI: gera de novo e troca o PDF do mesmo documento.
+    if (etapa == EtapaSei.relatorio && (s?.relatorio ?? false)) {
+      return () => _rodar(
+        context,
+        () => service.atualizarRelatorioSei(processo.id),
+        'Falha ao atualizar o relatório',
+      );
+    }
     if (etapa != EtapaSei.processo) {
       return () => _rodar(
         context,

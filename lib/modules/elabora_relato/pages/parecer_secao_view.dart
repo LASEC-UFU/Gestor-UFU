@@ -118,7 +118,9 @@ class _RelatorioViewState extends State<RelatorioView> {
                 CheckboxListTile(
                   value: porPastas,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Separar por pastas (Pasta I, II… a cada 20)'),
+                  title: const Text(
+                    'Separar por pastas (Pasta I, II… a cada 20)',
+                  ),
                   onChanged: (v) => setLocal(() => porPastas = v ?? false),
                 ),
               ],

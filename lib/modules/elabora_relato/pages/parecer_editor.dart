@@ -125,7 +125,9 @@ class _ParecerEditorState extends State<ParecerEditor>
       _subs.add(
         widget.service.insercoes
             .where((i) => i.secao == widget.secao)
-            .listen((i) => _js('window.parecer.inserir(${jsonEncode(i.html)})')),
+            .listen(
+              (i) => _js('window.parecer.inserir(${jsonEncode(i.html)})'),
+            ),
       );
       _subs.add(
         widget.service.substituicoes
@@ -165,7 +167,10 @@ class _ParecerEditorState extends State<ParecerEditor>
       case 'pronto':
         if (mounted) setState(() => _pronto = true);
       case 'mudou':
-        widget.service.definirSecaoDoEditor(widget.secao, '${msg['html'] ?? ''}');
+        widget.service.definirSecaoDoEditor(
+          widget.secao,
+          '${msg['html'] ?? ''}',
+        );
       case 'erro':
         if (mounted) setState(() => _erro = '${msg['mensagem']}');
     }
@@ -254,7 +259,11 @@ class _ParecerEditorState extends State<ParecerEditor>
           padding: const EdgeInsets.only(top: 6),
           child: Row(
             children: [
-              Icon(Icons.zoom_in_rounded, size: 16, color: AppTheme.textSecondary),
+              Icon(
+                Icons.zoom_in_rounded,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 6),
               DropdownButton<double>(
                 value: _zoom,

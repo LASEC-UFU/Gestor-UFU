@@ -192,6 +192,8 @@ class SeiArvoreTexto {
       if (doc.data.isNotEmpty) 'de ${dataPorExtenso(doc.data)}',
       if (doc.resumo.isNotEmpty) doc.resumo.replaceAll(RegExp(r'[;.]+$'), ''),
     ];
-    return partes.isEmpty ? '$ident$code' : '$ident$code – ${partes.join(', ')}';
+    return partes.isEmpty
+        ? '$ident$code'
+        : '$ident$code – ${partes.join(', ')}';
   }
 }

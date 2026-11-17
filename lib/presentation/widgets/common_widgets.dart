@@ -13,9 +13,8 @@ class AiAgentButton extends StatelessWidget {
 
   final bool compact;
 
-  void _open() => AiAgentLauncher.open(
-    route: AgentDataHost.instance.currentRoute?.call(),
-  );
+  void _open() =>
+      AiAgentLauncher.open(route: AgentDataHost.instance.currentRoute?.call());
 
   @override
   Widget build(BuildContext context) {

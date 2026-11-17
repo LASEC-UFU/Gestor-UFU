@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
 import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
@@ -470,13 +471,48 @@ class _Builder {
           'discente. ${p.textoAvaliacaoDidatica.trim()}',
         ),
       );
+    const comprovantes = ProgressaoComprovantesService();
     for (final a in p.avaliacoesDidaticas.where((a) => a.trim().isNotEmpty)) {
+      // Como nas demais seções, cite em vermelho o documento comprobatório
+      // (consulta do semestre em Avaliacao_Didatica/).
+      final rotulo = comprovantes.rotuloAvaliacaoDidatica(p, a);
       out.add(
         pw.Padding(
           padding: const pw.EdgeInsets.only(left: 18, bottom: 4),
-          child: pw.Bullet(
-            text: a.trim(),
-            style: const pw.TextStyle(fontSize: 10.5),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Container(
+                width: 5,
+                height: 5,
+                margin: const pw.EdgeInsets.only(top: 5, right: 8),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColors.black,
+                  shape: pw.BoxShape.circle,
+                ),
+              ),
+              pw.Expanded(
+                child: pw.RichText(
+                  textAlign: pw.TextAlign.justify,
+                  text: pw.TextSpan(
+                    style: const pw.TextStyle(fontSize: 10.5),
+                    children: [
+                      pw.TextSpan(text: a.trim()),
+                      if (rotulo != null) ...[
+                        const pw.TextSpan(text: ' ('),
+                        pw.TextSpan(
+                          text: rotulo,
+                          style: const pw.TextStyle(
+                            color: ProgressaoPdfService._vermelho,
+                          ),
+                        ),
+                        const pw.TextSpan(text: ')'),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );

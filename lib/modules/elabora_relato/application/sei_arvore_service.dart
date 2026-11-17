@@ -132,12 +132,14 @@ class SeiArvoreService extends ChangeNotifier {
             log('Sem texto de "${node.text}": $error');
           }
         }
-        _documentos.add(SeiDocumento.fromTree(
+        _documentos.add(
+          SeiDocumento.fromTree(
             i + 1,
             node.text,
             texto: texto,
             href: node.href,
-          ));
+          ),
+        );
       }
       log('Inventário com ${_documentos.length} documento(s).');
       await _salvarInventario();
@@ -165,9 +167,8 @@ class SeiArvoreService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _salvarInventario() => _store.writeJson(inventoryKey, [
-    for (final d in _documentos) d.toJson(),
-  ]);
+  Future<void> _salvarInventario() =>
+      _store.writeJson(inventoryKey, [for (final d in _documentos) d.toJson()]);
 
   /// Corrige data/resumo de um documento (revisão manual ou do agente).
   Future<void> atualizarDocumento(
@@ -236,8 +237,10 @@ class SeiArvoreService extends ChangeNotifier {
         );
         final resumos = lerResumos(resposta);
         if (resumos.isEmpty) {
-          log('A IA não devolveu resumos legíveis para o lote '
-              '${lote.first.ordem}–${lote.last.ordem}.');
+          log(
+            'A IA não devolveu resumos legíveis para o lote '
+            '${lote.first.ordem}–${lote.last.ordem}.',
+          );
         }
         for (final d in lote) {
           final r = resumos[d.ordem];
@@ -286,7 +289,9 @@ Responda SOMENTE com JSON: [{"ordem": 1, "resumo": "..."}, ...]''';
         ..writeln('ordem: ${d.ordem}')
         ..writeln('nome na árvore: ${d.nomeArvore}')
         ..writeln('data: ${d.data.isEmpty ? 'não identificada' : d.data}')
-        ..writeln('texto: ${texto.isEmpty ? '(sem texto: PDF ou anexo)' : texto}');
+        ..writeln(
+          'texto: ${texto.isEmpty ? '(sem texto: PDF ou anexo)' : texto}',
+        );
     }
     return b.toString();
   }

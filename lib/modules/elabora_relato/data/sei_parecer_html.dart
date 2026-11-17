@@ -52,7 +52,9 @@ class SeiParecerHtml {
         );
       }
       final fim = i == docs.length - 1 ? '.' : ';';
-      b.write('<p class="$classeJustificado">${i + 1}. ${item(docs[i])}$fim</p>');
+      b.write(
+        '<p class="$classeJustificado">${i + 1}. ${item(docs[i])}$fim</p>',
+      );
     }
     return b.toString();
   }
@@ -77,11 +79,10 @@ class SeiParecerHtml {
   }
 
   /// Texto simples (uma linha por parágrafo) → parágrafos HTML.
-  static String paragrafos(String texto, {String classe = classeParagrafo}) =>
-      [
-        for (final l in texto.split('\n'))
-          if (l.trim().isNotEmpty) '<p class="$classe">${escape(l.trim())}</p>',
-      ].join();
+  static String paragrafos(String texto, {String classe = classeParagrafo}) => [
+    for (final l in texto.split('\n'))
+      if (l.trim().isNotEmpty) '<p class="$classe">${escape(l.trim())}</p>',
+  ].join();
 
   /// Texto puro de um trecho HTML (para contagens e resumos ao agente).
   static String textoPuro(String html) {
@@ -167,13 +168,10 @@ class SeiParecerHtmlMerger {
     Parecer p,
     List<String> avisos,
   ) {
-    final rotulo = frag
-        .querySelectorAll('td,th')
-        .where((c) {
-          final t = _norm(c.text);
-          return t.startsWith('assunto') && t.length <= 12;
-        })
-        .firstOrNull;
+    final rotulo = frag.querySelectorAll('td,th').where((c) {
+      final t = _norm(c.text);
+      return t.startsWith('assunto') && t.length <= 12;
+    }).firstOrNull;
     if (rotulo == null) {
       if (p.assunto.trim().isNotEmpty) {
         avisos.add('Não achei a linha ASSUNTO no modelo; preencha no SEI.');
@@ -206,7 +204,8 @@ class SeiParecerHtmlMerger {
     }
   }
 
-  static bool _ehCelula(Element e) => e.localName == 'td' || e.localName == 'th';
+  static bool _ehCelula(Element e) =>
+      e.localName == 'td' || e.localName == 'th';
 
   /// Troca o conteúdo da célula mantendo o parágrafo (e o estilo) original.
   static void _definirCelula(Element celula, String texto) {
@@ -324,14 +323,16 @@ class SeiParecerHtmlMerger {
       .where((e) => e.querySelector('p,div,h1,h2,h3,h4,h5,h6,table') == null)
       .toList();
 
-  static Element? _bloco(DocumentFragment frag, RegExp re) => _blocos(
-    frag,
-  ).where((e) => re.hasMatch(_norm(e.text))).firstOrNull;
+  static Element? _bloco(DocumentFragment frag, RegExp re) =>
+      _blocos(frag).where((e) => re.hasMatch(_norm(e.text))).firstOrNull;
 
   static Element? _blocoDepois(DocumentFragment frag, Element ref, RegExp re) {
     final blocos = _blocos(frag);
     final i = blocos.indexOf(ref);
-    return blocos.skip(i + 1).where((e) => re.hasMatch(_norm(e.text))).firstOrNull;
+    return blocos
+        .skip(i + 1)
+        .where((e) => re.hasMatch(_norm(e.text)))
+        .firstOrNull;
   }
 
   /// Troca o texto do bloco preservando a formatação do elemento mais

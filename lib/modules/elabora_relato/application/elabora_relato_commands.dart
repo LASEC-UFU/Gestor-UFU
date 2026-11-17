@@ -139,7 +139,8 @@ List<ModuleCommand> elaboraRelatoCommands(
     },
     run: (input, origin) async {
       var n = 0;
-      for (final item in (input['itens'] as List? ?? const []).whereType<Map>()) {
+      for (final item
+          in (input['itens'] as List? ?? const []).whereType<Map>()) {
         final ordem = (item['ordem'] as num?)?.toInt();
         if (ordem == null) continue;
         await service.atualizarDocumento(
@@ -224,11 +225,13 @@ List<ModuleCommand> elaboraRelatoCommands(
         }
       }
       final novo = Parecer.fromJson(atual);
-      parecer.atualizar(novo.copyWith(
-        relatorio: parecer.parecer.relatorio,
-        fundamentacao: parecer.parecer.fundamentacao,
-        conclusao: parecer.parecer.conclusao,
-      ));
+      parecer.atualizar(
+        novo.copyWith(
+          relatorio: parecer.parecer.relatorio,
+          fundamentacao: parecer.parecer.fundamentacao,
+          conclusao: parecer.parecer.conclusao,
+        ),
+      );
       for (final s in ParecerSecao.values) {
         final html = input[s.id];
         if (html is String) await parecer.substituirSecao(s, html);

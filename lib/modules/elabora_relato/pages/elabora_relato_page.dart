@@ -47,7 +47,8 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
     _Funcionalidade(
       ParecerSecao.fundamentacao.titulo,
       Icons.gavel_rounded,
-      (_) => ParecerSecaoView(secao: ParecerSecao.fundamentacao, service: parecer),
+      (_) =>
+          ParecerSecaoView(secao: ParecerSecao.fundamentacao, service: parecer),
     ),
     _Funcionalidade(
       ParecerSecao.conclusao.titulo,
