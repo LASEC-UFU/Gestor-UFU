@@ -155,6 +155,15 @@ class ProgressaoSeiRequerimento {
     }, 'a abertura do processo $normalized');
   }
 
+  /// O Edge controlado está no SEI com sessão ativa (menu "Iniciar Processo")?
+  Future<bool> estaLogado() async {
+    if (!sei.isConnected) return false;
+    await sei.adotarAbaSei();
+    final host = Uri.tryParse(sei.currentUrl ?? '')?.host.toLowerCase() ?? '';
+    if (!host.contains('sei.ufu.br')) return false;
+    return await _anyFrame<bool>(_loggedInScript) == true;
+  }
+
   Future<String> numeroProcessoAtual() async {
     if (!sei.isConnected) return '';
     final number = await _anyFrame<String>(_currentProcessNumberScript);

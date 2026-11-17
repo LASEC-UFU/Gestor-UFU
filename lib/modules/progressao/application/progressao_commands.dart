@@ -347,6 +347,98 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
     },
   ),
   ModuleCommand(
+    id: 'progressao.verificarSei',
+    title: 'Verificar as etapas do dossiê no SEI',
+    description:
+        'Abre o processo salvo no Edge controlado e lê a árvore do SEI: '
+        'informa login, processo, requerimento, comprovantes (presentes/total), '
+        'titulação e relatório. Não grava nada no SEI.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {..._processoId},
+      'required': ['processoId'],
+    },
+    run: (input, origin) async {
+      final s = await service.verificarSei(input.requireString('processoId'));
+      return CommandResult.ok(
+        message: !s.logado
+            ? 'O Edge não está logado no SEI; peça ao usuário para entrar.'
+            : s.numeroProcesso.isEmpty
+            ? 'Processo do cadastro não aberto no SEI'
+                  '${s.numeroAberto.isEmpty ? '' : ' (aberto no Edge: ${s.numeroAberto})'}.'
+            : 'Processo ${s.numeroProcesso}: requerimento '
+                  '${s.requerimento ? 'presente' : 'pendente'}; comprovantes '
+                  '${s.comprovantesNoSei}/${s.comprovantesTotal}; titulação '
+                  '${s.titulacao ? 'presente' : 'pendente'}; relatório '
+                  '${s.relatorio ? 'presente' : 'pendente'}.',
+        data: {
+          'logado': s.logado,
+          'numeroProcesso': s.numeroProcesso,
+          'numeroAberto': s.numeroAberto,
+          'etapas': {
+            for (final e in EtapaSei.values)
+              e.name: {
+                'concluida': s.concluida(e),
+                'disponivel': s.disponivel(e),
+              },
+          },
+          'comprovantesFaltantes': s.comprovantesFaltantes,
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'progressao.executarEtapaSei',
+    title: 'Executar uma etapa do dossiê no SEI',
+    description:
+        'Executa só a etapa indicada no processo salvo (processo, '
+        'requerimento, comprovantes, titulacao, relatorio) — ou "pendentes" '
+        'para todas as que faltam, em ordem. Documentos presentes não são '
+        'duplicados. Pede confirmação.',
+    approval: CommandApproval.required,
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        ..._processoId,
+        'etapa': {
+          'type': 'string',
+          'enum': [...EtapaSei.values.map((e) => e.name), 'pendentes'],
+        },
+      },
+      'required': ['processoId', 'etapa'],
+    },
+    run: (input, origin) async {
+      final id = input.requireString('processoId');
+      final nome = input.requireString('etapa');
+      if (nome == 'pendentes') {
+        await service.executarEtapasPendentes(id);
+      } else {
+        final etapa = EtapaSei.values.where((e) => e.name == nome).firstOrNull;
+        if (etapa == null) {
+          throw CommandException('etapa_invalida', 'Etapa desconhecida: $nome');
+        }
+        final s = service.envio.situacoes[id];
+        if (etapa != EtapaSei.processo && !(s?.disponivel(etapa) ?? false)) {
+          throw CommandException(
+            'etapa_bloqueada',
+            'Conclua as etapas anteriores (use progressao.verificarSei).',
+          );
+        }
+        await service.executarEtapaSei(id, etapa);
+      }
+      final s = service.envio.situacoes[id];
+      return CommandResult.ok(
+        message: s == null
+            ? 'Etapa executada.'
+            : 'Etapa executada. Requerimento ${s.requerimento ? 'presente' : 'pendente'}; '
+                  'comprovantes ${s.comprovantesNoSei}/${s.comprovantesTotal}; '
+                  'titulação ${s.titulacao ? 'presente' : 'pendente'}; '
+                  'relatório ${s.relatorio ? 'presente' : 'pendente'}.',
+      );
+    },
+  ),
+  ModuleCommand(
     id: 'progressao.montarProcessoSei',
     title: 'Montar dossiê de progressão/promoção no SEI',
     description:

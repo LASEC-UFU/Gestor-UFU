@@ -90,6 +90,16 @@ Future<T?> seiEvaluateAnyFrame<T>(
   return null;
 }
 
+const _framesSnapshotScript = r'''() => {
+ const out=[];const walk=(w,d)=>{try{out.push(d+':'+w.location.href+':'+w.document.readyState);for(const f of w.document.querySelectorAll('iframe,frame'))walk(f.contentWindow,d+1);}catch(e){out.push(d+':x');}};
+ walk(window,0);return out.join('|');
+}''';
+
+const _nestedFileInputScript = r'''() => {
+ const walk=w=>{for(const f of w.document.querySelectorAll('iframe,frame')){try{const d=f.contentWindow.document;if(d.getElementById('selSerie')){const i=d.getElementById('filArquivo')||d.querySelector('input[type=file]');if(i)return i;}const r=walk(f.contentWindow);if(r)return r;}catch(e){}}return null;};
+ return walk(window);
+}''';
+
 const _nestedFramesEvalScript = r'''async (src, args) => {
  const wins=[];
  const walk=w=>{for(const f of w.document.querySelectorAll('iframe,frame')){try{const cw=f.contentWindow;if(cw&&cw.document){wins.push(cw);walk(cw);}}catch(e){}}};
@@ -240,42 +250,65 @@ class SeiAutomationService {
         '${day.month.toString().padLeft(2, '0')}/${day.year}';
     final before = await _documentNodes();
 
-    if (await _anyFrame<bool>(_isMetadataFormScript) != true) {
-      if (await _anyFrame<bool>(_isTypeChoiceScript) != true) {
-        await _waitUntil(
-          () => _anyFrame<bool>(_clickIncludeDocumentScript),
-          'o comando Incluir Documento',
+    // Depois de salvar o documento anterior, o SEI recarrega a árvore e abre
+    // o documento novo no quadro de visualização. Se o "Incluir Documento"
+    // (ou a escolha do tipo) acontecer antes, a lista de tipos ou o
+    // formulário são substituídos pela visualização. Por isso: espere o SEI
+    // assentar e, se nem a lista de tipos nem o formulário estiverem na tela
+    // por alguns segundos, recomece pelo "Incluir Documento".
+    await _aguardarSeiEstavel();
+    final dadosFormulario = <String, String>{
+      'date': date,
+      'number': cleanNumber,
+      'tree': cleanTree,
+      'serie': serie,
+      'access': nivelAcesso.name,
+      'hipoteseLegal': hipoteseLegal,
+    };
+    final limite = DateTime.now().add(const Duration(seconds: 90));
+    var ultimaAcao = DateTime.fromMillisecondsSinceEpoch(0);
+    var inclusaoLogada = false;
+    var tipoLogado = false;
+    Map<String, dynamic>? metadata;
+    while (DateTime.now().isBefore(limite)) {
+      try {
+        metadata = await _anyFrame<Map<String, dynamic>>(
+          _fillMetadataScript,
+          args: [dadosFormulario],
         );
-        log('SEI: inclusão de documento iniciada.');
+        if (metadata != null) break;
+        if (await _anyFrame<bool>(_isMetadataFormScript) == true) {
+          // Formulário aberto (talvez recarregando após trocar o tipo).
+          ultimaAcao = DateTime.now();
+        } else if (await _anyFrame<bool>(_isTypeChoiceScript) == true) {
+          await _anyFrame<bool>(_filterExternalTypeScript);
+          if (await _anyFrame<bool>(_chooseExternalTypeScript) == true) {
+            if (!tipoLogado) log('SEI: tipo de documento Externo selecionado.');
+            tipoLogado = true;
+          }
+          ultimaAcao = DateTime.now();
+        } else if (DateTime.now().difference(ultimaAcao) >
+            const Duration(seconds: 6)) {
+          if (await _anyFrame<bool>(_clickIncludeDocumentScript) == true) {
+            if (!inclusaoLogada) log('SEI: inclusão de documento iniciada.');
+            inclusaoLogada = true;
+          }
+          ultimaAcao = DateTime.now();
+        }
+      } catch (_) {
+        // O SEI pode trocar os quadros entre uma leitura e outra.
       }
-      await _waitUntil(() async {
-        if (await _anyFrame<bool>(_chooseExternalTypeScript) == true)
-          return true;
-        await _anyFrame<bool>(_filterExternalTypeScript);
-        return await _anyFrame<bool>(_chooseExternalTypeScript);
-      }, 'o tipo Externo na lista de documentos');
+      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    log('SEI: tipo de documento Externo selecionado.');
-
-    final metadata = await _waitUntilValue<Map<String, dynamic>>(
-      () => _anyFrame<Map<String, dynamic>>(
-        _fillMetadataScript,
-        args: [
-          <String, String>{
-            'date': date,
-            'number': cleanNumber,
-            'tree': cleanTree,
-            'serie': serie,
-            'access': nivelAcesso.name,
-            'hipoteseLegal': hipoteseLegal,
-          },
-        ],
-      ),
-      'o formulário de documento externo',
-    );
+    if (metadata == null) {
+      throw TimeoutException(
+        'Tempo esgotado aguardando o formulário de documento externo.',
+      );
+    }
     if (metadata['error'] != null) throw StateError('${metadata['error']}');
     log(
-      'SEI: documento $serie, data $date, nato-digital e acesso público conferidos.',
+      'SEI: documento $serie, data $date, nato-digital e acesso '
+      '${nivelAcesso == SeiNivelAcesso.restrito ? 'restrito' : 'público'} conferidos.',
     );
 
     if (interessado.trim().isNotEmpty) {
@@ -444,6 +477,32 @@ class SeiAutomationService {
 
   /// Indica se a árvore possui um documento ativo que corresponda a algum
   /// dos nomes fornecidos, ignorando o número SEI entre parênteses.
+  /// Lê a árvore uma única vez e devolve, para cada grupo de nomes
+  /// alternativos, se há um documento ativo (não cancelado) com algum deles.
+  Future<List<bool>> documentosPresentes(List<List<String>> grupos) async {
+    _checkReady();
+    await _openAllFolders();
+    final nodes = await _documentNodes();
+    final cancelado = RegExp(r'\bcancelad[oa]\b', caseSensitive: false);
+    final textos = [
+      for (final node in nodes)
+        if (!cancelado.hasMatch('${node['text']} ${node['title']}'))
+          _normalize(
+            '${node['text']} ${node['title']}'.replaceAll(
+              RegExp(r'\s*\(\d+\)\s*$'),
+              '',
+            ),
+          ),
+    ];
+    return [
+      for (final grupo in grupos)
+        grupo
+            .map(_normalize)
+            .where((alvo) => alvo.isNotEmpty)
+            .any((alvo) => textos.any((t) => t.contains(alvo))),
+    ];
+  }
+
   Future<bool> existeDocumento(Iterable<String> nomes) async {
     _checkReady();
     await _openAllFolders();
@@ -502,6 +561,27 @@ class SeiAutomationService {
         }
       }
     }
+    // O puppeteer-dart perde o contexto do iframe do formulário
+    // (ifrVisualizacao). Pegue o <input type=file> pela página principal
+    // (iframes de mesma origem) e envie o arquivo por DOM.setFileInputFiles.
+    for (final page in pages) {
+      if (page.isClosed) continue;
+      try {
+        final handle = await page.evaluateHandle<JsHandle>(
+          _nestedFileInputScript,
+        );
+        final input = handle.asElement;
+        if (input == null) continue;
+        await input.uploadFile([file]);
+        await _waitUntil(
+          () =>
+              _anyFrame<bool>(_hasPdfNameScript, args: [p.basename(file.path)]),
+          'a confirmação do PDF no formulário',
+          timeout: const Duration(seconds: 60),
+        );
+        return;
+      } catch (_) {}
+    }
     throw StateError(
       'Não consegui anexar ou confirmar o PDF no formulário do SEI.',
     );
@@ -539,6 +619,40 @@ class SeiAutomationService {
 
   Future<T?> _anyFrame<T>(String script, {List<Object?> args = const []}) =>
       seiEvaluateAnyFrame<T>(_browser, script, args: args);
+
+  /// Espera os quadros do SEI pararem de navegar (todos carregados e com o
+  /// mesmo endereço por ~1,5 s), no máximo [limite].
+  Future<void> _aguardarSeiEstavel({
+    Duration limite = const Duration(seconds: 10),
+  }) async {
+    final fim = DateTime.now().add(limite);
+    String? anterior;
+    var estavelDesde = DateTime.now();
+    while (DateTime.now().isBefore(fim)) {
+      final atual = await _anyFrameTop<String>(_framesSnapshotScript) ?? '';
+      if (atual != anterior || atual.contains('loading')) {
+        anterior = atual;
+        estavelDesde = DateTime.now();
+      } else if (DateTime.now().difference(estavelDesde) >
+          const Duration(milliseconds: 1500)) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
+  /// Avalia só na página principal do SEI (não nos iframes).
+  Future<T?> _anyFrameTop<T>(String script) async {
+    final page = _page;
+    if (page == null || page.isClosed) return null;
+    try {
+      return await page
+          .evaluate<T?>(script)
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<void> _waitUntil(
     Future<bool?> Function() check,
@@ -663,7 +777,9 @@ const _fillMetadataScript = r'''async (dados) => {
  if(dados.tree&&!arvore)return {error:'O campo Nome na Árvore não foi encontrado.'};
  const option=[...serie.options].find(o=>norm(o.textContent)===norm(dados.serie));
  if(!option||option.disabled)return {error:`O tipo de documento externo "${dados.serie}" não está disponível no SEI.`};
- serie.value=option.value;serie.dispatchEvent(new Event('change',{bubbles:true}));
+ // No SEI, trocar o tipo (trocarSerie) submete e recarrega o formulário: troque
+ // só se necessário e devolva null para preencher depois do recarregamento.
+ if(serie.value!==option.value){serie.value=option.value;serie.dispatchEvent(new Event('change',{bubbles:true}));return null;}
  const fill=(el,v)=>{if(!el)return;el.value=v;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));};
  fill(data,dados.date);fill(numero,dados.number);fill(arvore,dados.tree);
  let nato=document.querySelector('#divOptNato input[type=radio]');

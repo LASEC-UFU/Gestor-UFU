@@ -307,25 +307,6 @@ class ProgressaoRequerimentoSeiHtml {
     }
   }
 
-  static int _promotionRowIndex(PosicaoCarreira origem) {
-    if (origem.carreira == Carreira.ebtt) {
-      return switch (origem.classe) {
-        'D I' => 0,
-        'D II' => 1,
-        'D III' => 2,
-        'D IV' => 3,
-        _ => -1,
-      };
-    }
-    return switch (origem.classe) {
-      'A' => 0,
-      'B' => 1,
-      'C' => 2,
-      'D' => 3,
-      _ => -1,
-    };
-  }
-
   static String _className(String classe) => switch (classe) {
     'A' => 'auxiliar',
     'B' => 'assistente',
@@ -344,9 +325,9 @@ class ProgressaoRequerimentoSeiHtml {
     final table =
         _tableWithLabel(tabelas, 'Resumo da pontuacao') ??
         tabelas.firstWhereOrNull(
-          (t) => _rows(t).any(
-            (r) => _norm(_cells(r).firstOrNull?.text ?? '') == 'a11',
-          ),
+          (t) => _rows(
+            t,
+          ).any((r) => _norm(_cells(r).firstOrNull?.text ?? '') == 'a11'),
         );
     if (table == null) {
       ausentes.add('Tabela Resumo da pontuação');
