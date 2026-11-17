@@ -6,8 +6,11 @@
  * Comunicação com o app (WebView2):
  *   app → página: parecer.iniciar({html, css, estilos, dica}),
  *                 parecer.definir(html), parecer.inserir(html), parecer.foco()
+ *                 parecer.reservar(id), parecer.aplicar(id, texto, esperado),
+ *                 parecer.liberar(id)
  *   página → app: {tipo:'carregado'}, {tipo:'pronto'}, {tipo:'mudou', html},
- *                 {tipo:'erro', mensagem}
+ *                 {tipo:'erro', mensagem}, {tipo:'selecao', texto, …},
+ *                 {tipo:'consultarIa', texto, …}, {tipo:'comentar'}
  */
 (() => {
   'use strict';
@@ -282,6 +285,115 @@
   };
 
   let editor = null;
+  let comentarios = [];
+  let comentarioAtivo = null;
+  let highlightRanges = [];
+  let savedModelRange = null;
+
+  function textoEditor() { return editor ? (editor.ui.getEditableElement().textContent || '') : ''; }
+  function offsetSelecao(root, node, offset) {
+    try { const r = document.createRange(); r.selectNodeContents(root); r.setEnd(node, offset); return r.toString().length; } catch (_) { return -1; }
+  }
+  function rangeTexto(root, start, length) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n, pos = 0, a = null, b = null, ao = 0, bo = 0;
+    while ((n = walker.nextNode())) { const end = pos + n.nodeValue.length;
+      if (a === null && start >= pos && start <= end) { a = n; ao = start - pos; }
+      if (a !== null && start + length >= pos && start + length <= end) { b = n; bo = start + length - pos; break; }
+      pos = end;
+    }
+    if (!a || !b) return null;
+    const r = document.createRange(); r.setStart(a, ao); r.setEnd(b, bo); return r;
+  }
+  function pintar(c) {
+    if (!editor || !c) return false;
+    const root = editor.ui.getEditableElement(), all = textoEditor(), selected = String(c.selecionado || '');
+    if (!selected) return false;
+    let at = Number(c.posicao);
+    if (all.slice(at, at + selected.length) !== selected) {
+      const prev = String(c.anterior || '').slice(-30), next = String(c.posterior || '').slice(0, 30);
+      const hits = []; let from = 0, i;
+      while ((i = all.indexOf(selected, from)) >= 0) { hits.push(i); from = i + Math.max(1, selected.length); }
+      if (!hits.length) { c.localizado = false; enviar({tipo:'statusComentario', comentario:c}); return false; }
+      const score = (x) => (all.slice(Math.max(0,x-prev.length),x) === prev ? 2 : 0) + (all.slice(x+selected.length,x+selected.length+next.length) === next ? 2 : 0);
+      at = hits.sort((x,y) => score(y) - score(x) || Math.abs(x - Number(c.posicao || 0)) - Math.abs(y - Number(c.posicao || 0)))[0];
+    }
+    const r = rangeTexto(root, at, selected.length);
+    if (!r) { c.localizado = false; enviar({tipo:'statusComentario', comentario:c}); return false; }
+    c.localizado = true;
+    c.posicao = at;
+    if (window.CSS && CSS.highlights && window.Highlight) { highlightRanges.push(r); CSS.highlights.set('parecer-comentarios', new Highlight(...highlightRanges)); }
+    return true;
+  }
+
+
+  // Seleção atual (ou cursor) com o contexto em volta, para o app.
+  function dadosSelecao() {
+    if (!editor) return null;
+    const editable = editor.ui.getEditableElement();
+    const s = window.getSelection();
+    if (!s || !s.rangeCount || !editable.contains(s.anchorNode)) return null;
+    const start = offsetSelecao(editable, s.anchorNode, s.anchorOffset);
+    const end = offsetSelecao(editable, s.focusNode, s.focusOffset);
+    const lo = Math.min(start, end), hi = Math.max(start, end), all = textoEditor();
+    const texto = s.isCollapsed ? '' : s.toString();
+    return { texto: texto.trim() ? texto : '', colapsado: s.isCollapsed || !texto.trim(), posicao: lo,
+      anterior: all.slice(Math.max(0, lo - 400), lo), posterior: all.slice(hi, hi + 400) };
+  }
+  function reportarSelecao() {
+    const d = dadosSelecao(); if (!d) return;
+    const mr = editor.model.document.selection.getFirstRange();
+    if (mr) savedModelRange = editor.model.createRange(mr.start, mr.end);
+    enviar(Object.assign({ tipo: 'selecao' }, d));
+  }
+
+  // Menu do botão direito (Shift + botão direito abre o menu padrão).
+  function fecharMenu() { const m = document.getElementById('menu-ia'); if (m) m.remove(); }
+  function abrirMenu(x, y) {
+    fecharMenu();
+    const d = dadosSelecao() || { texto: '', colapsado: true };
+    const m = document.createElement('div');
+    m.id = 'menu-ia';
+    const item = (rotulo, acao, ativo = true) => {
+      const b = document.createElement('button');
+      b.textContent = rotulo; b.disabled = !ativo;
+      b.addEventListener('mousedown', (ev) => ev.preventDefault());
+      b.addEventListener('click', () => { fecharMenu(); acao(); });
+      m.appendChild(b);
+    };
+    item(d.colapsado ? '✦ Consultar a IA neste ponto…' : '✦ Consultar a IA sobre o trecho…',
+      () => enviar(Object.assign({ tipo: 'consultarIa' }, d)));
+    item('Comentar seleção', () => enviar({ tipo: 'comentar' }), !d.colapsado);
+    item('Copiar', () => document.execCommand('copy'), !d.colapsado);
+    item('Recortar', () => document.execCommand('cut'), !d.colapsado);
+    const dica = document.createElement('div');
+    dica.className = 'dica'; dica.textContent = 'Shift + botão direito: menu padrão';
+    m.appendChild(dica);
+    document.body.appendChild(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + 'px';
+  }
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest || !e.target.closest('#menu-ia')) fecharMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharMenu(); });
+  window.addEventListener('blur', fecharMenu);
+  document.addEventListener('scroll', fecharMenu, true);
+
+  // Texto de um intervalo do modelo (blocos separados por \n).
+  function textoModelo(range) {
+    let out = '', ultimoBloco = null;
+    for (const item of range.getItems()) {
+      if (!item.is('$textProxy')) continue;
+      const bloco = item.parent;
+      if (ultimoBloco && bloco !== ultimoBloco) out += '\n';
+      ultimoBloco = bloco;
+      out += item.data;
+    }
+    return out;
+  }
+  const semEspacos = (t) => String(t || '').replace(/\s+/g, '');
+  const nomeMarcador = (id) => 'consulta:' + id;
+  const nomeCursor = (id) => 'consultaCursor:' + id;
 
   const toModel = (html) => editor.data.toModel(editor.data.processor.toView(html));
 
@@ -353,10 +465,38 @@
       wc.on('update', atualizarContagem);
       atualizarContagem();
 
+      // Trecho reservado para uma consulta à IA: destacado enquanto a caixa
+      // de consulta está aberta (marcadores acompanham as edições).
+      editor.conversion.for('editingDowncast').markerToHighlight({
+        model: 'consulta', view: { classes: 'gestor-consulta' },
+      });
+      editor.conversion.for('editingDowncast').markerToElement({
+        model: 'consultaCursor',
+        view: (data, { writer }) => data.isOpening === false ? null
+          : writer.createUIElement('span', { class: 'gestor-consulta-cursor' }),
+      });
+
+      comentarios = Array.isArray(o.comentarios) ? o.comentarios : [];
+      const editable = editor.ui.getEditableElement();
+      editable.addEventListener('mouseup', () => setTimeout(reportarSelecao, 0));
+      editable.addEventListener('keyup', reportarSelecao);
+      editable.addEventListener('contextmenu', (e) => {
+        if (e.shiftKey) return; // Shift + botão direito: menu padrão do navegador.
+        e.preventDefault();
+        setTimeout(() => { reportarSelecao(); abrirMenu(e.clientX, e.clientY); }, 0);
+      });
+      for (const c of comentarios) pintar(c);
+      editable.addEventListener('click', () => {
+        const s = window.getSelection(); if (!s || !s.isCollapsed) return;
+        const pos = offsetSelecao(editable, s.anchorNode, s.anchorOffset);
+        const c = comentarios.find(x => x.localizado !== false && pos >= Number(x.posicao) && pos <= Number(x.posicao) + String(x.selecionado || '').length);
+        if (c) { comentarioAtivo = c.id; enviar({tipo:'comentarioClic', id:c.id}); }
+      });
+
       let timer = null;
       editor.model.document.on('change:data', () => {
         clearTimeout(timer);
-        timer = setTimeout(() => enviar({ tipo: 'mudou', html: editor.getData() }), 400);
+        timer = setTimeout(() => { enviar({ tipo: 'mudou', html: editor.getData() }); highlightRanges = []; for (const c of comentarios) pintar(c); }, 400);
       });
       // Sai do modo código-fonte: garante que o app receba o HTML editado.
       editor.plugins.get('SourceEditing').on('change:isSourceEditingMode', (_, __, ativo) => {
@@ -382,6 +522,73 @@
     },
 
     definirLinks(mapa) { linksSei = mapa || {}; },
+
+    definirComentarios(lista) { comentarios = Array.isArray(lista) ? lista : []; highlightRanges = []; if (window.CSS && CSS.highlights) CSS.highlights.delete('parecer-comentarios'); for (const c of comentarios) pintar(c); },
+    ativar(id) { comentarioAtivo = id; const c = comentarios.find(x => String(x.id) === String(id)); return pintar(c); },
+    navegar(c) { comentarioAtivo = c.id; const ok = pintar(c); if (ok) { const root = editor.ui.getEditableElement(); root.scrollIntoView({block:'nearest'}); } return ok; },
+
+    /// Reserva a última seleção (ou cursor) para uma consulta: guarda um
+    /// marcador vivo e devolve o texto reservado. O relato não é alterado.
+    reservar(id) {
+      if (!editor) return { ok: false, motivo: 'O editor não está pronto.' };
+      const model = editor.model;
+      const range = savedModelRange || model.document.selection.getFirstRange();
+      if (!range) return { ok: false, motivo: 'Clique no texto ou selecione um trecho.' };
+      let texto;
+      try { texto = textoModelo(range); } catch (_) { savedModelRange = null; return { ok: false, motivo: 'O texto mudou. Selecione o trecho de novo.' }; }
+      model.change((writer) => {
+        const nome = range.isCollapsed || !texto.trim() ? nomeCursor(id) : nomeMarcador(id);
+        const r = nome === nomeCursor(id) ? model.createRange(range.end) : range;
+        if (model.markers.has(nome)) writer.updateMarker(nome, { range: r });
+        else writer.addMarker(nome, { range: r, usingOperation: false, affectsData: false });
+      });
+      return { ok: true, texto: texto.trim() ? texto : '', cursor: !texto.trim() };
+    },
+
+    /// Substitui o trecho reservado [id] por [texto] (ou insere no cursor).
+    /// Recusa se o trecho mudou desde a reserva ([esperado]).
+    aplicar(id, texto, esperado) {
+      if (!editor) return { ok: false, motivo: 'O editor não está pronto.' };
+      const model = editor.model;
+      const marcador = model.markers.get(nomeMarcador(id)) || model.markers.get(nomeCursor(id));
+      if (!marcador) return { ok: false, motivo: 'O ponto de edição não existe mais. Selecione o trecho de novo.' };
+      const range = marcador.getRange();
+      if (esperado && semEspacos(textoModelo(range)) !== semEspacos(esperado)) {
+        return { ok: false, motivo: 'O trecho foi alterado depois da consulta. Selecione-o de novo.' };
+      }
+      const paragrafos = String(texto || '').split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+      if (!paragrafos.length) return { ok: false, motivo: 'Texto vazio.' };
+      model.change((writer) => {
+        if (paragrafos.length === 1) {
+          // Mantém a formatação do início do trecho.
+          const no = range.start.textNode || range.start.nodeAfter || range.start.nodeBefore;
+          const attrs = no && no.is('$text') ? no.getAttributes() : [];
+          model.insertContent(writer.createText(paragrafos[0].replace(/\s*\n\s*/g, ' '), attrs), range);
+        } else {
+          const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const bloco = range.start.parent;
+          const classe = bloco && bloco.getAttribute && bloco.getAttribute('htmlPAttributes');
+          const cls = classe && classe.classes ? ` class="${classe.classes.join(' ')}"` : '';
+          const html = paragrafos.map((t) => `<p${cls}>${esc(t).replace(/\n/g, '<br>')}</p>`).join('');
+          model.insertContent(toModel(html), range);
+        }
+        for (const nome of [nomeMarcador(id), nomeCursor(id)]) if (model.markers.has(nome)) writer.removeMarker(nome);
+      });
+      savedModelRange = null;
+      editor.editing.view.focus();
+      enviar({ tipo: 'mudou', html: editor.getData() });
+      return { ok: true };
+    },
+
+    /// Descarta a reserva [id] (caixa fechada sem aceitar).
+    liberar(id) {
+      if (!editor) return false;
+      const model = editor.model;
+      model.change((writer) => {
+        for (const nome of [nomeMarcador(id), nomeCursor(id)]) if (model.markers.has(nome)) writer.removeMarker(nome);
+      });
+      return true;
+    },
 
     obter() { return editor ? editor.getData() : ''; },
 

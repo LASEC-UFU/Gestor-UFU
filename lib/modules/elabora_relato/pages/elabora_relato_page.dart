@@ -66,6 +66,7 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
       child: ModuleScaffold(
         moduleId: 'elabora-relato',
         subtitle: 'Pareceres e relatos de processos do SEI',
+        actions: [InserirSeiBotao(service: parecer)],
         body: Column(
           children: [
             Padding(

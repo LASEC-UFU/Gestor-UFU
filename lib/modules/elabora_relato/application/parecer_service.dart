@@ -4,11 +4,15 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/data/sei_parecer_automation.dart';
 import 'package:gestor_ufu/modules/elabora_relato/data/sei_parecer_html.dart';
+import 'package:gestor_ufu/modules/elabora_relato/domain/base_documentos.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
+import 'package:gestor_ufu/platform/contracts/ai_text.dart';
 import 'package:gestor_ufu/platform/services/gestor_paths.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
@@ -19,15 +23,24 @@ typedef InsercaoNoEditor = ({ParecerSecao secao, String html});
 /// no banco do Gestor, e a inserção no SEI. Usado pelas abas e pelos
 /// comandos do agente.
 class ParecerService extends ChangeNotifier {
-  ParecerService({KeyValueStore? store, required this.arvore})
-    : _store = store ?? KeyValueStore(),
-      _sei = SeiParecerAutomation(arvore.automation);
+  ParecerService({
+    KeyValueStore? store,
+    required this.arvore,
+    this.ia,
+    BaseDocumentosService? base,
+  }) : _store = store ?? KeyValueStore(),
+       base = base ?? BaseDocumentosService(store: store),
+       _sei = SeiParecerAutomation(arvore.automation);
 
   static const draftKey = 'parecer_relato_rascunho';
   static const stylesKey = 'parecer_relato_estilos_sei';
 
   final KeyValueStore _store;
   final SeiArvoreService arvore;
+  final AiTextService? ia;
+
+  /// Base de documentos de consulta (pasta com normas e anexos).
+  final BaseDocumentosService base;
   final SeiParecerAutomation _sei;
 
   Parecer _parecer = const Parecer();
@@ -54,6 +67,83 @@ class ParecerService extends ChangeNotifier {
 
   /// Seção trocada por fora do editor (agente/comando): o editor recarrega.
   Stream<ParecerSecao> get substituicoes => _substituicoes.stream;
+
+  /// Comentários (anotações privadas) da [secao], fora do HTML do parecer.
+  List<Map<String, dynamic>> comentarios(ParecerSecao secao) => [
+    for (final c in _parecer.comentarios)
+      if ('${c['secao']}' == secao.id) c,
+  ];
+
+  Future<void> salvarComentario(Map<String, dynamic> comentario) async {
+    final lista = [..._parecer.comentarios];
+    final id = '${comentario['id']}';
+    final i = lista.indexWhere((c) => '${c['id']}' == id);
+    if (i < 0) {
+      lista.add(comentario);
+    } else {
+      lista[i] = comentario;
+    }
+    _parecer = _parecer.copyWith(comentarios: lista);
+    await salvarAgora();
+    notifyListeners();
+  }
+
+  Future<void> excluirComentario(String id) async {
+    _parecer = _parecer.copyWith(
+      comentarios: _parecer.comentarios
+          .where((c) => '${c['id']}' != id)
+          .toList(),
+    );
+    await salvarAgora();
+    notifyListeners();
+  }
+
+  /// Perguntas para o simulado de arguição: comentários (de todas as
+  /// seções) com "possível pergunta na arguição". Comentários antigos da
+  /// análise guardavam a pergunta em `pergunta`.
+  List<Map<String, dynamic>> perguntasArguicao() => [
+    for (final c in _parecer.comentarios)
+      if (perguntaArguicao(c).isNotEmpty && '${c['status']}' != 'nao_aplica') c,
+  ];
+
+  static String perguntaArguicao(Map<String, dynamic> c) {
+    final nova = '${c['pergunta_arguicao'] ?? ''}'.trim();
+    if (nova.isNotEmpty) return nova;
+    // Em consultas à IA, `pergunta` é a pergunta do relator, não da banca.
+    if ('${c['categoria']}' == 'consulta_ia') return '';
+    return '${c['pergunta'] ?? ''}'.trim();
+  }
+
+  /// Registra o resultado de uma pergunta no simulado (acertou/rever).
+  Future<void> registrarTreino(String id, {required bool acertou}) async {
+    final c = _parecer.comentarios.where((x) => '${x['id']}' == id).firstOrNull;
+    if (c == null) return;
+    final treino = Map<String, dynamic>.from(
+      c['treino'] is Map ? c['treino'] as Map : const {},
+    );
+    final chave = acertou ? 'acertos' : 'rever';
+    treino[chave] = ((treino[chave] as num?)?.toInt() ?? 0) + 1;
+    treino['ultimo'] = acertou ? 'acertou' : 'rever';
+    treino['em'] = DateTime.now().toIso8601String();
+    await salvarComentario({...c, 'treino': treino});
+  }
+
+  /// Verificação antes de inserir no SEI (não bloqueia a inserção).
+  Future<ChecklistSei> checklistSei() async {
+    await carregar();
+    BaseDocumentos? b;
+    try {
+      b = await base.garantirAtualizada();
+    } catch (_) {
+      b = base.base;
+    }
+    return ChecklistSei.verificar(
+      parecer: _parecer,
+      textoDe: (s) => ChecklistSei.textoDeHtml(_parecer.secao(s)),
+      base: b,
+      baseConfigurada: base.configurada,
+    );
+  }
 
   Future<void> carregar() async {
     if (_carregado) return;

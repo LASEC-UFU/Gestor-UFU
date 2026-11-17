@@ -39,17 +39,44 @@ PARECER Nº, PROCESSO Nº e INTERESSADO(S) são preenchidos pelo SEI.
   fundamentacao, conclusao). Use parágrafos `<p class="Texto_Justificado_
   Recuo_Primeira_Linha">`; links SEI `<a class="ancora_sei"
   id="lnkSei{id_documento}">{número SEI}</a>` (id interno ≠ número SEI).
+- `parecer.verificar`: pendências antes do SEI (comentários "para
+  revisão", artigos citados que não estão na base, campos vazios). Mostre
+  ao usuário antes de inserir.
 - `parecer.inserirSei`: só após confirmação do usuário. Gera o documento
   "Parecer" no processo aberto (ou preenche o editor de Parecer aberto) e
-  salva sem assinar.
+  salva sem assinar. O botão "Inserir no SEI" fica no cabeçalho do módulo.
 
-Códigos de erro: endereco_invalido, sei_fechado, fora_do_sei, arvore_vazia,
+## Comentários, rastreabilidade e simulado
+Os comentários ficam no rascunho, fora do HTML enviado ao SEI. Ao aceitar
+uma proposta da IA baseada em fontes, o Gestor cria um comentário
+"rastreabilidade" com arquivo, localização e trecho de cada fonte. A
+análise da seção guarda `pergunta_arguicao` e `resposta_oral`, usadas no
+"Simulado de arguição" (barra da seção).
+
+## Base de documentos de consulta
+O relator escolhe uma pasta com normas, resoluções e anexos. O Gestor
+grava nela `base_consulta.gestor.json` (trechos com arquivo, página,
+artigo, seção e parágrafo) sem alterar os originais e só reprocessa
+arquivos novos/alterados. A pasta é vigiada: a base se atualiza sozinha
+alguns segundos depois de arquivos serem adicionados, alterados ou
+removidos (e é conferida de novo antes de cada consulta).
+- `parecer.base.preparar` {pasta?, forcar?}: prepara/atualiza a base.
+- `parecer.base.buscar` {consulta, limite?}: trechos relevantes (base +
+  documentos lidos da árvore do SEI). Ao fundamentar, cite o arquivo
+  original e a localização devolvidos; se nada for encontrado, diga isso.
+PDFs digitalizados (sem camada de texto) ficam marcados "requer_ocr": o
+Gestor não faz OCR.
+No editor, o usuário consulta a IA sobre um trecho com o botão direito;
+as propostas só entram no texto quando ele clica em "Aceitar".
+
+Códigos de erro: base_sem_pasta, consulta_vazia, endereco_invalido, sei_fechado, fora_do_sei, arvore_vazia,
 em_andamento, sem_extracao, ia_indisponivel, documento_inexistente,
 falha_sei, tempo_esgotado.
 
 ## Banco
 `sei_tree_address_url` (endereço do SEI), `parecer_relato_inventario`
-(último inventário), `parecer_relato_rascunho` (rascunho) e
-`parecer_relato_estilos_sei` (estilos capturados do editor do SEI).
+(último inventário), `parecer_relato_rascunho` (rascunho),
+`parecer_relato_estilos_sei` (estilos capturados do editor do SEI) e
+`parecer_base_documentos_pasta` (pasta da base de documentos).
 ''',
 );

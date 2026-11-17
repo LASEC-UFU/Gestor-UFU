@@ -565,8 +565,9 @@ const agentTools = <AgentToolSpec>[
   AgentToolSpec(
     name: 'read_document',
     description:
-        'Lê o texto de .docx (parágrafos e tabelas) ou de arquivos de texto, '
-        'em fatias (offset/max_chars, padrão 8000).',
+        'Extrai texto de .docx, PDF (camada de texto, via pdftotext/Poppler) '
+        'e arquivos de texto, em fatias (offset/max_chars, padrão 8000). PDF '
+        'digitalizado sem OCR é informado como sem texto extraível.',
     schema: {
       'type': 'object',
       'properties': {

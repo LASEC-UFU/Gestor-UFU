@@ -1,3 +1,4 @@
+import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
@@ -275,20 +276,129 @@ List<ModuleCommand> elaboraRelatoCommands(
     },
   ),
   ModuleCommand(
+    id: 'parecer.verificar',
+    title: 'Verificar o parecer antes do SEI',
+    description:
+        'Lista pendências: comentários "para revisão", artigos citados no '
+        'texto que não estão na base de documentos e campos vazios. Rode '
+        'antes de parecer.inserirSei e mostre o resultado ao usuário.',
+    inputSchema: {'type': 'object', 'properties': {}},
+    run: (input, origin) async {
+      final c = await parecer.checklistSei();
+      return CommandResult.ok(
+        message: c.itens.isEmpty
+            ? 'Nenhuma pendência encontrada.'
+            : c.itens.map((i) => i.titulo).join('; '),
+        data: {'itens': _itens(c)},
+      );
+    },
+  ),
+  ModuleCommand(
     id: 'parecer.inserirSei',
     title: 'Inserir o parecer no SEI',
     description:
         'Gera um documento "Parecer" no processo aberto no Edge do app (ou '
         'preenche o editor de Parecer já aberto) com o rascunho e salva sem '
-        'assinar. Confirme com o usuário antes.',
+        'assinar. Antes, rode parecer.verificar e confirme com o usuário.',
     inputSchema: {'type': 'object', 'properties': {}},
     run: (input, origin) async {
       await parecer.carregar();
+      final c = await parecer.checklistSei();
       final avisos = await parecer.inserirNoSei();
       return CommandResult.ok(
         message: 'Parecer inserido e salvo no SEI (não assinado).',
-        data: {'avisos': avisos},
+        data: {'avisos': avisos, 'pendencias': _itens(c)},
       );
     },
   ),
+  ModuleCommand(
+    id: 'parecer.base.preparar',
+    title: 'Preparar a base de documentos',
+    description:
+        'Prepara/atualiza a base de consulta (JSON na pasta de documentos '
+        'do relator): extrai PDF com texto, DOCX, TXT/MD e HTML em trechos '
+        'com página/artigo/seção/parágrafo. Só reprocessa arquivos novos ou '
+        'alterados. pasta opcional (troca a pasta); forcar reprocessa tudo.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'pasta': {'type': 'string'},
+        'forcar': {'type': 'boolean'},
+      },
+    },
+    run: (input, origin) async {
+      final base = parecer.base;
+      final pasta = input.optionalString('pasta');
+      if (pasta != null) {
+        await base.definirPasta(pasta);
+        if (input['forcar'] == true) await base.preparar(forcar: true);
+      } else {
+        await base.preparar(forcar: input['forcar'] == true);
+      }
+      final r = base.ultimoResumo;
+      final b = base.base;
+      return CommandResult.ok(
+        message:
+            'Base em ${base.pasta}: ${b?.documentos.length ?? 0} '
+            'documento(s), ${b?.totalTrechos ?? 0} trecho(s). '
+            '${r?.descricao ?? ''}',
+        data: {
+          'json': r?.arquivoJson ?? '',
+          'sem_texto': r?.semTexto ?? const [],
+          'erros': r?.erros ?? const [],
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.base.buscar',
+    title: 'Buscar na base de documentos',
+    description:
+        'Busca termos, normas ou artigos ("art. 41 estágio") na base de '
+        'consulta e nos documentos lidos da árvore do SEI. Devolve trechos '
+        'com arquivo original e localização. Cite sempre o arquivo e a '
+        'localização; não invente referências.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'consulta': {'type': 'string'},
+        'limite': {'type': 'integer'},
+      },
+      'required': ['consulta'],
+    },
+    run: (input, origin) async {
+      final consulta = input.optionalString('consulta') ?? '';
+      if (consulta.trim().isEmpty) {
+        throw const CommandException('consulta_vazia', 'Informe a consulta.');
+      }
+      final limite = ((input['limite'] as num?)?.toInt() ?? 8).clamp(1, 30);
+      final fontes = await parecer.base.fontesPara(
+        consulta,
+        processo: service.documentos,
+        limiteBase: limite,
+        limiteProcesso: (limite / 2).ceil(),
+      );
+      return CommandResult.ok(
+        message: fontes.isEmpty
+            ? 'Nada encontrado na base para "$consulta".'
+            : '${fontes.length} trecho(s) encontrados.',
+        data: {
+          'pasta': parecer.base.pasta,
+          'trechos': [
+            for (final f in fontes)
+              {
+                'arquivo': f.arquivo,
+                'localizacao': f.localizacao,
+                'texto': f.texto,
+              },
+          ],
+        },
+      );
+    },
+  ),
+];
+
+List<Map<String, Object>> _itens(ChecklistSei c) => [
+  for (final i in c.itens)
+    {'titulo': i.titulo, 'gravidade': i.gravidade.name, 'detalhes': i.detalhes},
 ];

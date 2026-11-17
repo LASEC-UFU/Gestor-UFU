@@ -63,7 +63,8 @@ void main() {
       vocativo: 'Senhor Presidente,\nSenhores(as) Conselheiros(as),',
       abertura: 'Em cumprimento ao Despacho 262/2024, transcrevo o relato.',
       relatorio: '<p class="Texto_Justificado">1. Ofício 1;</p>',
-      fundamentacao: '<p class="Texto_Justificado_Recuo_Primeira_Linha">Análise.</p>',
+      fundamentacao:
+          '<p class="Texto_Justificado_Recuo_Primeira_Linha">Análise.</p>',
       conclusao: '<p>CONSIDERANDO o disposto…</p>',
       nomeSignatario: 'Fulano de Tal',
       cargoSignatario: 'Relator',
@@ -99,6 +100,26 @@ void main() {
     expect('Em cumprimento'.allMatches(again).length, 1);
     expect('Senhores(as)'.allMatches(again).length, 1);
     expect('1. Ofício 1;'.allMatches(again).length, 1);
+  });
+
+  test('comentários são opcionais no rascunho legado e não entram no HTML', () {
+    final legado = Parecer.fromJson({'relatorio': '<p>Relato anterior.</p>'});
+    expect(legado.comentarios, isEmpty);
+
+    const comentario = {
+      'id': 'c1',
+      'secao': 'relatorio',
+      'selecionado': 'Relato anterior.',
+      'texto': 'Conferir a resolução.',
+      'categoria': 'analise_normativa',
+    };
+    final novo = legado.copyWith(comentarios: [comentario]);
+    final recuperado = Parecer.fromJson(novo.toJson());
+    expect(recuperado.comentarios.single['texto'], 'Conferir a resolução.');
+
+    final html = SeiParecerHtmlMerger.merge(_modelo, recuperado).html;
+    expect(html, contains('Relato anterior.'));
+    expect(html, isNot(contains('Conferir a resolução.')));
   });
 
   test('recusa HTML que não é o modelo de Parecer', () {

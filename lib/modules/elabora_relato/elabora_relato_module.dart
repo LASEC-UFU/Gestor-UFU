@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/elabora_relato_commands.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
@@ -30,7 +31,12 @@ class ElaboraRelatoModule extends GestorModule {
       store: services.store,
       ia: services.contract<AiTextService>(),
     );
-    _parecer = ParecerService(store: services.store, arvore: _arvore);
+    _parecer = ParecerService(
+      store: services.store,
+      arvore: _arvore,
+      ia: services.contract<AiTextService>(),
+      base: BaseDocumentosService(store: services.store),
+    );
   }
 
   @override

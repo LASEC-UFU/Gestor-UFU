@@ -136,40 +136,12 @@ class AgentFiles {
     };
   }
 
-  /// `read_document`: texto de .docx (parágrafos e tabelas) ou de arquivos
-  /// de texto, em fatias (`offset`/`max_chars`).
+  /// `read_document`: extrai texto de DOCX, PDF e arquivos de texto em fatias.
   static Future<Map<String, Object?>> readDocument(
     Map<String, dynamic> input,
   ) async {
     final path = '${input['path'] ?? ''}'.trim();
-    final file = File(path);
-    if (path.isEmpty || !await file.exists()) {
-      throw StateError('Arquivo não encontrado: $path');
-    }
-    final ext = p.extension(path).toLowerCase();
-    String text;
-    if (ext == '.docx') {
-      text = docxText(await file.readAsBytes());
-    } else if (const {
-      '.txt',
-      '.md',
-      '.csv',
-      '.tsv',
-      '.json',
-      '.xml',
-      '.html',
-      '.htm',
-      '.log',
-    }.contains(ext)) {
-      text = utf8.decode(await file.readAsBytes(), allowMalformed: true);
-    } else if (ext == '.pdf') {
-      throw StateError(
-        'PDF não é lido por esta ferramenta. Agentes CLI (Claude) leem PDF '
-        'direto pelo caminho; peça só as páginas necessárias.',
-      );
-    } else {
-      throw StateError('Formato não suportado: $ext.');
-    }
+    final text = await documentText(path);
     final offset = ((input['offset'] as num?)?.toInt() ?? 0).clamp(
       0,
       text.length,
@@ -188,48 +160,137 @@ class AgentFiles {
     };
   }
 
-  /// Texto de um .docx: parágrafos em linhas, tabelas com células por TAB.
-  static String docxText(List<int> bytes) {
+  /// Extrai o conteúdo integral de um DOCX, PDF ou arquivo de texto.
+  static Future<String> documentText(String path) async {
+    final file = File(path);
+    if (path.trim().isEmpty || !await file.exists()) {
+      throw StateError('Arquivo não encontrado: $path');
+    }
+    final ext = p.extension(path).toLowerCase();
+    if (ext == '.docx') return docxText(await file.readAsBytes());
+    if (ext == '.pdf') {
+      final text = (await pdfPages(
+        path,
+      )).join('\n\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+      if (text.isEmpty) {
+        throw StateError(
+          'O PDF não tem camada de texto (digitalizado como imagem); é '
+          'necessário OCR.',
+        );
+      }
+      return text;
+    }
+    if (textExtensions.contains(ext)) {
+      return utf8.decode(await file.readAsBytes(), allowMalformed: true);
+    }
+    throw StateError('Formato não suportado: $ext.');
+  }
+
+  /// Extensões lidas como texto puro.
+  static const textExtensions = {
+    '.txt',
+    '.md',
+    '.csv',
+    '.tsv',
+    '.json',
+    '.xml',
+    '.html',
+    '.htm',
+    '.log',
+  };
+
+  /// Texto de cada página de um PDF (camada de texto, via Poppler
+  /// `pdftotext`, em ordem de leitura). Páginas digitalizadas como imagem
+  /// voltam vazias: o PDF precisa de OCR, que o Gestor não faz.
+  static Future<List<String>> pdfPages(String path) async {
+    final ProcessResult result;
+    try {
+      result = await Process.run(
+        'pdftotext',
+        ['-enc', 'UTF-8', '-eol', 'unix', path, '-'],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
+    } on ProcessException {
+      throw StateError(
+        'Não foi possível encontrar o pdftotext (Poppler). Instale o Poppler '
+        'ou coloque o pdftotext no PATH para ler PDFs.',
+      );
+    }
+    if (result.exitCode != 0) {
+      final stderr = '${result.stderr}'.trim();
+      throw StateError(
+        stderr.isEmpty
+            ? 'pdftotext encerrou com código ${result.exitCode}.'
+            : stderr,
+      );
+    }
+    final pages = '${result.stdout}'.split('\f');
+    // O pdftotext termina cada página com form feed (\f).
+    if (pages.length > 1 && pages.last.trim().isEmpty) pages.removeLast();
+    return [for (final page in pages) page.trim()];
+  }
+
+  /// Parágrafos de um .docx na ordem do documento, com o estilo de
+  /// parágrafo (`w:pStyle`, ex.: "Heading1", "Ttulo2"); cada linha de
+  /// tabela vira um parágrafo com as células separadas por TAB.
+  static List<({String texto, String estilo})> docxParagraphs(List<int> bytes) {
     final archive = ZipDecoder().decodeBytes(bytes);
     final entry = archive.findFile('word/document.xml');
     if (entry == null) throw StateError('O arquivo não parece um .docx.');
     final xml = XmlDocument.parse(
       utf8.decode(entry.content as List<int>, allowMalformed: true),
     );
-    String paragraph(XmlElement p) {
-      final buffer = StringBuffer();
-      for (final node in p.descendants.whereType<XmlElement>()) {
-        switch (node.name.local) {
-          case 't':
-            buffer.write(node.innerText);
-          case 'tab':
-            buffer.write('\t');
-          case 'br':
-            buffer.write(' ');
-        }
-      }
-      return buffer.toString();
-    }
-
-    final lines = <String>[];
+    final out = <({String texto, String estilo})>[];
     final body = xml.findAllElements('w:body').firstOrNull;
-    if (body == null) return '';
+    if (body == null) return out;
     for (final child in body.childElements) {
       if (child.name.local == 'p') {
-        lines.add(paragraph(child));
+        final style =
+            child
+                .findAllElements('w:pStyle')
+                .firstOrNull
+                ?.getAttribute('w:val') ??
+            '';
+        out.add((texto: _docxParagraph(child), estilo: style));
       } else if (child.name.local == 'tbl') {
         for (final row in child.findAllElements('w:tr')) {
-          lines.add(
-            [
+          out.add((
+            texto: [
               for (final cell in row.findElements('w:tc'))
-                cell.findAllElements('w:p').map(paragraph).join(' ').trim(),
+                cell
+                    .findAllElements('w:p')
+                    .map(_docxParagraph)
+                    .join(' ')
+                    .trim(),
             ].join('\t'),
-          );
+            estilo: 'tabela',
+          ));
         }
       }
     }
-    return lines.join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
+    return out;
   }
+
+  static String _docxParagraph(XmlElement p) {
+    final buffer = StringBuffer();
+    for (final node in p.descendants.whereType<XmlElement>()) {
+      switch (node.name.local) {
+        case 't':
+          buffer.write(node.innerText);
+        case 'tab':
+          buffer.write('\t');
+        case 'br':
+          buffer.write(' ');
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// Texto de um .docx: parágrafos em linhas, tabelas com células por TAB.
+  static String docxText(List<int> bytes) => docxParagraphs(
+    bytes,
+  ).map((p) => p.texto).join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n').trim();
 
   static String _cellText(CellValue? value) {
     if (value == null) return '';

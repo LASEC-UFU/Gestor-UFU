@@ -5,6 +5,7 @@ import 'package:archive/archive.dart';
 import 'package:excel/excel.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:pdf/widgets.dart' as pw;
 
 import 'package:gestor_ufu/data/services/ai_agent/agent_files.dart';
 
@@ -91,5 +92,26 @@ void main() {
       'max_chars': 200,
     });
     expect(slice['caracteres_total'], 33);
+  });
+
+  test('PDF: extrai a camada de texto em fatias', () async {
+    try {
+      await Process.run('pdftotext', ['-v']);
+    } on ProcessException {
+      // Poppler e opcional para executar esta verificacao local.
+      return;
+    }
+    final pdf = pw.Document()
+      ..addPage(pw.Page(build: (_) => pw.Text('Resolution 42 2026')));
+    final path = p.join(dir.path, 'resolucao.pdf');
+    File(path).writeAsBytesSync(await pdf.save());
+    final full = await AgentFiles.documentText(path);
+    expect(full, contains('Resolution 42 2026'));
+    final slice = await AgentFiles.readDocument({
+      'path': path,
+      'offset': 0,
+      'max_chars': 200,
+    });
+    expect(slice['trecho'], contains('Resolution 42 2026'));
   });
 }
