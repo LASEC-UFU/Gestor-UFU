@@ -55,6 +55,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
   final _lista = ScrollController();
   final _busca = TextEditingController();
   final _chaves = <String, GlobalKey>{};
+  final _foco = FocusNode(debugLabel: 'Leitor com comentários');
   String? _ultimoVisto;
 
   LeitorComentadoController get c => widget.controller;
@@ -82,6 +83,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
     c.removeListener(_mudou);
     _lista.dispose();
     _busca.dispose();
+    _foco.dispose();
     super.dispose();
   }
 
@@ -90,6 +92,9 @@ class _LeitorComentadoState extends State<LeitorComentado> {
     setState(() {});
     final sel = c.selecionado;
     if (sel != null && sel != _ultimoVisto) {
+      // Leva o foco do teclado ao leitor (Alt + ↑/↓, Esc), sem tirá-lo da
+      // busca se o usuário estiver nela.
+      if (!_foco.hasFocus) _foco.requestFocus();
       // Mostra o cartão selecionado na lista.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final ctx = _chaves[sel]?.currentContext;
@@ -115,9 +120,13 @@ class _LeitorComentadoState extends State<LeitorComentado> {
             c.anterior,
         const SingleActivator(LogicalKeyboardKey.escape): c.limparSelecao,
       },
-      child: LayoutBuilder(
-        builder: (context, box) =>
-            box.maxWidth < widget.limiteEstreito ? _estreito(box) : _largo(box),
+      child: Focus(
+        focusNode: _foco,
+        child: LayoutBuilder(
+          builder: (context, box) => box.maxWidth < widget.limiteEstreito
+              ? _estreito(box)
+              : _largo(box),
+        ),
       ),
     );
   }

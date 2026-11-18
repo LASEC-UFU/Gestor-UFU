@@ -73,7 +73,13 @@ documento e a página/parágrafo.
   salva sem assinar. O botão "Inserir no SEI" fica no cabeçalho do módulo.
 
 ## Comentários, rastreabilidade e simulado
-Os comentários ficam no rascunho, fora do HTML enviado ao SEI. Ao aceitar
+Os comentários ficam no rascunho, fora do HTML enviado ao SEI. Escreva cada
+um para quem vai lê-lo: `texto` = o ponto que precisa de atenção (frase
+completa), `importancia` = por que merece revisão, `sugestao` = o que fazer
+para melhorar; nada de rótulos soltos. O trecho já aparece destacado no
+documento: não o repita no texto. Na tela, o painel de comentários (comum
+aos documentos HTML e PDF) leva o documento até o trecho de cada comentário.
+Ao aceitar
 uma proposta da IA baseada em fontes, o Gestor cria um comentário
 "rastreabilidade" com arquivo, localização e trecho de cada fonte. A
 análise da seção guarda `pergunta_arguicao` e `resposta_oral`, usadas no

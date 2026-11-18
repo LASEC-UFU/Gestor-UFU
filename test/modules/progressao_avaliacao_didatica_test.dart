@@ -45,8 +45,14 @@ void main() {
       service.rotuloAvaliacaoDidatica(p0, p0.avaliacoesDidaticas[0]),
       'Avaliacao_Didatica_2024-2',
     );
-    expect(service.rotuloAvaliacaoDidatica(p0, p0.avaliacoesDidaticas[2]), isNull);
-    expect(service.rotuloAvaliacaoDidatica(p0, p0.avaliacoesDidaticas[3]), isNull);
+    expect(
+      service.rotuloAvaliacaoDidatica(p0, p0.avaliacoesDidaticas[2]),
+      isNull,
+    );
+    expect(
+      service.rotuloAvaliacaoDidatica(p0, p0.avaliacoesDidaticas[3]),
+      isNull,
+    );
     expect(service.avaliacoesDidaticas(p0).map((a) => a.rotulo), [
       'Avaliacao_Didatica_2024-2',
       'Avaliacao_Didatica_2025-1',

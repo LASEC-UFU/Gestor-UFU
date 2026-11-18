@@ -26,10 +26,12 @@ class SuperficiePdfController {
       _estado?._js('window.pdfv.irPara(${jsonEncode({'pagina': pagina})})');
 
   /// Busca a próxima (ou anterior) ocorrência; responde em `aoBuscar`.
-  Future<void> buscar(String termo, {bool proxima = true}) async =>
-      _estado?._js(
-        'window.pdfv.buscar(${jsonEncode(termo)}, ${proxima ? 'true' : 'false'})',
-      );
+  Future<void> buscar(
+    String termo, {
+    bool proxima = true,
+  }) async => _estado?._js(
+    'window.pdfv.buscar(${jsonEncode(termo)}, ${proxima ? 'true' : 'false'})',
+  );
 
   /// "+", "-", "largura" ou um fator (1 = 100%).
   Future<void> zoom(String valor) async =>
@@ -167,10 +169,9 @@ class _SuperficiePdfState extends State<SuperficiePdf> {
     await _js(
       'window.pdfv.irPara(${jsonEncode({'pagina': m.pdfPagina, 'inicio': m.pdfInicio, 'fim': m.pdfFim, 'pedido': id})})',
     );
-    return c.future.timeout(
-      const Duration(seconds: 6),
-      onTimeout: () => false,
-    ).whenComplete(() => _navegacoes.remove(id));
+    return c.future
+        .timeout(const Duration(seconds: 6), onTimeout: () => false)
+        .whenComplete(() => _navegacoes.remove(id));
   }
 
   static String _hex(Color c) =>

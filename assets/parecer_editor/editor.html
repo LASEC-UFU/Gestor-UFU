@@ -12,7 +12,11 @@
   #barra { position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 1px solid #d6d8de; }
   #barra .ck.ck-toolbar { border: 0; background: #fff; padding: 2px 6px; }
   #area { flex: 1; overflow: auto; padding: 18px 12px 40px; }
-  #folha { max-width: 21cm; margin: 0 auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  #folha { position: relative; max-width: 21cm; margin: 0 auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  /* Comentário selecionado: cor própria, sublinhado, contorno e barra na margem. */
+  ::highlight(parecer-ativo) { background-color: #64b5f6; color: #062a57; text-decoration: underline; text-decoration-thickness: 2px; text-decoration-color: #0b4fa8; }
+  .gestor-ativo-caixa { position: absolute; pointer-events: none; outline: 2px solid #0b4fa8; border-radius: 2px; z-index: 5; }
+  .gestor-ativo-barra { position: absolute; left: 6px; width: 6px; border-radius: 3px; background: #0b4fa8; pointer-events: none; z-index: 5; }
   #folha .ck-editor__editable { min-height: 24cm; padding: 1.5cm 1.8cm; border: 0 !important; box-shadow: none !important; }
   #rodape { font: 11px "Segoe UI", sans-serif; color: #5e6478; padding: 4px 10px; background: #fff; border-top: 1px solid #d6d8de; display: flex; gap: 16px; }
   .ck.ck-button.gestor-ativo { background: #ffe3b3 !important; }

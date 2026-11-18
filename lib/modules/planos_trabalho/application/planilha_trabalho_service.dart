@@ -14,7 +14,7 @@ class PlanilhaTrabalhoService {
       'Informações e Resumo',
       {'A7': 'Docente:', 'A8': 'Unidade:', 'A9': 'Regime de trabalho:'},
       0,
-      const {},
+      {},
       {
         'B7': ('Docente', 'texto'),
         'B8': ('Unidade', 'texto'),
@@ -162,7 +162,7 @@ class PlanilhaTrabalhoService {
       'Observações',
       {'C1': 'Observações'},
       0,
-      const {},
+      {},
       {'A5': ('Observações', 'texto')},
     ),
   };
@@ -267,10 +267,11 @@ class PlanilhaTrabalhoService {
       final current = _readValue(cell.value, field['type'] as String);
       result.add({...field, 'current': current});
     }
-    if (result.isEmpty)
+    if (result.isEmpty) {
       throw const FormatException(
         'Não há valores preenchidos para transferir.',
       );
+    }
     return result;
   }
 
@@ -303,8 +304,9 @@ class PlanilhaTrabalhoService {
     final operations = preview(data, sourcePath);
     final workbookFile = decoded.findFile('xl/workbook.xml');
     final relsFile = decoded.findFile('xl/_rels/workbook.xml.rels');
-    if (workbookFile == null || relsFile == null)
+    if (workbookFile == null || relsFile == null) {
       throw const FormatException('Estrutura XLSX inválida.');
+    }
     final workbookDoc = XmlDocument.parse(
       utf8.decode(workbookFile.content as List<int>),
     );
@@ -334,16 +336,18 @@ class PlanilhaTrabalhoService {
     for (final operation in operations) {
       final section = operation['section'] as String;
       final path = sheetPaths[section];
-      if (path == null)
+      if (path == null) {
         throw FormatException(
           'A aba ${operation['sheet']} não foi localizada no arquivo.',
         );
+      }
       (bySheet[path] ??= []).add(operation);
     }
     for (final entry in bySheet.entries) {
       final archiveFile = decoded.findFile(entry.key);
-      if (archiveFile == null)
+      if (archiveFile == null) {
         throw FormatException('A aba ${entry.key} está ausente no arquivo.');
+      }
       final document = XmlDocument.parse(
         utf8.decode(archiveFile.content as List<int>),
       );
@@ -376,10 +380,11 @@ class PlanilhaTrabalhoService {
       utf8.encode(workbookDoc.toXmlString()),
     );
     final bytes = ZipEncoder().encode(decoded);
-    if (bytes == null)
+    if (bytes == null) {
       throw const FormatException(
         'Não foi possível gerar a cópia da planilha.',
       );
+    }
     await destination.writeAsBytes(bytes, flush: true);
     return operations;
   }
@@ -406,8 +411,9 @@ class PlanilhaTrabalhoService {
     }
     if (type == 'data') {
       final match = RegExp(r'^(\d{2})/(\d{2})/(\d{4})$').firstMatch(value);
-      if (match == null)
+      if (match == null) {
         throw const FormatException('Informe a data no formato DD/MM/AAAA.');
+      }
       final date = DateTime(
         int.parse(match[3]!),
         int.parse(match[2]!),
@@ -475,10 +481,11 @@ class PlanilhaTrabalhoService {
     }
     for (final entry in _sections.entries) {
       final sheet = sheets[entry.key]!;
-      if (sheet.maxRows > 2000)
+      if (sheet.maxRows > 2000) {
         throw FormatException(
           'A aba ${sheet.sheetName} excede o limite reconhecido.',
         );
+      }
       for (final anchor in entry.value.anchors.entries) {
         final cell = sheet.cell(CellIndex.indexByString(anchor.key));
         if (_normalize(_readValue(cell.value, 'texto')?.toString() ?? '') !=
@@ -494,8 +501,9 @@ class PlanilhaTrabalhoService {
 
   Object? _readValue(CellValue? value, String type) {
     if (value == null || value is FormulaCellValue) return null;
-    if (value is DateCellValue)
+    if (value is DateCellValue) {
       return value.asDateTimeLocal().toIso8601String();
+    }
     if (value is IntCellValue) return value.value;
     if (value is DoubleCellValue) return value.value;
     if (value is TextCellValue) return value.value.toString();
@@ -533,8 +541,9 @@ class PlanilhaTrabalhoService {
   ) {
     final root = document.rootElement;
     final sheetData = root.findElements('sheetData').firstOrNull;
-    if (sheetData == null)
+    if (sheetData == null) {
       throw const FormatException('A planilha não contém sheetData.');
+    }
     final coords = _cellCoordinates(address);
     final rowNumber = coords.$2;
     var row = sheetData
@@ -578,10 +587,11 @@ class PlanilhaTrabalhoService {
         row.children.insert(row.children.indexOf(nextCell), cell);
       }
     }
-    if (cell.findElements('f').isNotEmpty)
+    if (cell.findElements('f').isNotEmpty) {
       throw FormatException(
         'O campo $address contém fórmula e não será sobrescrito.',
       );
+    }
     cell.children.clear();
     cell.attributes.removeWhere(
       (attribute) => attribute.name.local != 'r' && attribute.name.local != 's',
@@ -622,8 +632,9 @@ class PlanilhaTrabalhoService {
 
   (int, int) _cellCoordinates(String address) {
     final match = RegExp(r'^([A-Z]+)(\d+)$').firstMatch(address);
-    if (match == null)
+    if (match == null) {
       throw FormatException('Referência de célula inválida: $address');
+    }
     var column = 0;
     for (final rune in match[1]!.codeUnits) {
       column = column * 26 + rune - 64;
@@ -806,16 +817,18 @@ class _WorkbookRules {
       bool valid;
       switch (operator) {
         case 'between':
-          if (first == null || second == null)
+          if (first == null || second == null) {
             throw FormatException(
               'Não foi possível conferir os limites de $section!$address.',
             );
+          }
           valid = value >= first && value <= second;
         case 'notBetween':
-          if (first == null || second == null)
+          if (first == null || second == null) {
             throw FormatException(
               'Não foi possível conferir os limites de $section!$address.',
             );
+          }
           valid = value < first || value > second;
         case 'equal':
           valid = first != null && value == first;
@@ -834,17 +847,19 @@ class _WorkbookRules {
             'Regra numérica desconhecida em $section!$address.',
           );
       }
-      if (!valid)
+      if (!valid) {
         throw FormatException(
           'O valor $value não atende à validação de $section!$address.',
         );
+      }
     }
   }
 
   static XmlDocument _xml(Archive archive, String path) {
     final file = archive.findFile(path);
-    if (file == null)
+    if (file == null) {
       throw FormatException('Arquivo XLSX inválido: $path não encontrado.');
+    }
     return XmlDocument.parse(utf8.decode(file.content as List<int>));
   }
 
@@ -870,10 +885,13 @@ class _WorkbookRules {
 
   static (int, int) _coordinates(String address) {
     final match = RegExp(r'^([A-Z]+)(\d+)$').firstMatch(address);
-    if (match == null)
+    if (match == null) {
       throw FormatException('Referência de célula inválida: $address');
+    }
     var column = 0;
-    for (final unit in match[1]!.codeUnits) column = column * 26 + unit - 64;
+    for (final unit in match[1]!.codeUnits) {
+      column = column * 26 + unit - 64;
+    }
     return (column, int.parse(match[2]!));
   }
 
@@ -889,8 +907,9 @@ class _WorkbookRules {
       if (target.$1 >= start.$1 &&
           target.$1 <= end.$1 &&
           target.$2 >= start.$2 &&
-          target.$2 <= end.$2)
+          target.$2 <= end.$2) {
         return true;
+      }
     }
     return false;
   }

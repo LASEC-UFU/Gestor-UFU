@@ -503,10 +503,7 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
                     itemCount: _modules.length,
                     // onReorder entrega newIndex antes de remover o item;
                     // ajusta para a semântica usada por _reorderModules.
-                    onReorder: (oldIndex, newIndex) => _reorderModules(
-                      oldIndex,
-                      newIndex > oldIndex ? newIndex - 1 : newIndex,
-                    ),
+                    onReorderItem: _reorderModules,
                     buildDefaultDragHandles: false,
                     itemBuilder: (context, index) {
                       final module = _modules[index];
@@ -836,10 +833,11 @@ class _DashboardFooter extends StatelessWidget {
         context,
       ).showSnackBar(SnackBar(content: Text('Backup exportado: $path')));
     } catch (error) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Falha ao exportar backup: $error')),
         );
+      }
     }
   }
 
@@ -875,10 +873,11 @@ class _DashboardFooter extends StatelessWidget {
         ),
       );
     } catch (error) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Falha ao importar backup: $error')),
         );
+      }
     }
   }
 }

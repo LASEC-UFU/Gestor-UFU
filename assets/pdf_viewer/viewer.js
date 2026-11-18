@@ -13,7 +13,7 @@
  * página → app: {tipo:'carregado'}, {tipo:'aberto', paginas, textos},
  *   {tipo:'selecao', pagina, inicio, fim, texto} | {tipo:'selecao', vazio},
  *   {tipo:'acao', acao, pagina, inicio, fim, texto},
- *   {tipo:'marcacao', id, abrir}, {tipo:'escala', escala}, {tipo:'erro', mensagem}
+ *   {tipo:'marcacao', id}, {tipo:'navegou', pedido, ok}, {tipo:'escala', escala}, {tipo:'erro', mensagem}
  */
 import * as pdfjsLib from './pdf.min.js';
 
@@ -413,6 +413,7 @@ async function irPara(alvo) {
     await new Promise((r) => setTimeout(r, 50));
   }
   if (!(alvo.fim > alvo.inicio)) return p.renderizada;
+  if (alvo.inicio < 0 || alvo.fim > p.texto.length) return false;
   const rs = retangulos(p, alvo.inicio, alvo.fim);
   if (!rs.length) return false;
   area.scrollTop = p.div.offsetTop + rs[0].y - area.clientHeight * 0.3;

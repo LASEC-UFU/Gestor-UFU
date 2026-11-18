@@ -1,26 +1,28 @@
-import 'dart:convert';
 import 'package:collection/collection.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:gestor_ufu/modules/integracoes_pessoais/integration_service.dart';
+
+import 'package:gestor_ufu/modules/agenda_email/application/integration_service.dart';
+import 'package:gestor_ufu/modules/agenda_email/application/preferencias_agenda.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 
-List<ModuleCommand> integrationCommands(IntegrationService api) => [
+/// Comandos do módulo Agendas e E-mails (tela, menu "/" e agente).
+List<ModuleCommand> agendaEmailCommands(
+  IntegrationService api, [
+  PreferenciasAgenda? prefs,
+]) => _comandos(api, prefs ?? PreferenciasAgenda());
+
+List<ModuleCommand> _comandos(
+  IntegrationService api,
+  PreferenciasAgenda preferencias,
+) => [
   ModuleCommand(
-    id: 'agenda.listar_calendarios',
+    id: 'agenda.listarCalendarios',
     title: 'Listar calendários conectados',
     description:
         'Lista calendários reais das contas conectadas e informa provedor, conta e id de origem.',
     run: (_, _) async {
-      final prefs = await SharedPreferences.getInstance();
-      final personal = prefs.getString('calendar.default.personal') ?? '';
-      final professional =
-          prefs.getString('calendar.default.professional') ?? '';
-      Map<String, String> classifications = {};
-      try {
-        classifications = Map<String, String>.from(
-          jsonDecode(prefs.getString('calendar.classification') ?? '{}') as Map,
-        );
-      } catch (_) {}
+      final personal = await preferencias.calendarioPessoal();
+      final professional = await preferencias.calendarioProfissional();
+      final classifications = await preferencias.classificacao();
       final calendars = await api.calendars();
       return CommandResult.ok(
         data: {
@@ -41,7 +43,7 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     },
   ),
   ModuleCommand(
-    id: 'agenda.listar_eventos',
+    id: 'agenda.listarEventos',
     title: 'Consultar eventos',
     description:
         'Consulta eventos no período ISO informado. Devolve título, horário, conta, provedor, calendário e ids de origem, sem enviar descrição ao modelo.',
@@ -64,11 +66,12 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     run: (input, _) async {
       final from = DateTime.tryParse(input.requireString('inicio'));
       final to = DateTime.tryParse(input.requireString('fim'));
-      if (from == null || to == null || !to.isAfter(from))
+      if (from == null || to == null || !to.isAfter(from)) {
         throw const CommandException(
           'periodo_invalido',
           'Informe início e fim ISO válidos; o fim deve ser posterior ao início.',
         );
+      }
       final calendars = await api.calendars();
       final id = input.optionalString('calendar_id'),
           provider = input.optionalString('provider_id');
@@ -79,11 +82,12 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
                 (provider == null || '${c['provider_id']}' == provider),
           )
           .toList();
-      if (selected.isEmpty)
+      if (selected.isEmpty) {
         throw const CommandException(
           'calendario_inexistente',
           'Nenhum calendário conectado corresponde aos identificadores informados.',
         );
+      }
       final events = await api.events(from, to, selected);
       return CommandResult.ok(
         data: {
@@ -108,7 +112,7 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     },
   ),
   ModuleCommand(
-    id: 'agenda.criar_evento',
+    id: 'agenda.criarEvento',
     title: 'Criar evento de agenda',
     description:
         'Cria evento em calendário configurado. Antes de executar, apresente título, horário/fuso, pessoal/profissional e destino e solicite confirmação explícita. Se categoria não estiver clara, pergunte. Escrita externa exige confirmação.',
@@ -139,14 +143,13 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     mutates: true,
     run: (input, _) async {
       final category = input.requireString('categoria');
-      if (!['Pessoal', 'Profissional'].contains(category))
+      if (!['Pessoal', 'Profissional'].contains(category)) {
         throw const CommandException(
           'categoria_invalida',
           'Escolha Pessoal ou Profissional.',
         );
-      final prefs = await SharedPreferences.getInstance();
-      final key =
-          prefs.getString('calendar.default.${category.toLowerCase()}') ?? '';
+      }
+      final key = await preferencias.calendarioPadrao(category);
       final all = await api.calendars();
       final requestedId = input.optionalString('calendar_id');
       final requestedProvider = input.optionalString('provider_id');
@@ -159,18 +162,20 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
                 : '${c['provider_id']}:${c['id']}' == key,
           )
           .firstOrNull;
-      if (cal == null)
+      if (cal == null) {
         throw CommandException(
           'destino_nao_configurado',
           'Nenhum calendário padrão $category configurado. Escolha um calendário na tela Agendas e E-mails.',
         );
+      }
       final start = DateTime.tryParse(input.requireString('inicio')),
           end = DateTime.tryParse(input.requireString('fim'));
-      if (start == null || end == null || !end.isAfter(start))
+      if (start == null || end == null || !end.isAfter(start)) {
         throw const CommandException(
           'horario_invalido',
           'Informe horários ISO 8601 válidos e fim posterior ao início.',
         );
+      }
       final google = cal['provider_id'] == 'google_calendar';
       final event = <String, dynamic>{
         'provider_id': cal['provider_id'],
@@ -195,7 +200,7 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     },
   ),
   ModuleCommand(
-    id: 'agenda.atualizar_evento',
+    id: 'agenda.atualizarEvento',
     title: 'Atualizar evento',
     description:
         'Altera evento na agenda de origem. Consulte primeiro os eventos, mostre os dados identificadores e as mudanças propostas ao usuário e peça confirmação explícita antes de executar.',
@@ -227,11 +232,12 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
       final provider = input.requireString('provider_id');
       final start = DateTime.tryParse(input.requireString('inicio')),
           end = DateTime.tryParse(input.requireString('fim'));
-      if (start == null || end == null || !end.isAfter(start))
+      if (start == null || end == null || !end.isAfter(start)) {
         throw const CommandException(
           'horario_invalido',
           'Informe início e fim ISO válidos.',
         );
+      }
       await api.saveEvent({
         'id': input.requireString('id'),
         'calendar_id': input.requireString('calendar_id'),
@@ -247,10 +253,10 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     },
   ),
   ModuleCommand(
-    id: 'agenda.excluir_evento',
+    id: 'agenda.excluirEvento',
     title: 'Excluir evento',
     description:
-        'Exclui evento na agenda de origem. Consulte primeiro agenda.listar_eventos e confirme com o usuário título, horário, conta, provedor e calendário antes da aprovação desta exclusão.',
+        'Exclui evento na agenda de origem. Consulte primeiro agenda.listarEventos e confirme com o usuário título, horário, conta, provedor e calendário antes da aprovação desta exclusão.',
     inputSchema: {
       'type': 'object',
       'required': ['id', 'calendar_id', 'provider_id'],
@@ -361,7 +367,7 @@ List<ModuleCommand> integrationCommands(IntegrationService api) => [
     },
   ),
   ModuleCommand(
-    id: 'email.alterar_lido',
+    id: 'email.alterarLido',
     title: 'Alterar estado de leitura',
     description:
         'Marca uma mensagem como lida ou não lida na conta original. Antes, identifique remetente, assunto e conta e solicite confirmação explícita. Não envia, exclui, arquiva nem move mensagens.',
@@ -410,11 +416,12 @@ void _verifyMessage(Map<String, dynamic> message, CommandInput input) {
     ('conta', 'account'),
   ]) {
     if (input.requireString(pair.$1).toLowerCase() !=
-        ('${message[pair.$2] ?? ''}').toLowerCase())
+        ('${message[pair.$2] ?? ''}').toLowerCase()) {
       throw const CommandException(
         'mensagem_alterada',
         'A mensagem não corresponde aos dados confirmados. Consulte novamente e confirme o alvo correto.',
       );
+    }
   }
 }
 

@@ -74,10 +74,11 @@ class PlanosEnsinoAutomationService {
           args: const ['Plano de Ensino'],
         );
       }, const Duration(seconds: 25));
-      if (!typeChosen)
+      if (!typeChosen) {
         throw StateError(
           'Não encontrei o tipo Plano de Ensino na escolha de documentos.',
         );
+      }
       log('SEI: tipo Plano de Ensino selecionado.');
     } else {
       log('SEI: retomando o formulário de metadados já aberto.');
@@ -105,10 +106,11 @@ class PlanosEnsinoAutomationService {
         ],
       );
     }, const Duration(seconds: 20));
-    if (!metadataReady)
+    if (!metadataReady) {
       throw StateError(
         'Não consegui preencher os metadados do Plano de Ensino.',
       );
+    }
     log('SEI: descrição, código, nome na árvore e acesso público conferidos.');
 
     final saved = await currentPage.evaluate<bool>(_saveMetadataScript);
@@ -119,10 +121,11 @@ class PlanosEnsinoAutomationService {
       () async => _findEditor(),
       const Duration(seconds: 35),
     );
-    if (editor == null)
+    if (editor == null) {
       throw StateError(
         'O editor do SEI não abriu o modelo de Plano de Ensino.',
       );
+    }
     final editorPage = editor.$1;
     final rootName = editor.$2;
     final modelHtml = await editorPage.evaluate<String?>(
@@ -139,18 +142,20 @@ class PlanosEnsinoAutomationService {
       _setEditorHtmlScript,
       args: [rootName, merged.html],
     );
-    if (!applied)
+    if (!applied) {
       throw StateError('Não consegui substituir o conteúdo no editor do SEI.');
+    }
     log(
       'SEI: ${merged.substitutions} correspondências aplicadas ao modelo nativo; cronogramas com ${((plan['cronograma_teorico'] as List?)?.length ?? 0)} aulas teóricas e ${((plan['cronograma_pratico'] as List?)?.length ?? 0)} práticas; estrutura e formatação do SEI preservadas.',
     );
     final commitClicked = await editorPage.evaluate<bool>(
       _clickEditorSaveScript,
     );
-    if (!commitClicked)
+    if (!commitClicked) {
       throw StateError(
         'O editor recebeu o conteúdo, mas o botão Salvar não foi localizado.',
       );
+    }
     await _waitFor<bool>(
       () async => await editorPage.evaluate<bool>(_isEditorSavedScript),
       const Duration(seconds: 35),

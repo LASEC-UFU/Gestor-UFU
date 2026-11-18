@@ -9,20 +9,21 @@ import 'package:gestor_ufu/modules/elabora_relato/application/anexos_processo_se
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/data/base_documentos_indexer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/anexo_processo.dart';
-import 'package:gestor_ufu/modules/elabora_relato/domain/base_documentos.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/marcacao_anexo_dialog.dart';
-import 'package:gestor_ufu/modules/elabora_relato/pages/pdf_anexo_viewer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
-
-/// Seleção atual no documento: parágrafo e posição dentro dele.
-typedef _Selecao = ({int par, int ini, int fim});
+import 'package:gestor_ufu/platform/ui/leitor_comentado/comentario_documento.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado_controller.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/marca_documento.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/superficie_pdf.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/superficie_texto.dart';
 
 /// Aba "Documentos do processo": o relator anexa arquivos do processo
 /// (PDF com texto, DOCX, TXT/MD, HTML) para LER — o texto não é editado —,
 /// marca trechos com cores, pergunta à IA o que eles dizem e guarda
-/// comentários (que a IA ajuda a redigir). Uma marcação pode virar citação
-/// numa seção do parecer.
+/// comentários. Usa a camada de comentários comum da plataforma
+/// ([LeitorComentado], [SuperficiePdf], [SuperficieTexto]).
 class AnexosView extends StatefulWidget {
   const AnexosView({required this.service, super.key});
 
@@ -33,25 +34,21 @@ class AnexosView extends StatefulWidget {
 }
 
 class _AnexosViewState extends State<AnexosView> {
-  final _scroll = ScrollController();
   final _busca = TextEditingController();
-  final _selecao = ValueNotifier<_Selecao?>(null);
-  final _chaves = <int, GlobalKey>{};
+  final _leitor = LeitorComentadoController();
+  final _pdf = SuperficiePdfController();
+  final _texto = SuperficieTextoController();
+  final _selTexto = ValueNotifier<SelecaoTexto?>(null);
+  final _selPdf = ValueNotifier<SelecaoPdf?>(null);
 
   String? _anexoId;
   List<ParagrafoFonte> _pars = const [];
+  List<String> _paginasPdf = const [];
   bool _lendo = false;
   bool _anexando = false;
-  String? _erroLeitura;
-  String? _ativa;
-  int _ultimaBusca = -1;
-  String _corPadrao = 'amarelo';
-
-  // Visão "PDF original".
-  final _pdf = PdfViewerController();
-  final _selPdf = ValueNotifier<SelecaoPdf?>(null);
-  List<String> _paginasPdf = const [];
   bool _modoTexto = false;
+  String? _erroLeitura;
+  String _corPadrao = 'amarelo';
   String _pasta = '';
   int _escalaPct = 100;
 
@@ -65,13 +62,18 @@ class _AnexosViewState extends State<AnexosView> {
   @override
   void initState() {
     super.initState();
+    _leitor
+      ..navegar = _navegar
+      ..aoLimpar = () {
+        if (mounted) setState(() {});
+      };
     anexos.pasta().then((p) {
       if (mounted) setState(() => _pasta = p);
     });
     anexos.addListener(_mudou);
     anexos.carregar().then((_) {
       if (mounted && _anexoId == null && anexos.anexos.isNotEmpty) {
-        _selecionar(anexos.anexos.first.id);
+        _selecionarAnexo(anexos.anexos.first.id);
       }
     });
   }
@@ -79,9 +81,9 @@ class _AnexosViewState extends State<AnexosView> {
   @override
   void dispose() {
     anexos.removeListener(_mudou);
-    _scroll.dispose();
     _busca.dispose();
-    _selecao.dispose();
+    _leitor.dispose();
+    _selTexto.dispose();
     _selPdf.dispose();
     super.dispose();
   }
@@ -100,19 +102,19 @@ class _AnexosViewState extends State<AnexosView> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(texto)));
   }
 
-  Future<void> _selecionar(String id) async {
+  // ------------------------------------------------------------- anexos
+
+  Future<void> _selecionarAnexo(String id) async {
+    _leitor.limparSelecao();
     setState(() {
       _anexoId = id;
       _pars = const [];
+      _paginasPdf = const [];
       _erroLeitura = null;
       _lendo = true;
-      _ativa = null;
-      _ultimaBusca = -1;
-      _chaves.clear();
-      _paginasPdf = const [];
       _modoTexto = false;
     });
-    _selecao.value = null;
+    _selTexto.value = null;
     _selPdf.value = null;
     try {
       final pars = await anexos.paragrafos(anexos.exigir(id));
@@ -124,7 +126,6 @@ class _AnexosViewState extends State<AnexosView> {
     } finally {
       if (mounted && _anexoId == id) setState(() => _lendo = false);
     }
-    if (_scroll.hasClients) _scroll.jumpTo(0);
   }
 
   Future<void> _anexar() async {
@@ -157,7 +158,7 @@ class _AnexosViewState extends State<AnexosView> {
     }
     if (!mounted) return;
     setState(() => _anexando = false);
-    if (ultimo != null) await _selecionar(ultimo.id);
+    if (ultimo != null) await _selecionarAnexo(ultimo.id);
     if (erros.isNotEmpty && mounted) {
       // ignore: use_build_context_synchronously
       await showDialog<void>(
@@ -244,54 +245,149 @@ class _AnexosViewState extends State<AnexosView> {
     if (ok == true) await anexos.remover(a.id);
   }
 
-  // ------------------------------------------------------------ marcações
+  // --------------------------------------------- marcações e comentários
 
-  Future<void> _marcar({bool dialogo = false, bool perguntar = false}) async {
-    final a = _anexo;
-    if (a == null) return;
-    final MarcacaoAnexo m;
+  MarcaDocumento _marca(MarcacaoAnexo m) => MarcaDocumento(
+    id: m.id,
+    cor: Color(coresMarcacao[m.cor] ?? coresMarcacao['amarelo']!),
+    comentada: m.comentario.isNotEmpty,
+    paragrafo: m.paragrafo,
+    inicio: m.inicio,
+    fim: m.fim,
+    pdfPagina: m.pdfPagina,
+    pdfInicio: m.pdfInicio,
+    pdfFim: m.pdfFim,
+  );
+
+  /// Leva o documento aberto (PDF ou texto) ao trecho do comentário.
+  Future<bool> _navegar(ComentarioDocumento c, bool rolar) async {
+    if (mounted) setState(() {});
+    final m = _anexo?.marcacoes.where((x) => x.id == c.id).firstOrNull;
+    if (m == null) return false;
+    final marca = _marca(m);
     if (_emPdf) {
-      final s = _selPdf.value;
-      if (s == null || s.pagina < 1 || s.pagina > _paginasPdf.length) return;
-      m = AnexosProcessoService.novaMarcacaoPdf(
-        pagina: s.pagina,
-        textoPagina: _paginasPdf[s.pagina - 1],
-        inicio: s.inicio,
-        fim: s.fim,
-        pars: _pars,
-        cor: _corPadrao,
-      );
-      _selPdf.value = null;
-    } else {
-      final s = _selecao.value;
-      if (s == null || s.fim <= s.ini || s.par >= _pars.length) return;
-      var nova = AnexosProcessoService.novaMarcacao(
-        paragrafo: s.par,
-        textoParagrafo: _pars[s.par].texto,
-        inicio: s.ini,
-        fim: s.fim,
-        cor: _corPadrao,
-      );
-      // Já ancora no PDF, se as páginas foram lidas.
-      if (_paginasPdf.isNotEmpty) {
-        nova =
-            AnexosProcessoService.ancorarNoPdf(nova, _paginasPdf, _pars) ??
-            nova;
-      }
-      m = nova;
-      _selecao.value = null;
+      if (!marca.noPdf) return false;
+      return rolar ? _pdf.irPara(marca) : true;
     }
-    if (!dialogo) {
-      await anexos.salvarMarcacao(a.id, m);
-      setState(() => _ativa = m.id);
-      return;
-    }
-    await _abrirMarcacao(m, nova: true, perguntar: perguntar);
+    if (!marca.noTexto) return false;
+    return rolar ? _texto.irPara(marca) : true;
   }
 
-  Future<void> _abrirMarcacao(
+  /// Comentário (cartão do painel) de uma marcação.
+  ComentarioDocumento _comentario(AnexoProcesso a, MarcacaoAnexo m) {
+    return ComentarioDocumento(
+      id: m.id,
+      titulo: m.comentario.isNotEmpty
+          ? m.comentario
+          : 'Trecho marcado, ainda sem comentário. Use "Comentar e perguntar '
+                'à IA" para registrar o que observar.',
+      cor: Color(coresMarcacao[m.cor] ?? coresMarcacao['amarelo']!),
+      local: AnexosProcessoService.localMarcacao(m, _pars),
+      ancorado: _emPdf ? m.pdfPagina > 0 : m.paragrafo >= 0,
+      trechoMarcado: m.texto,
+      secoes: [
+        if (m.pergunta.isNotEmpty)
+          SecaoComentario(
+            'Pergunta feita à IA',
+            m.pergunta,
+            icone: Icons.help_outline,
+          ),
+        if (m.explicacaoIa.isNotEmpty)
+          SecaoComentario(
+            'O que a IA explicou',
+            m.explicacaoIa,
+            icone: Icons.auto_awesome_outlined,
+          ),
+      ],
+      acoes: [
+        AcaoComentario(
+          rotulo: m.comentario.isEmpty
+              ? 'Comentar e perguntar à IA'
+              : 'Editar e perguntar à IA',
+          icone: Icons.edit_note,
+          aoAcionar: () => _editarMarcacao(m),
+        ),
+        AcaoComentario(
+          rotulo: 'Cor',
+          icone: Icons.palette_outlined,
+          aoAcionar: () => _mudarCor(a, m),
+        ),
+        AcaoComentario(
+          rotulo: 'Copiar trecho',
+          icone: Icons.copy,
+          aoAcionar: () => Clipboard.setData(
+            ClipboardData(
+              text:
+                  '“${m.texto.trim()}” (${a.nome}, '
+                  '${AnexosProcessoService.localMarcacao(m, _pars)})',
+            ),
+          ),
+        ),
+        AcaoComentario(
+          rotulo: 'Citar no parecer',
+          icone: Icons.format_quote,
+          aoAcionar: () => _citar(a, m),
+        ),
+        AcaoComentario(
+          rotulo: 'Excluir',
+          icone: Icons.delete_outline,
+          destrutiva: true,
+          aoAcionar: () => anexos.excluirMarcacao(a.id, m.id),
+        ),
+      ],
+    );
+  }
+
+  /// Cria a marcação da seleção atual (PDF ou texto).
+  Future<void> _marcar(AcaoTrecho acao) async {
+    final a = _anexo;
+    if (a == null) return;
+    MarcacaoAnexo? m;
+    if (_emPdf) {
+      final s = _selPdf.value;
+      if (s != null && s.pagina >= 1 && s.pagina <= _paginasPdf.length) {
+        m = AnexosProcessoService.novaMarcacaoPdf(
+          pagina: s.pagina,
+          textoPagina: _paginasPdf[s.pagina - 1],
+          inicio: s.inicio,
+          fim: s.fim,
+          pars: _pars,
+          cor: _corPadrao,
+        );
+      }
+      _selPdf.value = null;
+    } else {
+      final s = _selTexto.value;
+      if (s != null && s.fim > s.inicio && s.paragrafo < _pars.length) {
+        var nova = AnexosProcessoService.novaMarcacao(
+          paragrafo: s.paragrafo,
+          textoParagrafo: _pars[s.paragrafo].texto,
+          inicio: s.inicio,
+          fim: s.fim,
+          cor: _corPadrao,
+        );
+        if (_paginasPdf.isNotEmpty) {
+          nova =
+              AnexosProcessoService.ancorarNoPdf(nova, _paginasPdf, _pars) ??
+              nova;
+        }
+        m = nova;
+      }
+      _selTexto.value = null;
+    }
+    if (m == null) return;
+    if (acao == AcaoTrecho.marcar) {
+      await anexos.salvarMarcacao(a.id, m);
+      await _leitor.selecionar(m.id, rolar: false);
+      return;
+    }
+    await _editarMarcacao(m, perguntar: acao == AcaoTrecho.perguntar);
+  }
+
+  /// Comentário e perguntas à IA (diálogo de edição; ver/navegar não abre
+  /// diálogo: é feito no próprio painel).
+  Future<void> _editarMarcacao(
     MarcacaoAnexo m, {
-    bool nova = false,
     bool perguntar = false,
   }) async {
     final a = _anexo;
@@ -319,12 +415,51 @@ class _AnexosViewState extends State<AnexosView> {
     );
     if (r == null) return;
     await anexos.salvarMarcacao(a.id, r);
-    if (mounted) setState(() => _ativa = r.id);
+    await _leitor.selecionar(r.id, rolar: false);
   }
 
-  Future<void> _citar(MarcacaoAnexo m, ParecerSecao secao) async {
-    final a = _anexo;
-    if (a == null) return;
+  Future<void> _mudarCor(AnexoProcesso a, MarcacaoAnexo m) async {
+    final cor = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Cor da marcação'),
+        children: [
+          for (final e in coresMarcacao.entries)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, e.key),
+              child: Row(
+                children: [
+                  CircleAvatar(radius: 10, backgroundColor: Color(e.value)),
+                  const SizedBox(width: 10),
+                  Text(e.key),
+                  if (e.key == m.cor) ...[
+                    const SizedBox(width: 6),
+                    const Icon(Icons.check, size: 16),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (cor != null) await anexos.salvarMarcacao(a.id, m.copyWith(cor: cor));
+  }
+
+  Future<void> _citar(AnexoProcesso a, MarcacaoAnexo m) async {
+    final secao = await showDialog<ParecerSecao>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: const Text('Citar o trecho em qual seção?'),
+        children: [
+          for (final s in ParecerSecao.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, s),
+              child: Text(s.titulo),
+            ),
+        ],
+      ),
+    );
+    if (secao == null) return;
     String esc(String t) => t
         .replaceAll('&', '&amp;')
         .replaceAll('<', '&lt;')
@@ -338,54 +473,9 @@ class _AnexosViewState extends State<AnexosView> {
     _mensagem('Citação inserida em ${secao.titulo}.');
   }
 
-  // ------------------------------------------------------- navegação/busca
-
-  Future<void> _irPara(int i) async {
-    if (i < 0 || i >= _pars.length || !_scroll.hasClients) return;
-    for (var tentativa = 0; tentativa < 5; tentativa++) {
-      final ctx = _chaves[i]?.currentContext;
-      if (ctx != null && ctx.mounted) {
-        await Scrollable.ensureVisible(
-          ctx,
-          alignment: 0.25,
-          duration: const Duration(milliseconds: 250),
-        );
-        return;
-      }
-      // Fora da área construída: salta para a posição estimada.
-      final pos = _scroll.position;
-      final alvo = (pos.maxScrollExtent * i / _pars.length).clamp(
-        0.0,
-        pos.maxScrollExtent,
-      );
-      _scroll.jumpTo(alvo);
-      await WidgetsBinding.instance.endOfFrame;
-    }
-  }
-
-  /// Leva até a marcação na visão aberta.
-  void _irParaMarcacao(MarcacaoAnexo m) {
-    setState(() => _ativa = m.id);
-    if (_emPdf) {
-      if (m.pdfPagina > 0) {
-        _pdf.irPara(m);
-      } else {
-        _mensagem(
-          'Esta marcação não foi localizada no PDF; veja-a na visão "Texto".',
-        );
-      }
-    } else if (m.paragrafo >= 0) {
-      _irPara(m.paragrafo);
-    } else {
-      _mensagem(
-        'Esta marcação não foi localizada na visão "Texto"; veja-a no PDF.',
-      );
-    }
-  }
-
-  /// Páginas do PDF lidas pelo visualizador: guarda o texto e ancora no PDF
-  /// as marcações feitas na visão "Texto" (ou pelo agente).
-  Future<void> _aoReceberPaginas(List<String> paginas) async {
+  /// Páginas do PDF lidas: guarda o texto e ancora no PDF as marcações
+  /// feitas na visão "Texto" (ou pelo agente).
+  Future<void> _aoLerPaginas(List<String> paginas) async {
     final a = _anexo;
     if (a == null) return;
     setState(() => _paginasPdf = paginas);
@@ -407,29 +497,33 @@ class _AnexosViewState extends State<AnexosView> {
         'na visão "Texto".',
       );
     }
+    // Comentário já selecionado: leva o PDF até ele.
+    final sel = _leitor.selecionado;
+    if (sel != null) await _leitor.selecionar(sel);
   }
 
-  void _buscar({bool proxima = true}) {
+  void _buscarNoDocumento({bool proxima = true}) {
+    final termo = _busca.text.trim();
+    if (termo.isEmpty) return;
     if (_emPdf) {
-      if (_busca.text.trim().isNotEmpty) {
-        _pdf.buscar(_busca.text.trim(), proxima: proxima);
-      }
-      return;
+      _pdf.buscar(termo, proxima: proxima);
+    } else if (!_texto.buscar(termo, proxima: proxima)) {
+      _mensagem('"$termo" não aparece no documento.');
     }
-    final termo = TextoBusca.semAcentos(_busca.text.trim());
-    if (termo.isEmpty || _pars.isEmpty) return;
-    final n = _pars.length;
-    for (var k = 1; k <= n; k++) {
-      final i = proxima
-          ? (_ultimaBusca + k) % n
-          : (_ultimaBusca - k + n * 2) % n;
-      if (TextoBusca.semAcentos(_pars[i].texto).contains(termo)) {
-        setState(() => _ultimaBusca = i);
-        _irPara(i);
-        return;
-      }
+  }
+
+  void _trocarVisao(bool texto) {
+    setState(() {
+      _modoTexto = texto;
+      _selTexto.value = null;
+      _selPdf.value = null;
+    });
+    final sel = _leitor.selecionado;
+    if (sel != null) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _leitor.selecionar(sel),
+      );
     }
-    _mensagem('"${_busca.text.trim()}" não aparece no documento.');
   }
 
   // ------------------------------------------------------------------- UI
@@ -438,27 +532,24 @@ class _AnexosViewState extends State<AnexosView> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, c) {
-        final largo = c.maxWidth >= 1100;
-        final documento = _documento();
+        final largo = c.maxWidth >= 1150;
+        final leitor = _leitorDoAnexo();
         if (!largo) {
           return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _seletorCompacto(),
               const SizedBox(height: 8),
-              Expanded(child: documento),
-              const SizedBox(height: 8),
-              SizedBox(height: 190, child: _painelMarcacoes()),
+              Expanded(child: leitor),
             ],
           );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: 250, child: _listaAnexos()),
+            SizedBox(width: 240, child: _listaAnexos()),
             const SizedBox(width: 12),
-            Expanded(child: documento),
-            const SizedBox(width: 12),
-            SizedBox(width: 320, child: _painelMarcacoes()),
+            Expanded(child: leitor),
           ],
         );
       },
@@ -488,7 +579,7 @@ class _AnexosViewState extends State<AnexosView> {
             for (final a in anexos.anexos)
               DropdownMenuItem(value: a.id, child: Text(a.nome)),
           ],
-          onChanged: (id) => id == null ? null : _selecionar(id),
+          onChanged: (id) => id == null ? null : _selecionarAnexo(id),
         ),
       ),
       const SizedBox(width: 8),
@@ -496,57 +587,85 @@ class _AnexosViewState extends State<AnexosView> {
     ],
   );
 
-  Widget _listaAnexos() => _Painel(
-    titulo: 'Documentos do processo',
-    rodape: _botaoAnexar(),
-    child: anexos.anexos.isEmpty
-        ? const Padding(
-            padding: EdgeInsets.all(12),
-            child: Text(
-              'Anexe ofícios, pareceres, PPCs, atas… para ler, marcar e '
-              'comentar com a ajuda da IA. O arquivo não é alterado.',
-              textAlign: TextAlign.center,
+  Widget _listaAnexos() => Container(
+    decoration: BoxDecoration(
+      gradient: AppTheme.cardGradient,
+      border: Border.all(color: AppTheme.divider),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          child: Text(
+            'Documentos do processo',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: AppTheme.textPrimary,
             ),
-          )
-        : ListView(
-            children: [
-              for (final a in anexos.anexos)
-                ListTile(
-                  dense: true,
-                  selected: a.id == _anexoId,
-                  leading: Icon(_icone(a.extensao), size: 20),
-                  title: Text(
-                    a.nome,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    [
-                      if (a.paginas > 0) '${a.paginas} p.',
-                      '${a.marcacoes.length} marcação(ões)',
-                      if (a.aviso.isNotEmpty) '⚠',
-                    ].join(' · '),
-                  ),
-                  onTap: () => _selecionar(a.id),
-                  trailing: PopupMenuButton<String>(
-                    tooltip: 'Ações',
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
-                        value: 'abrir',
-                        child: Text('Abrir original'),
-                      ),
-                      PopupMenuItem(value: 'renomear', child: Text('Renomear')),
-                      PopupMenuItem(value: 'remover', child: Text('Remover')),
-                    ],
-                    onSelected: (v) => switch (v) {
-                      'abrir' => _abrirOriginal(a),
-                      'renomear' => _renomear(a),
-                      _ => _remover(a),
-                    },
-                  ),
-                ),
-            ],
           ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: anexos.anexos.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(
+                    'Anexe ofícios, pareceres, PPCs, atas… para ler, marcar e '
+                    'comentar com a ajuda da IA. O arquivo não é alterado.',
+                    textAlign: TextAlign.center,
+                  ),
+                )
+              : ListView(
+                  children: [
+                    for (final a in anexos.anexos)
+                      ListTile(
+                        dense: true,
+                        selected: a.id == _anexoId,
+                        leading: Icon(_icone(a.extensao), size: 20),
+                        title: Text(
+                          a.nome,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text(
+                          [
+                            if (a.paginas > 0) '${a.paginas} p.',
+                            '${a.marcacoes.length} comentário(s)',
+                            if (a.aviso.isNotEmpty) '⚠',
+                          ].join(' · '),
+                        ),
+                        onTap: () => _selecionarAnexo(a.id),
+                        trailing: PopupMenuButton<String>(
+                          tooltip: 'Ações do documento',
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(
+                              value: 'abrir',
+                              child: Text('Abrir original'),
+                            ),
+                            PopupMenuItem(
+                              value: 'renomear',
+                              child: Text('Renomear'),
+                            ),
+                            PopupMenuItem(
+                              value: 'remover',
+                              child: Text('Remover'),
+                            ),
+                          ],
+                          onSelected: (v) => switch (v) {
+                            'abrir' => _abrirOriginal(a),
+                            'renomear' => _renomear(a),
+                            _ => _remover(a),
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+        ),
+        Padding(padding: const EdgeInsets.all(10), child: _botaoAnexar()),
+      ],
+    ),
   );
 
   static IconData _icone(String ext) => switch (ext) {
@@ -556,120 +675,34 @@ class _AnexosViewState extends State<AnexosView> {
     _ => Icons.article_outlined,
   };
 
-  Widget _documento() {
+  Widget _leitorDoAnexo() {
     final a = _anexo;
     if (a == null) {
-      return _Painel(
-        titulo: 'Leitura',
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.menu_book_outlined,
-                size: 48,
-                color: AppTheme.textSecondary,
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Anexe um documento do processo para ler, marcar trechos e '
-                'perguntar à IA.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              _botaoAnexar(),
-            ],
-          ),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.menu_book_outlined,
+              size: 48,
+              color: AppTheme.textSecondary,
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Anexe um documento do processo para ler, marcar trechos e '
+              'perguntar à IA.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            _botaoAnexar(),
+          ],
         ),
       );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                a.nome,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            SizedBox(
-              width: 240,
-              child: TextField(
-                controller: _busca,
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Buscar no documento',
-                  prefixIcon: const Icon(Icons.search, size: 18),
-                  suffixIcon: IconButton(
-                    tooltip: 'Anterior',
-                    icon: const Icon(Icons.keyboard_arrow_up, size: 18),
-                    onPressed: () => _buscar(proxima: false),
-                  ),
-                ),
-                onSubmitted: (_) => _buscar(),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Abrir o arquivo original',
-              onPressed: () => _abrirOriginal(a),
-              icon: const Icon(Icons.open_in_new),
-            ),
-          ],
-        ),
-        if (a.extensao == '.pdf')
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(
-              children: [
-                SegmentedButton<bool>(
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                  segments: const [
-                    ButtonSegment(
-                      value: false,
-                      icon: Icon(Icons.picture_as_pdf_outlined, size: 17),
-                      label: Text('PDF original'),
-                    ),
-                    ButtonSegment(
-                      value: true,
-                      icon: Icon(Icons.notes_rounded, size: 17),
-                      label: Text('Texto'),
-                    ),
-                  ],
-                  selected: {_modoTexto},
-                  onSelectionChanged: (s) => setState(() {
-                    _modoTexto = s.first;
-                    _selecao.value = null;
-                    _selPdf.value = null;
-                  }),
-                ),
-                const Spacer(),
-                if (_emPdf) ...[
-                  IconButton(
-                    tooltip: 'Diminuir',
-                    onPressed: () => _pdf.zoom('-'),
-                    icon: const Icon(Icons.zoom_out),
-                  ),
-                  Text('$_escalaPct%', style: const TextStyle(fontSize: 12)),
-                  IconButton(
-                    tooltip: 'Aumentar (ou Ctrl + roda do mouse)',
-                    onPressed: () => _pdf.zoom('+'),
-                    icon: const Icon(Icons.zoom_in),
-                  ),
-                  IconButton(
-                    tooltip: 'Ajustar à largura',
-                    onPressed: () => _pdf.zoom('largura'),
-                    icon: const Icon(Icons.fit_screen_outlined),
-                  ),
-                ],
-              ],
-            ),
-          ),
+        _barraDocumento(a),
         if (a.aviso.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -682,126 +715,138 @@ class _AnexosViewState extends State<AnexosView> {
         _barraSelecao(),
         const SizedBox(height: 6),
         Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.divider),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: _emPdf
-                ? (_pasta.isEmpty
-                      ? const Center(child: CircularProgressIndicator())
-                      : PdfAnexoViewer(
-                          key: ValueKey('pdf-${a.id}'),
-                          pasta: _pasta,
-                          arquivo: a.arquivoGuardado,
-                          marcacoes: a.marcacoes,
-                          ativa: _ativa,
-                          controller: _pdf,
-                          onPaginas: _aoReceberPaginas,
-                          onSelecao: (s) => _selPdf.value = s,
-                          onAcao: (acao, s) {
-                            _selPdf.value = s;
-                            _marcar(
-                              dialogo: acao != 'marcar',
-                              perguntar: acao == 'perguntar',
-                            );
-                          },
-                          onMarcacao: (id, abrir) {
-                            final m = a.marcacoes
-                                .where((x) => x.id == id)
-                                .firstOrNull;
-                            if (m == null) return;
-                            setState(() => _ativa = id);
-                            if (abrir) _abrirMarcacao(m);
-                          },
-                          onBusca: (achou, _) {
-                            if (!achou) {
-                              _mensagem(
-                                '"${_busca.text.trim()}" não aparece no '
-                                'documento.',
-                              );
-                            }
-                          },
-                          onEscala: (e) =>
-                              setState(() => _escalaPct = (e * 100).round()),
-                        ))
-                : _lendo
-                ? const Center(child: CircularProgressIndicator())
-                : _erroLeitura != null
-                ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text(
-                        _erroLeitura!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.black87),
-                      ),
-                    ),
-                  )
-                : _pars.isEmpty
-                ? const Center(
-                    child: Text(
-                      'Sem texto para exibir. Use "Abrir original".',
-                      style: TextStyle(color: Colors.black87),
-                    ),
-                  )
-                : Scrollbar(
-                    controller: _scroll,
-                    child: ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(28, 18, 28, 40),
-                      itemCount: _pars.length,
-                      itemBuilder: (_, i) => _paragrafo(i, a),
-                    ),
-                  ),
+          child: LeitorComentado(
+            controller: _leitor,
+            comentarios: [for (final m in a.marcacoes) _comentario(a, m)],
+            vazio:
+                'Selecione um trecho do documento e use "Marcar", "Comentar" '
+                'ou "Perguntar à IA" (também pelo botão direito).',
+            documento: _folha(a),
           ),
         ),
       ],
     );
   }
 
+  Widget _barraDocumento(AnexoProcesso a) => Wrap(
+    spacing: 8,
+    runSpacing: 6,
+    crossAxisAlignment: WrapCrossAlignment.center,
+    children: [
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Text(
+          a.nome,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      if (a.extensao == '.pdf')
+        SegmentedButton<bool>(
+          showSelectedIcon: false,
+          style: const ButtonStyle(visualDensity: VisualDensity.compact),
+          segments: const [
+            ButtonSegment(
+              value: false,
+              icon: Icon(Icons.picture_as_pdf_outlined, size: 17),
+              label: Text('PDF original'),
+            ),
+            ButtonSegment(
+              value: true,
+              icon: Icon(Icons.notes_rounded, size: 17),
+              label: Text('Texto'),
+            ),
+          ],
+          selected: {_modoTexto},
+          onSelectionChanged: (s) => _trocarVisao(s.first),
+        ),
+      if (_emPdf) ...[
+        IconButton(
+          tooltip: 'Diminuir o zoom',
+          onPressed: () => _pdf.zoom('-'),
+          icon: const Icon(Icons.zoom_out),
+        ),
+        Text('$_escalaPct%', style: const TextStyle(fontSize: 12)),
+        IconButton(
+          tooltip: 'Aumentar o zoom (ou Ctrl + roda do mouse)',
+          onPressed: () => _pdf.zoom('+'),
+          icon: const Icon(Icons.zoom_in),
+        ),
+        IconButton(
+          tooltip: 'Ajustar à largura',
+          onPressed: () => _pdf.zoom('largura'),
+          icon: const Icon(Icons.fit_screen_outlined),
+        ),
+      ],
+      SizedBox(
+        width: 230,
+        child: TextField(
+          controller: _busca,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'Buscar no documento',
+            prefixIcon: const Icon(Icons.search, size: 18),
+            suffixIcon: IconButton(
+              tooltip: 'Ocorrência anterior',
+              icon: const Icon(Icons.keyboard_arrow_up, size: 18),
+              onPressed: () => _buscarNoDocumento(proxima: false),
+            ),
+          ),
+          onSubmitted: (_) => _buscarNoDocumento(),
+        ),
+      ),
+      IconButton(
+        tooltip: 'Abrir o arquivo original',
+        onPressed: () => _abrirOriginal(a),
+        icon: const Icon(Icons.open_in_new),
+      ),
+    ],
+  );
+
   Widget _barraSelecao() => ListenableBuilder(
-    listenable: Listenable.merge([_selecao, _selPdf]),
+    listenable: Listenable.merge([_selTexto, _selPdf]),
     builder: (context, _) {
-      final s = _selecao.value;
-      final ativo = _emPdf ? _selPdf.value != null : s != null && s.fim > s.ini;
+      final ativo = _emPdf ? _selPdf.value != null : _selTexto.value != null;
       return Wrap(
         spacing: 6,
         runSpacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           for (final e in coresMarcacao.entries)
-            InkWell(
-              onTap: () => setState(() => _corPadrao = e.key),
-              customBorder: const CircleBorder(),
-              child: Tooltip(
-                message: 'Cor das novas marcações: ${e.key}',
-                child: CircleAvatar(
-                  radius: 10,
-                  backgroundColor: Color(e.value),
-                  child: _corPadrao == e.key
-                      ? const Icon(Icons.check, size: 12, color: Colors.black87)
-                      : null,
+            Tooltip(
+              message: 'Cor das novas marcações: ${e.key}',
+              child: InkResponse(
+                onTap: () => setState(() => _corPadrao = e.key),
+                radius: 18,
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: CircleAvatar(
+                    radius: 10,
+                    backgroundColor: Color(e.value),
+                    child: _corPadrao == e.key
+                        ? const Icon(
+                            Icons.check,
+                            size: 12,
+                            color: Colors.black87,
+                          )
+                        : null,
+                  ),
                 ),
               ),
             ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           OutlinedButton.icon(
-            onPressed: ativo ? () => _marcar() : null,
+            onPressed: ativo ? () => _marcar(AcaoTrecho.marcar) : null,
             icon: const Icon(Icons.border_color_outlined, size: 18),
             label: const Text('Marcar'),
           ),
           OutlinedButton.icon(
-            onPressed: ativo ? () => _marcar(dialogo: true) : null,
+            onPressed: ativo ? () => _marcar(AcaoTrecho.comentar) : null,
             icon: const Icon(Icons.add_comment_outlined, size: 18),
             label: const Text('Comentar'),
           ),
           FilledButton.tonalIcon(
-            onPressed: ativo
-                ? () => _marcar(dialogo: true, perguntar: true)
-                : null,
+            onPressed: ativo ? () => _marcar(AcaoTrecho.perguntar) : null,
             icon: const Icon(Icons.auto_awesome_outlined, size: 18),
             label: const Text('Perguntar à IA'),
           ),
@@ -815,294 +860,80 @@ class _AnexosViewState extends State<AnexosView> {
     },
   );
 
-  Widget _paragrafo(int i, AnexoProcesso a) {
-    final par = _pars[i];
-    final marcacoes = [
-      for (final m in a.marcacoes)
-        if (m.paragrafo == i) m,
-    ];
-    final novaPagina =
-        par.pagina > 0 && (i == 0 || _pars[i - 1].pagina != par.pagina);
-    final base = TextStyle(
-      color: const Color(0xFF1D2230),
-      fontSize: par.titulo ? 15 : 14,
-      height: 1.5,
-      fontWeight: par.titulo ? FontWeight.w700 : FontWeight.w400,
-    );
-    final destaque = _ultimaBusca == i;
-    return Column(
-      key: _chaves.putIfAbsent(i, GlobalKey.new),
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (novaPagina)
-          Padding(
-            padding: const EdgeInsets.only(top: 10, bottom: 6),
-            child: Row(
-              children: [
-                const Expanded(child: Divider(color: Color(0xFFD6D8DE))),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Página ${par.pagina}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF7A8090),
-                    ),
-                  ),
-                ),
-                const Expanded(child: Divider(color: Color(0xFFD6D8DE))),
-              ],
-            ),
-          ),
-        Container(
-          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-          color: destaque ? const Color(0x1A1F6FD1) : null,
-          child: SelectableText.rich(
-            TextSpan(
-              style: base,
-              children: [
-                for (final s in segmentarParagrafo(par.texto, marcacoes))
-                  TextSpan(
-                    text: s.texto,
-                    style: s.marcacao == null
-                        ? null
-                        : TextStyle(
-                            backgroundColor: Color(
-                              coresMarcacao[s.marcacao!.cor]!,
-                            ).withAlpha(s.marcacao!.id == _ativa ? 255 : 150),
-                            decoration: s.marcacao!.comentario.isEmpty
-                                ? null
-                                : TextDecoration.underline,
-                            decorationStyle: TextDecorationStyle.dotted,
-                          ),
-                  ),
-              ],
-            ),
-            onSelectionChanged: (sel, _) => _aoSelecionar(i, sel, marcacoes),
-            contextMenuBuilder: (context, state) =>
-                _menu(context, state, i, marcacoes),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _aoSelecionar(int i, TextSelection sel, List<MarcacaoAnexo> marcacoes) {
-    if (!sel.isValid) return;
-    if (sel.isCollapsed) {
-      final m = marcacoes
-          .where((x) => sel.baseOffset >= x.inicio && sel.baseOffset < x.fim)
-          .lastOrNull;
-      if (m != null && m.id != _ativa) setState(() => _ativa = m.id);
-      return;
-    }
-    _selecao.value = (par: i, ini: sel.start, fim: sel.end);
-  }
-
-  Widget _menu(
-    BuildContext context,
-    EditableTextState state,
-    int i,
-    List<MarcacaoAnexo> marcacoes,
-  ) {
-    final sel = state.textEditingValue.selection;
-    final temSelecao = sel.isValid && !sel.isCollapsed;
-    final sobre = sel.isValid
-        ? marcacoes
-              .where((x) => sel.start < x.fim && sel.end > x.inicio)
-              .lastOrNull
-        : null;
-    void fechar() => state.hideToolbar();
-    final itens = <ContextMenuButtonItem>[
-      if (temSelecao) ...[
-        ContextMenuButtonItem(
-          label: 'Marcar',
-          onPressed: () {
-            fechar();
-            _selecao.value = (par: i, ini: sel.start, fim: sel.end);
-            _marcar();
-          },
-        ),
-        ContextMenuButtonItem(
-          label: 'Comentar…',
-          onPressed: () {
-            fechar();
-            _selecao.value = (par: i, ini: sel.start, fim: sel.end);
-            _marcar(dialogo: true);
-          },
-        ),
-        ContextMenuButtonItem(
-          label: 'Perguntar à IA…',
-          onPressed: () {
-            fechar();
-            _selecao.value = (par: i, ini: sel.start, fim: sel.end);
-            _marcar(dialogo: true, perguntar: true);
-          },
-        ),
-      ],
-      if (sobre != null)
-        ContextMenuButtonItem(
-          label: 'Abrir marcação',
-          onPressed: () {
-            fechar();
-            _abrirMarcacao(sobre);
-          },
-        ),
-      ...state.contextMenuButtonItems,
-    ];
-    return AdaptiveTextSelectionToolbar.buttonItems(
-      anchors: state.contextMenuAnchors,
-      buttonItems: itens,
-    );
-  }
-
-  Widget _painelMarcacoes() {
-    final a = _anexo;
-    final ms = a?.marcacoes ?? const <MarcacaoAnexo>[];
-    return _Painel(
-      titulo: 'Marcações e comentários (${ms.length})',
-      child: ms.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text(
-                'Selecione um trecho do documento e use "Marcar", '
-                '"Comentar" ou "Perguntar à IA".',
-                textAlign: TextAlign.center,
-              ),
-            )
-          : ListView(
-              children: [
-                for (final m in ms)
-                  Card(
-                    margin: const EdgeInsets.fromLTRB(6, 4, 6, 4),
-                    color: m.id == _ativa
-                        ? Theme.of(context).colorScheme.secondaryContainer
-                        : null,
-                    child: InkWell(
-                      onTap: () => _irParaMarcacao(m),
-                      onDoubleTap: () => _abrirMarcacao(m),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(10, 8, 0, 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 5,
-                              height: 44,
-                              color: Color(coresMarcacao[m.cor]!),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(child: _resumoMarcacao(m)),
-                            _menuMarcacao(m),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-    );
-  }
-
-  Widget _resumoMarcacao(MarcacaoAnexo m) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        '“${m.texto.trim()}”',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontStyle: FontStyle.italic, fontSize: 12.5),
-      ),
-      if (m.comentario.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
+  /// O documento em folha branca: PDF original ou texto.
+  Widget _folha(AnexoProcesso a) {
+    final marcas = [for (final m in a.marcacoes) _marca(m)];
+    final Widget conteudo;
+    if (_emPdf) {
+      conteudo = _pasta.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : SuperficiePdf(
+              key: ValueKey('pdf-${a.id}'),
+              pasta: _pasta,
+              arquivo: a.arquivoGuardado,
+              marcas: marcas,
+              selecionada: _leitor.selecionado,
+              controller: _pdf,
+              aoLerPaginas: _aoLerPaginas,
+              aoSelecionar: (s) => _selPdf.value = s,
+              aoPedirAcao: (acao, s) {
+                _selPdf.value = s;
+                _marcar(acao);
+              },
+              aoTocarMarca: (id) => _leitor.selecionar(id, rolar: false),
+              aoBuscar: (achou, _) {
+                if (!achou) {
+                  _mensagem(
+                    '"${_busca.text.trim()}" não aparece no documento.',
+                  );
+                }
+              },
+              aoMudarEscala: (e) =>
+                  setState(() => _escalaPct = (e * 100).round()),
+            );
+    } else if (_lendo) {
+      conteudo = const Center(child: CircularProgressIndicator());
+    } else if (_erroLeitura != null) {
+      conteudo = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
           child: Text(
-            m.comentario,
-            maxLines: 4,
-            overflow: TextOverflow.ellipsis,
+            _erroLeitura!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.black87),
           ),
         ),
-      Padding(
-        padding: const EdgeInsets.only(top: 4),
+      );
+    } else if (_pars.isEmpty) {
+      conteudo = const Center(
         child: Text(
-          [
-            AnexosProcessoService.localMarcacao(m, _pars),
-            if (m.explicacaoIa.isNotEmpty) 'explicação da IA',
-          ].join(' · '),
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
+          'Sem texto para exibir. Use "Abrir original".',
+          style: TextStyle(color: Colors.black87),
         ),
+      );
+    } else {
+      conteudo = SuperficieTexto(
+        key: ValueKey('texto-${a.id}'),
+        paragrafos: _pars,
+        marcas: marcas,
+        selecionada: _leitor.selecionado,
+        controller: _texto,
+        aoSelecionar: (s) => _selTexto.value = s,
+        aoPedirAcao: (acao, s) {
+          _selTexto.value = s;
+          _marcar(acao);
+        },
+        aoTocarMarca: (id) => _leitor.selecionar(id, rolar: false),
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppTheme.divider),
       ),
-    ],
-  );
-
-  Widget _menuMarcacao(MarcacaoAnexo m) => PopupMenuButton<String>(
-    tooltip: 'Ações',
-    itemBuilder: (_) => [
-      const PopupMenuItem(value: 'abrir', child: Text('Comentário e IA…')),
-      const PopupMenuItem(value: 'copiar', child: Text('Copiar trecho')),
-      for (final s in ParecerSecao.values)
-        PopupMenuItem(
-          value: 'citar:${s.id}',
-          child: Text('Citar em ${s.titulo}'),
-        ),
-      const PopupMenuItem(value: 'excluir', child: Text('Excluir marcação')),
-    ],
-    onSelected: (v) async {
-      final a = _anexo;
-      if (a == null) return;
-      if (v == 'abrir') {
-        await _abrirMarcacao(m);
-      } else if (v == 'copiar') {
-        await Clipboard.setData(
-          ClipboardData(
-            text:
-                '“${m.texto.trim()}” (${a.nome}, '
-                '${AnexosProcessoService.localMarcacao(m, _pars)})',
-          ),
-        );
-      } else if (v.startsWith('citar:')) {
-        final secao = ParecerSecao.porId(v.substring(6));
-        if (secao != null) await _citar(m, secao);
-      } else if (v == 'excluir') {
-        await anexos.excluirMarcacao(a.id, m.id);
-      }
-    },
-  );
-}
-
-/// Painel com título (e rodapé opcional) usado nas colunas da aba.
-class _Painel extends StatelessWidget {
-  const _Painel({required this.titulo, required this.child, this.rodape});
-
-  final String titulo;
-  final Widget child;
-  final Widget? rodape;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      gradient: AppTheme.cardGradient,
-      border: Border.all(color: AppTheme.divider),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: Text(
-            titulo,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: AppTheme.textPrimary,
-            ),
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(child: child),
-        if (rodape != null)
-          Padding(padding: const EdgeInsets.all(10), child: rodape),
-      ],
-    ),
-  );
+      clipBehavior: Clip.antiAlias,
+      child: conteudo,
+    );
+  }
 }

@@ -171,6 +171,6 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(find.text('Anexar documento'), findsWidgets);
-    expect(find.textContaining('Marcações e comentários'), findsOneWidget);
+    expect(find.text('Documentos do processo'), findsWidgets);
   });
 }

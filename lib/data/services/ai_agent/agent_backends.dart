@@ -210,12 +210,9 @@ class ClaudeApiBackend extends AgentBackend {
     String? afterId;
     do {
       final response = await http.get(
-        Uri.parse('https://api.anthropic.com/v1/models').replace(
-          queryParameters: {
-            'limit': '1000',
-            if (afterId != null) 'after_id': afterId,
-          },
-        ),
+        Uri.parse(
+          'https://api.anthropic.com/v1/models',
+        ).replace(queryParameters: {'limit': '1000', 'after_id': ?afterId}),
         headers: _headers,
       );
       if (response.statusCode != 200) {
@@ -580,8 +577,9 @@ String _apiError(String provider, http.Response response) {
   try {
     final json = jsonDecode(utf8.decode(response.bodyBytes));
     final error = json is Map ? json['error'] : null;
-    if (error is Map && error['message'] != null)
+    if (error is Map && error['message'] != null) {
       detail = '${error['message']}';
+    }
   } catch (_) {}
   final hint = switch (response.statusCode) {
     401 || 403 => ' Verifique a chave de API.',
@@ -2581,10 +2579,7 @@ class GeminiApiBackend extends AgentBackend {
     do {
       final response = await http.get(
         Uri.parse('$_base/models').replace(
-          queryParameters: {
-            'pageSize': '1000',
-            if (pageToken != null) 'pageToken': pageToken,
-          },
+          queryParameters: {'pageSize': '1000', 'pageToken': ?pageToken},
         ),
         headers: _headers,
       );

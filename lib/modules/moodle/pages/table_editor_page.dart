@@ -871,8 +871,12 @@ class _TableEditorPageState extends State<TableEditorPage> {
       buildDefaultDragHandles: false,
       proxyDecorator: (child, index, animation) =>
           Material(color: Colors.transparent, elevation: 0, child: child),
-      onReorder: (oldIndex, newIndex) =>
-          ctrl.reorderSections(oldIndex, newIndex),
+      // onReorderItem entrega o destino já ajustado; o controlador espera
+      // a convenção antiga (antes de remover o item).
+      onReorderItem: (oldIndex, newIndex) => ctrl.reorderSections(
+        oldIndex,
+        newIndex > oldIndex ? newIndex + 1 : newIndex,
+      ),
       itemCount: config.sections.length,
       itemBuilder: (context, index) {
         final section = config.sections[index];
@@ -1305,11 +1309,11 @@ class _TableEditorPageState extends State<TableEditorPage> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               buildDefaultDragHandles: false,
-                              onReorder: (oldIdx, newIdx) =>
+                              onReorderItem: (oldIdx, newIdx) =>
                                   ctrl.reorderActivities(
                                     section.id,
                                     oldIdx,
-                                    newIdx,
+                                    newIdx > oldIdx ? newIdx + 1 : newIdx,
                                   ),
                               children: [
                                 for (
@@ -2946,7 +2950,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
       lastDate: DateTime(now.year + 3),
       helpText: 'Selecione a data que será trocada',
     );
-    if (picked == null || !mounted) return;
+    if (picked == null || !context.mounted) return;
 
     // Pedir o dia da semana efetivo
     final weekday = await showDialog<int>(

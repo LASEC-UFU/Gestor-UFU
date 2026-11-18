@@ -913,8 +913,9 @@ class ProgressaoService extends ChangeNotifier {
         requestStatus = await seiFlow.inserirRequerimento(p, log: envio.log)
             ? 'novo'
             : 'existente';
-        if (envio.cancelar)
+        if (envio.cancelar) {
           throw StateError('Execução interrompida após o requerimento.');
+        }
       }
 
       if (opcoes.incluirComprovantes) {
@@ -945,8 +946,9 @@ class ProgressaoService extends ChangeNotifier {
         );
         novos += lote.criados.length;
         existentes += lote.existentes.length;
-        if (lote.erros.isNotEmpty)
+        if (lote.erros.isNotEmpty) {
           throw StateError('Envio interrompido: ${lote.erros.join('; ')}');
+        }
       }
 
       if (opcoes.incluirTitulacao) {
@@ -970,8 +972,9 @@ class ProgressaoService extends ChangeNotifier {
         );
         novos += lote.criados.length;
         existentes += lote.existentes.length;
-        if (lote.erros.isNotEmpty)
+        if (lote.erros.isNotEmpty) {
           throw StateError('Falha ao anexar diploma: ${lote.erros.join('; ')}');
+        }
         titulacaoStatus = lote.criados.isEmpty ? 'existente' : 'incluída';
       }
 
@@ -996,10 +999,11 @@ class ProgressaoService extends ChangeNotifier {
         );
         novos += lote.criados.length;
         existentes += lote.existentes.length;
-        if (lote.erros.isNotEmpty)
+        if (lote.erros.isNotEmpty) {
           throw StateError(
             'Falha ao anexar relatório: ${lote.erros.join('; ')}',
           );
+        }
         relatorioStatus = lote.criados.isEmpty ? 'existente' : 'incluído';
         if (lote.existentes.isNotEmpty) {
           envio.log(

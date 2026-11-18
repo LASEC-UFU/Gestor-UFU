@@ -355,8 +355,9 @@ class SeiAutomationService {
     }
     try {
       final saved = await _anyFrame<bool>(_saveExternalScript);
-      if (saved != true)
+      if (saved != true) {
         throw StateError('Não encontrei o botão Salvar do SEI.');
+      }
       log('SEI: salvando o documento externo.');
       await _waitUntil(() async {
         if (alertText.isNotEmpty) return true;
@@ -689,8 +690,9 @@ class SeiAutomationService {
     );
     if (already == true) return;
     final field = await _anyFrame<bool>(_fillInterestedScript, args: [name]);
-    if (field != true)
+    if (field != true) {
       throw StateError('Não encontrei o campo Interessados do SEI.');
+    }
     await _waitUntil(
       () => _anyFrame<bool>(_selectInterestedSuggestionScript, args: [name]),
       'a sugestão exata do interessado "$name"',

@@ -66,10 +66,11 @@ class IntegrationService {
     required bool google,
     required String scopes,
   }) async {
-    if (clientId.isEmpty)
+    if (clientId.isEmpty) {
       throw StateError(
         'Não configurado: compile o aplicativo com --dart-define=${google ? 'GOOGLE_OAUTH_CLIENT_ID' : 'MICROSOFT_OAUTH_CLIENT_ID'}=<client-id>.',
       );
+    }
     final verifier = _random(64);
     final challenge = base64Url
         .encode(sha256.convert(utf8.encode(verifier)).bytes)
@@ -141,15 +142,18 @@ class IntegrationService {
         '<html><meta charset="utf-8"><body>Autenticação recebida. Você pode fechar esta janela e voltar ao Gestor UFU.</body></html>',
       );
       await request.response.close();
-      if (params['state'] != state)
+      if (params['state'] != state) {
         throw StateError('Resposta OAuth inválida (state não confere).');
-      if (params['error'] != null)
+      }
+      if (params['error'] != null) {
         throw StateError(
           _oauthError(params['error']!, params['error_description'] ?? ''),
         );
+      }
       final code = params['code'];
-      if (code == null)
+      if (code == null) {
         throw StateError('O provedor não retornou o código de autorização.');
+      }
       final tokenUri = google
           ? Uri.https('oauth2.googleapis.com', '/token')
           : Uri.https('login.microsoftonline.com', '/common/oauth2/v2.0/token');
@@ -190,8 +194,9 @@ class IntegrationService {
     if (DateTime.tryParse(
           '${token['expires_at']}',
         )?.isAfter(DateTime.now().add(const Duration(minutes: 2))) ==
-        true)
+        true) {
       return token;
+    }
     final refresh = token['refresh_token'];
     if (refresh == null) {
       await disconnect(provider);
@@ -245,8 +250,9 @@ class IntegrationService {
     }
     final streamed = await _http.send(request);
     final response = await http.Response.fromStream(streamed);
-    if (response.statusCode < 200 || response.statusCode >= 300)
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(_apiError(response));
+    }
     return response;
   }
 
@@ -414,8 +420,9 @@ class IntegrationService {
     bool unreadOnly = false,
     int page = 0,
   }) async {
-    if (page < 0 || page > 20)
+    if (page < 0 || page > 20) {
       throw const FormatException('A paginação vai de 0 a 20.');
+    }
     final out = <Map<String, dynamic>>[];
     if (await connected('google_mail')) {
       final profile =
@@ -441,7 +448,7 @@ class IntegrationService {
               as Map;
       var currentPage = 0;
       while (true) {
-        if (currentPage == page)
+        if (currentPage == page) {
           for (final m in (list['messages'] as List? ?? [])) {
             final id = '${(m as Map)['id']}';
             final full =
@@ -454,6 +461,7 @@ class IntegrationService {
                     as Map;
             out.add({..._gmailMessage(full), 'account': gmailAccount});
           }
+        }
         if (currentPage >= page) break;
         final pageToken = list['nextPageToken'];
         if (pageToken is! String || pageToken.isEmpty) break;
@@ -489,7 +497,7 @@ class IntegrationService {
       var currentPage = 0;
       while (next.isNotEmpty) {
         final r = jsonDecode((await _api('microsoft_mail', next)).body) as Map;
-        if (currentPage == page)
+        if (currentPage == page) {
           for (final m in (r['value'] as List? ?? [])) {
             final item = Map<String, dynamic>.from(m as Map);
             out.add({
@@ -502,6 +510,7 @@ class IntegrationService {
               'account': '$account',
             });
           }
+        }
         if (currentPage >= page) break;
         final pageLink = r['@odata.nextLink'];
         next = pageLink is String ? pageLink : '';
@@ -521,11 +530,12 @@ class IntegrationService {
         '${headers.whereType<Map>().where((x) => '${x['name']}'.toLowerCase() == name.toLowerCase()).map((x) => x['value']).firstOrNull ?? ''}';
     String body(Map p) {
       final data = (p['body'] as Map?)?['data'];
-      if (data is String)
+      if (data is String) {
         return utf8.decode(
           base64Url.decode(base64Url.normalize(data)),
           allowMalformed: true,
         );
+      }
       for (final part in (p['parts'] as List? ?? [])) {
         final value = body(Map<String, dynamic>.from(part as Map));
         if (value.isNotEmpty) return value;
@@ -632,11 +642,12 @@ class IntegrationService {
 
   String _gmailBody(Map p) {
     final data = (p['body'] as Map?)?['data'];
-    if (data is String && data.isNotEmpty)
+    if (data is String && data.isNotEmpty) {
       return utf8.decode(
         base64Url.decode(base64Url.normalize(data)),
         allowMalformed: true,
       );
+    }
     for (final part in (p['parts'] as List? ?? [])) {
       final found = _gmailBody(Map<String, dynamic>.from(part as Map));
       if (found.isNotEmpty) return found;

@@ -42,8 +42,9 @@ List<ModuleCommand> planosEnsinoCommands(
       inputSchema: {'type': 'object', 'properties': _planoId},
       run: (input, origin) async {
         final id = input.optionalString('id');
-        if (id != null)
+        if (id != null) {
           return CommandResult.ok(data: {'plano': await plano(id)});
+        }
         return CommandResult.ok(
           data: {
             'planos': [

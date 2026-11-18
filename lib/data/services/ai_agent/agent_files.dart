@@ -6,6 +6,8 @@ import 'package:excel/excel.dart';
 import 'package:path/path.dart' as p;
 import 'package:xml/xml.dart';
 
+import 'package:gestor_ufu/platform/services/poppler.dart';
+
 /// Leitura econômica de arquivos para os agentes: em vez de despejar a
 /// planilha ou o documento inteiro no contexto (muitos tokens), o agente
 /// pede primeiro um resumo e depois só o trecho de que precisa.
@@ -202,34 +204,8 @@ class AgentFiles {
   /// Texto de cada página de um PDF (camada de texto, via Poppler
   /// `pdftotext`, em ordem de leitura). Páginas digitalizadas como imagem
   /// voltam vazias: o PDF precisa de OCR, que o Gestor não faz.
-  static Future<List<String>> pdfPages(String path) async {
-    final ProcessResult result;
-    try {
-      result = await Process.run(
-        'pdftotext',
-        ['-enc', 'UTF-8', '-eol', 'unix', path, '-'],
-        stdoutEncoding: utf8,
-        stderrEncoding: utf8,
-      );
-    } on ProcessException {
-      throw StateError(
-        'Não foi possível encontrar o pdftotext (Poppler). Instale o Poppler '
-        'ou coloque o pdftotext no PATH para ler PDFs.',
-      );
-    }
-    if (result.exitCode != 0) {
-      final stderr = '${result.stderr}'.trim();
-      throw StateError(
-        stderr.isEmpty
-            ? 'pdftotext encerrou com código ${result.exitCode}.'
-            : stderr,
-      );
-    }
-    final pages = '${result.stdout}'.split('\f');
-    // O pdftotext termina cada página com form feed (\f).
-    if (pages.length > 1 && pages.last.trim().isEmpty) pages.removeLast();
-    return [for (final page in pages) page.trim()];
-  }
+  static Future<List<String>> pdfPages(String path) =>
+      Poppler.paginasDeTexto(path);
 
   /// Parágrafos de um .docx na ordem do documento, com o estilo de
   /// parágrafo (`w:pStyle`, ex.: "Heading1", "Ttulo2"); cada linha de

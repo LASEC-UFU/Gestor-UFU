@@ -84,15 +84,17 @@ class ProgressaoSeiRequerimento {
         ok = await _anyFrame<bool>(_chooseProcessTypeScript, args: [tipo]);
         return ok == true ? true : null;
       }, 'o tipo de processo "$tipo"');
-      if (!typeSelected)
+      if (!typeSelected) {
         throw StateError('O tipo de processo "$tipo" não foi localizado.');
+      }
       atMetadata = await _wait<bool>(
         () => _anyFrame<bool>(_isProcessMetadataScript),
         'o formulário de autuação do processo',
       );
     }
-    if (!atMetadata)
+    if (!atMetadata) {
       throw StateError('O formulário de autuação do processo não abriu.');
+    }
     final numeroAnterior = await numeroProcessoAtual();
     final filled = await _anyFrame<Map<String, dynamic>>(
       _fillProcessMetadataScript,
@@ -118,8 +120,9 @@ class ProgressaoSeiRequerimento {
     }
     log('SEI: especificação, interessado e acesso restrito conferidos.');
     final saved = await _anyFrame<bool>(_saveProcessScript);
-    if (saved != true)
+    if (saved != true) {
       throw StateError('Não encontrei Salvar na autuação do processo.');
+    }
     log('SEI: processo salvo; identificando o número gerado.');
     final number = await _wait<String?>(() async {
       final value = await numeroProcessoAtual();
@@ -144,8 +147,9 @@ class ProgressaoSeiRequerimento {
       _searchProcessScript,
       args: [normalized],
     );
-    if (search != true)
+    if (search != true) {
       throw StateError('Campo Pesquisa Rápida não encontrado no SEI.');
+    }
     await _wait<bool>(() async {
       final atual = await numeroProcessoAtual();
       return atual == normalized &&
@@ -207,8 +211,9 @@ class ProgressaoSeiRequerimento {
         ok = await _anyFrame<bool>(_chooseDocumentTypeScript, args: [nome]);
         return ok == true ? true : null;
       }, 'o tipo de documento "$nome"');
-      if (!chosen)
+      if (!chosen) {
         throw StateError('O tipo de requerimento "$nome" não está disponível.');
+      }
       metadata = await _wait<bool>(
         () => _anyFrame<bool>(_isGeneratedDocumentFormScript),
         'o formulário de metadados do requerimento',
@@ -243,8 +248,9 @@ class ProgressaoSeiRequerimento {
       throw StateError('Selecione o docente nos interessados do requerimento.');
     }
     final saved = await _anyFrame<bool>(_saveMetadataScript);
-    if (saved != true)
+    if (saved != true) {
       throw StateError('Não encontrei Salvar do formulário do requerimento.');
+    }
     log('SEI: requerimento gerado; aguardando o editor do modelo.');
     final editor = await _wait<(Page, String)?>(
       _findEditor,
@@ -294,13 +300,15 @@ class ProgressaoSeiRequerimento {
       _setEditorHtmlScript,
       args: [root, merged.html],
     );
-    if (applied != true)
+    if (applied != true) {
       throw StateError('Não consegui aplicar os dados ao modelo do SEI.');
+    }
     final savedEditor = await page.evaluate<bool>(_clickEditorSaveScript);
-    if (savedEditor != true)
+    if (savedEditor != true) {
       throw StateError(
         'Não encontrei Salvar no editor; revise e salve manualmente.',
       );
+    }
     await _wait<bool>(
       () async =>
           await page.evaluate<bool>(_isEditorSavedScript) == true ? true : null,
@@ -319,11 +327,13 @@ class ProgressaoSeiRequerimento {
   }
 
   void _checkReady() {
-    if (!sei.isConnected)
+    if (!sei.isConnected) {
       throw StateError('Abra o Edge do SEI e entre no portal.');
+    }
     final host = Uri.tryParse(sei.currentUrl ?? '')?.host.toLowerCase() ?? '';
-    if (!host.contains('sei.ufu.br'))
+    if (!host.contains('sei.ufu.br')) {
       throw StateError('O Edge controlado não está no SEI da UFU.');
+    }
   }
 
   Future<(Page, String)?> _findEditor() async {

@@ -15,7 +15,10 @@ import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.da
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/base_documentos_dialog.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/consulta_ia_dialog.dart';
-import 'package:gestor_ufu/modules/elabora_relato/pages/webview_local.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/comentario_documento.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado_controller.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/webview_local.dart';
 
 /// Arquivos do editor (CKEditor 5 + estilos do SEI) copiados dos assets para
 /// uma pasta local servida ao WebView2 por um host virtual.
@@ -82,7 +85,7 @@ class _ParecerEditorState extends State<ParecerEditor>
   String? _erro;
   double _zoom = 1;
   Map<String, dynamic>? _selecao;
-  String? _ativo;
+  final _leitor = LeitorComentadoController();
 
   @override
   bool get wantKeepAlive => true;
@@ -97,6 +100,9 @@ class _ParecerEditorState extends State<ParecerEditor>
   void initState() {
     super.initState();
     _processoId;
+    _leitor
+      ..navegar = _navegarComentario
+      ..aoLimpar = () => _js('window.parecer.limparSelecaoComentario()');
     widget.service.arvore.addListener(_atualizarLinks);
     _iniciar();
   }
@@ -195,12 +201,7 @@ class _ParecerEditorState extends State<ParecerEditor>
       case 'comentar':
         unawaited(_novoComentario());
       case 'comentarioClic':
-        if (mounted) setState(() => _ativo = '${msg['id']}');
-        final encontrado = widget.service
-            .comentarios(widget.secao)
-            .where((c) => '${c['id']}' == '${msg['id']}')
-            .firstOrNull;
-        if (encontrado != null && mounted) _detalharComentario(encontrado);
+        unawaited(_leitor.selecionar('${msg['id']}', rolar: false));
       case 'statusComentario':
         final c = msg['comentario'];
         if (c is Map) {
@@ -242,6 +243,7 @@ class _ParecerEditorState extends State<ParecerEditor>
     // Garante que o último trecho digitado (antes do debounce) seja salvo.
     unawaited(widget.service.salvarAgora());
     if (_controladorCriado) _web.dispose();
+    _leitor.dispose();
     super.dispose();
   }
 
@@ -279,39 +281,28 @@ class _ParecerEditorState extends State<ParecerEditor>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final editorView = ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Stack(
-                  children: [
-                    if (_iniciado) Positioned.fill(child: Webview(_web)),
-                    if (!_pronto)
-                      const Positioned.fill(
-                        child: ColoredBox(
-                          color: Color(0xFFE9EAEE),
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-              if (constraints.maxWidth < 650) {
-                return Column(
-                  children: [
-                    Expanded(child: editorView),
-                    SizedBox(height: 170, child: _painelComentarios()),
-                  ],
-                );
-              }
-              return Row(
+          child: LeitorComentado(
+            controller: _leitor,
+            comentarios: _comentariosDocumento(),
+            acoesPainel: _acoesPainel(),
+            vazio:
+                'Selecione um trecho (ou clique no texto) e use o botão '
+                'direito para consultar a IA ou comentar.',
+            documento: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
                 children: [
-                  Expanded(child: editorView),
-                  const VerticalDivider(width: 1),
-                  SizedBox(width: 260, child: _painelComentarios()),
+                  if (_iniciado) Positioned.fill(child: Webview(_web)),
+                  if (!_pronto)
+                    const Positioned.fill(
+                      child: ColoredBox(
+                        color: Color(0xFFE9EAEE),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                    ),
                 ],
-              );
-            },
+              ),
+            ),
           ),
         ),
         Padding(
@@ -350,158 +341,213 @@ class _ParecerEditorState extends State<ParecerEditor>
     );
   }
 
-  Widget _painelComentarios() {
-    final cs = widget.service.comentarios(widget.secao);
+  /// Ações do topo do painel de comentários.
+  List<Widget> _acoesPainel() {
     final temSelecao = '${_selecao?['texto'] ?? ''}'.trim().isNotEmpty;
-    return Column(
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Padding(
-                padding: EdgeInsets.all(8),
-                child: Text(
-                  'Comentários',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip:
-                  'Consultar a IA sobre a seleção ou o cursor (também pelo '
-                  'botão direito no texto)',
-              onPressed: _selecao == null ? null : () => _consultarIa(),
-              icon: const Icon(Icons.auto_awesome_outlined),
-            ),
-            PopupMenuButton<String>(
-              tooltip: 'Mais ações',
-              icon: const Icon(Icons.more_vert),
-              itemBuilder: (_) => [
-                const PopupMenuItem(
-                  value: 'base',
-                  child: Text('Base de documentos…'),
-                ),
-                const PopupMenuItem(
-                  value: 'analisar',
-                  child: Text('Analisar a seção com a base'),
-                ),
-                PopupMenuItem(
-                  value: 'comentar',
-                  enabled: temSelecao,
-                  child: const Text('Comentar seleção'),
-                ),
-              ],
-              onSelected: (v) => switch (v) {
-                'base' => mostrarBaseDocumentos(context, widget.service.base),
-                'analisar' => _analisarRelato(),
-                _ => _novoComentario(),
-              },
-            ),
-            IconButton(
-              tooltip: 'Anterior',
-              onPressed: cs.isEmpty ? null : () => _navegar(-1, cs),
-              icon: const Icon(Icons.keyboard_arrow_up),
-            ),
-            IconButton(
-              tooltip: 'Próximo',
-              onPressed: cs.isEmpty ? null : () => _navegar(1, cs),
-              icon: const Icon(Icons.keyboard_arrow_down),
-            ),
-          ],
-        ),
-        Expanded(
-          child: cs.isEmpty
-              ? const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Text(
-                      'Selecione um trecho (ou clique no texto) e use o botão '
-                      'direito para consultar a IA ou comentar.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                )
-              : ListView(
-                  children: [
-                    for (final c in cs)
-                      Card(
-                        color: '${c['id']}' == _ativo
-                            ? Theme.of(context).colorScheme.secondaryContainer
-                            : null,
-                        child: ListTile(
-                          dense: true,
-                          title: Text(
-                            '${c['texto'] ?? ''}',
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            '${_categoria(c)} · ${_status(c)}\n'
-                            '${c['localizado'] == false ? 'Trecho não localizado' : c['referencia'] ?? c['trecho'] ?? ''}',
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          onTap: () {
-                            setState(() => _ativo = '${c['id']}');
-                            _js('window.parecer.navegar(${jsonEncode(c)})');
-                            _detalharComentario(c);
-                          },
-                          trailing: PopupMenuButton<String>(
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                value: 'confirmado',
-                                child: Text('Marcar confirmado'),
-                              ),
-                              PopupMenuItem(
-                                value: 'revisar',
-                                child: Text('Marcar para revisão'),
-                              ),
-                              PopupMenuItem(
-                                value: 'nao_aplica',
-                                child: Text('Não se aplica'),
-                              ),
-                              PopupMenuItem(
-                                value: 'editar',
-                                child: Text('Editar'),
-                              ),
-                              PopupMenuItem(
-                                value: 'excluir',
-                                child: Text('Excluir'),
-                              ),
-                            ],
-                            onSelected: (v) async {
-                              if (v == 'editar') {
-                                await _editarComentario(c);
-                                return;
-                              }
-                              if (v == 'excluir') {
-                                await widget.service.excluirComentario(
-                                  '${c['id']}',
-                                );
-                              } else {
-                                await widget.service.salvarComentario({
-                                  ...c,
-                                  'status': v,
-                                });
-                              }
-                              _repintarComentarios();
-                              if (mounted) setState(() {});
-                            },
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-        ),
-        if (cs.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.all(6),
-            child: Text(
-              '${(_indice(cs) + 1).clamp(1, cs.length)} de ${cs.length}',
-            ),
+    return [
+      IconButton(
+        tooltip:
+            'Consultar a IA sobre a seleção ou o cursor (também pelo botão '
+            'direito no texto)',
+        onPressed: _selecao == null ? null : () => _consultarIa(),
+        icon: const Icon(Icons.auto_awesome_outlined),
+      ),
+      PopupMenuButton<String>(
+        tooltip: 'Mais ações',
+        icon: const Icon(Icons.more_vert),
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: 'comentar',
+            enabled: temSelecao,
+            child: const Text('Comentar a seleção'),
+          ),
+          const PopupMenuItem(
+            value: 'analisar',
+            child: Text('Analisar a seção com a base'),
+          ),
+          const PopupMenuItem(
+            value: 'base',
+            child: Text('Base de documentos…'),
+          ),
+        ],
+        onSelected: (v) => switch (v) {
+          'base' => mostrarBaseDocumentos(context, widget.service.base),
+          'analisar' => _analisarRelato(),
+          _ => _novoComentario(),
+        },
+      ),
+    ];
+  }
+
+  /// Comentários da seção na ordem do texto (os sem trecho no fim).
+  List<ComentarioDocumento> _comentariosDocumento() {
+    final cs = [...widget.service.comentarios(widget.secao)];
+    int pos(Map<String, dynamic> c) => c['localizado'] == false
+        ? 1 << 30
+        : ((c['posicao'] as num?)?.toInt() ?? 0);
+    cs.sort((a, b) => pos(a).compareTo(pos(b)));
+    return [for (final c in cs) _comentarioDocumento(c)];
+  }
+
+  /// Organiza o comentário para quem o lê: o ponto de atenção, por que ele
+  /// merece revisão e o que fazer — sem repetir o trecho (que está
+  /// destacado no texto).
+  ComentarioDocumento _comentarioDocumento(Map<String, dynamic> c) {
+    String campo(String k) => '${c[k] ?? ''}'.trim();
+    final texto = campo('texto');
+    final importancia = campo('importancia');
+    final simples = campo('explicacao_simples');
+    final titulo = texto.isNotEmpty
+        ? texto
+        : simples.isNotEmpty
+        ? simples
+        : importancia;
+    final categoria = '${c['categoria'] ?? ''}';
+    final fundamento = [
+      if (campo('referencia').isNotEmpty) campo('referencia'),
+      if (campo('citacao_literal').isNotEmpty) '“${campo('citacao_literal')}”',
+    ].join('\n');
+    final fontes = [
+      for (final f in (c['fontes'] as List? ?? const []))
+        if (f is Map)
+          '${f['arquivo']}'
+              '${'${f['localizacao'] ?? ''}'.isEmpty ? '' : ' — ${f['localizacao']}'}',
+    ].join('\n');
+    final arguicao = [
+      if (campo('pergunta_arguicao').isNotEmpty)
+        'Pergunta provável: ${campo('pergunta_arguicao')}',
+      if (campo('resposta_oral').isNotEmpty)
+        'Como responder: ${campo('resposta_oral')}',
+      if (campo('contra_argumento').isNotEmpty)
+        'Se insistirem: ${campo('contra_argumento')}',
+    ].join('\n\n');
+    final status = '${c['status'] ?? ''}';
+    return ComentarioDocumento(
+      id: '${c['id']}',
+      titulo: titulo,
+      cor: switch (status) {
+        'revisar' => const Color(0xFFE6A100),
+        'confirmado' => const Color(0xFF43A047),
+        'nao_aplica' => const Color(0xFF9E9E9E),
+        _ => const Color(0xFFD18A00),
+      },
+      local: widget.secao.titulo,
+      ancorado:
+          c['localizado'] != false && '${c['selecionado'] ?? ''}'.isNotEmpty,
+      trechoMarcado: '${c['selecionado'] ?? c['trecho'] ?? ''}',
+      etiquetas: [
+        _categoria(c),
+        if (status.isNotEmpty) _status(c),
+        if ('${c['avaliacao'] ?? ''}'.isNotEmpty) '${c['avaliacao']}',
+      ],
+      secoes: [
+        if (importancia.isNotEmpty && importancia != titulo)
+          SecaoComentario(
+            'Por que merece atenção',
+            importancia,
+            icone: Icons.priority_high_rounded,
+          ),
+        if (campo('sugestao').isNotEmpty)
+          SecaoComentario(
+            'Como melhorar',
+            campo('sugestao'),
+            icone: Icons.lightbulb_outline,
+          ),
+        if (simples.isNotEmpty && simples != titulo && simples != importancia)
+          SecaoComentario(
+            'Em palavras simples',
+            simples,
+            icone: Icons.translate_rounded,
+          ),
+        if (fundamento.isNotEmpty)
+          SecaoComentario(
+            'Fundamento',
+            fundamento,
+            icone: Icons.menu_book_outlined,
+          ),
+        if (campo('pergunta').isNotEmpty && categoria == 'consulta_ia')
+          SecaoComentario(
+            'Pergunta feita à IA',
+            campo('pergunta'),
+            icone: Icons.help_outline,
+          ),
+        if (fontes.isNotEmpty)
+          SecaoComentario(
+            'Fontes usadas no texto aceito',
+            fontes,
+            icone: Icons.source_outlined,
+          ),
+        if (campo('texto_anterior').isNotEmpty)
+          SecaoComentario(
+            'Texto antes da alteração',
+            campo('texto_anterior'),
+            icone: Icons.history,
+          ),
+        // Perguntas de arguição só nas anotações de defesa do voto, onde
+        // são o próprio conteúdo (nas demais, ficam no Simulado).
+        if (categoria == 'defesa' && arguicao.isNotEmpty)
+          SecaoComentario(
+            'Na arguição',
+            arguicao,
+            icone: Icons.record_voice_over_outlined,
           ),
       ],
+      acoes: [
+        AcaoComentario(
+          rotulo: 'Editar',
+          icone: Icons.edit_outlined,
+          aoAcionar: () => _editarComentario(c),
+        ),
+        if (status != 'confirmado')
+          AcaoComentario(
+            rotulo: 'Marcar resolvido',
+            icone: Icons.check_circle_outline,
+            aoAcionar: () => _mudarStatus(c, 'confirmado'),
+          ),
+        if (status != 'revisar')
+          AcaoComentario(
+            rotulo: 'Para revisão',
+            icone: Icons.flag_outlined,
+            aoAcionar: () => _mudarStatus(c, 'revisar'),
+          ),
+        if (status != 'nao_aplica')
+          AcaoComentario(
+            rotulo: 'Não se aplica',
+            icone: Icons.block_outlined,
+            aoAcionar: () => _mudarStatus(c, 'nao_aplica'),
+          ),
+        AcaoComentario(
+          rotulo: 'Excluir',
+          icone: Icons.delete_outline,
+          destrutiva: true,
+          aoAcionar: () async {
+            await widget.service.excluirComentario('${c['id']}');
+            _repintarComentarios();
+            if (mounted) setState(() {});
+          },
+        ),
+      ],
     );
+  }
+
+  Future<void> _mudarStatus(Map<String, dynamic> c, String status) async {
+    await widget.service.salvarComentario({...c, 'status': status});
+    _repintarComentarios();
+    if (mounted) setState(() {});
+  }
+
+  /// Leva o editor ao trecho do comentário e o destaca.
+  Future<bool> _navegarComentario(ComentarioDocumento c, bool rolar) async {
+    if (!_pronto) return false;
+    try {
+      final r = await _web.executeScript(
+        'window.parecer.selecionarComentario(${jsonEncode(c.id)}, '
+        '${rolar ? 'true' : 'false'})',
+      );
+      return r is Map && r['ok'] == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   static String _categoria(Map<String, dynamic> c) =>
@@ -516,86 +562,15 @@ class _ParecerEditorState extends State<ParecerEditor>
 
   static String _status(Map<String, dynamic> c) =>
       switch ('${c['status'] ?? ''}') {
-        'confirmado' => 'confirmado',
-        'revisar' => 'para revisão',
-        'nao_aplica' => 'não se aplica',
-        _ => 'anotação',
+        'confirmado' => 'Resolvido',
+        'revisar' => 'Para revisão',
+        'nao_aplica' => 'Não se aplica',
+        _ => 'Anotação',
       };
 
   void _repintarComentarios() => _js(
     'window.parecer.definirComentarios(${jsonEncode(widget.service.comentarios(widget.secao))})',
   );
-
-  int _indice(List<Map<String, dynamic>> cs) =>
-      math.max(0, cs.indexWhere((c) => '${c['id']}' == _ativo));
-
-  void _navegar(int d, List<Map<String, dynamic>> cs) {
-    final i = (_indice(cs) + d + cs.length) % cs.length;
-    final c = cs[i];
-    setState(() => _ativo = '${c['id']}');
-    _js('window.parecer.navegar(${jsonEncode(c)})');
-  }
-
-  Future<void> _detalharComentario(Map<String, dynamic> c) async {
-    final fields = <String, String>{
-      'Trecho do relato': '${c['trecho'] ?? ''}',
-      'Comentário': '${c['texto'] ?? ''}',
-      'Pergunta feita': '${c['pergunta'] ?? ''}',
-      'Referência': '${c['referencia'] ?? ''}',
-      'Citação literal da fonte': '${c['citacao_literal'] ?? ''}',
-      'Em palavras simples': '${c['explicacao_simples'] ?? ''}',
-      'Por que importa': '${c['importancia'] ?? ''}',
-      'Possível pergunta na arguição': '${c['pergunta_arguicao'] ?? ''}',
-      'Resposta oral sugerida': '${c['resposta_oral'] ?? ''}',
-      'Se insistirem (contra-argumento)': '${c['contra_argumento'] ?? ''}',
-      'Fontes usadas': [
-        for (final f in (c['fontes'] as List? ?? const []))
-          if (f is Map)
-            '${f['arquivo']}'
-                '${'${f['localizacao'] ?? ''}'.isEmpty ? '' : ' — ${f['localizacao']}'}'
-                '\n"${f['trecho'] ?? ''}"',
-      ].join('\n\n'),
-      'Texto antes da alteração': '${c['texto_anterior'] ?? ''}',
-    }..removeWhere((_, v) => v.trim().isEmpty);
-    if (fields.isEmpty) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('${_categoria(c)} · ${_status(c)}'),
-        content: SizedBox(
-          width: 560,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final e in fields.entries)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          e.key,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        SelectableText(e.value),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
-    );
-  }
 
   /// Âncora de um comentário na seleção (texto + contexto em volta).
   Map<String, dynamic> _ancora(Map<String, dynamic> s) {
@@ -622,8 +597,12 @@ class _ParecerEditorState extends State<ParecerEditor>
     await _editarComentario(_ancora(s));
   }
 
+  /// Criar/editar: o ponto de atenção, por que merece revisão e como
+  /// melhorar (só o primeiro é obrigatório).
   Future<void> _editarComentario(Map<String, dynamic> c) async {
-    final ctrl = TextEditingController(text: '${c['texto'] ?? ''}');
+    final ponto = TextEditingController(text: '${c['texto'] ?? ''}');
+    final motivo = TextEditingController(text: '${c['importancia'] ?? ''}');
+    final sugestao = TextEditingController(text: '${c['sugestao'] ?? ''}');
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -631,13 +610,39 @@ class _ParecerEditorState extends State<ParecerEditor>
           c['texto'] == null ? 'Novo comentário' : 'Editar comentário',
         ),
         content: SizedBox(
-          width: 400,
-          child: TextField(
-            controller: ctrl,
-            autofocus: true,
-            minLines: 3,
-            maxLines: 8,
-            decoration: const InputDecoration(labelText: 'Comentário'),
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ponto,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'O que precisa de atenção',
+                  hintText: 'Ex.: A data do ofício não confere com a da ata.',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: motivo,
+                minLines: 1,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Por que merece revisão (opcional)',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: sugestao,
+                minLines: 1,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Como melhorar (opcional)',
+                ),
+              ),
+            ],
           ),
         ),
         actions: [
@@ -652,12 +657,21 @@ class _ParecerEditorState extends State<ParecerEditor>
         ],
       ),
     );
-    if (ok == true && ctrl.text.trim().isNotEmpty) {
-      await widget.service.salvarComentario({...c, 'texto': ctrl.text.trim()});
-      if (mounted) setState(() => _ativo = '${c['id']}');
+    if (ok == true && ponto.text.trim().isNotEmpty) {
+      final novo = {
+        ...c,
+        'texto': ponto.text.trim(),
+        'importancia': motivo.text.trim(),
+        'sugestao': sugestao.text.trim(),
+      }..removeWhere((k, v) => v is String && v.isEmpty && k != 'texto');
+      await widget.service.salvarComentario(novo);
       _repintarComentarios();
+      if (mounted) setState(() {});
+      await _leitor.selecionar('${c['id']}', rolar: false);
     }
-    ctrl.dispose();
+    ponto.dispose();
+    motivo.dispose();
+    sugestao.dispose();
   }
 
   bool _consultaAberta = false;
@@ -861,7 +875,8 @@ class _ParecerEditorState extends State<ParecerEditor>
           'id': '${DateTime.now().microsecondsSinceEpoch}-$criados',
           'trecho': ancora.isEmpty ? 'Análise da seção' : ancora,
           'localizado': at >= 0,
-          'texto': '${item['identificacao'] ?? ''}',
+          'texto': '${item['ponto'] ?? item['identificacao'] ?? ''}',
+          'sugestao': '${item['sugestao'] ?? ''}',
           'categoria': 'analise_normativa',
           'referencia':
               fonte?.referencia ?? 'Fundamento não localizado nas fontes',
@@ -871,7 +886,7 @@ class _ParecerEditorState extends State<ParecerEditor>
               ? citacao
               : '',
           'explicacao_simples': '${item['explicacao_simples'] ?? ''}',
-          'importancia': '${item['importancia'] ?? ''}',
+          'importancia': '${item['motivo'] ?? item['importancia'] ?? ''}',
           'pergunta_arguicao': '${item['pergunta'] ?? ''}',
           'resposta_oral': '${item['resposta_oral'] ?? ''}',
           'status': 'revisar',
@@ -890,17 +905,25 @@ class _ParecerEditorState extends State<ParecerEditor>
   }
 
   static const _sistemaAnalise = '''
-Você revisa uma seção de parecer de conselho da UFU com rigor documental.
+Você revisa uma seção de parecer de conselho da UFU com rigor documental e
+escreve comentários para o relator, em português direto, didático e
+respeitoso.
 Use SOMENTE as fontes numeradas [F1], [F2]… Não invente normas, artigos,
 fatos ou citações; "citacao" deve ser copiada literalmente da fonte.
-Aponte: afirmações sem suporte, divergências com as normas, requisitos não
-mencionados e perguntas prováveis numa arguição. Se a fonte não bastar,
-diga isso em "identificacao" e deixe "fonte" vazio.
+Aponte afirmações sem suporte, divergências com as normas e requisitos não
+mencionados. Cada comentário deve deixar claro, em frases completas (nunca
+só rótulos):
+- "ponto": qual é o ponto que precisa de atenção;
+- "motivo": por que ele merece revisão (o que a fonte diz ou o que falta);
+- "sugestao": o que o relator pode fazer para melhorar o trecho.
+Se a fonte não bastar, diga isso no "motivo" e deixe "fonte" vazio.
 "trecho" deve ser copiado literalmente do TEXTO da seção (até 120
 caracteres) para ancorar o comentário.
-Responda SOMENTE com JSON: [{"trecho": "...", "identificacao": "...",
-"fonte": "F1", "citacao": "...", "explicacao_simples": "...",
-"importancia": "...", "pergunta": "...", "resposta_oral": "..."}]''';
+Opcional, só se ajudar a preparar a arguição: "pergunta" (o que podem
+perguntar) e "resposta_oral".
+Responda SOMENTE com JSON: [{"trecho": "...", "ponto": "...",
+"motivo": "...", "sugestao": "...", "fonte": "F1", "citacao": "...",
+"pergunta": "...", "resposta_oral": "..."}]''';
 
   /// Texto visível da seção (o mesmo que o editor mostra), sem as tags.
   String _textoHtml(String html) => html

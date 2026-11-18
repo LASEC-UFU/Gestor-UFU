@@ -49,10 +49,11 @@ class PreferencesBackupService {
     final bytes =
         file.bytes ??
         (file.path == null ? null : await File(file.path!).readAsBytes());
-    if (bytes == null)
+    if (bytes == null) {
       throw const FormatException(
         'Não foi possível ler o arquivo selecionado.',
       );
+    }
 
     final decoded = json.decode(utf8.decode(bytes));
     if (decoded is! Map<String, dynamic> ||

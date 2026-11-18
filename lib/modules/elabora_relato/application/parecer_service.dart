@@ -105,6 +105,7 @@ class ParecerService extends ChangeNotifier {
     'citacao_literal',
     'explicacao_simples',
     'importancia',
+    'sugestao',
     'pergunta_arguicao',
     'resposta_oral',
     'contra_argumento',

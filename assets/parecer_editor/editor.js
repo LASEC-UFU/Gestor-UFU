@@ -305,26 +305,90 @@
     if (!a || !b) return null;
     const r = document.createRange(); r.setStart(a, ao); r.setEnd(b, bo); return r;
   }
-  function pintar(c) {
-    if (!editor || !c) return false;
+  /** Range do trecho de um comentário (relocaliza pelo contexto se o texto
+   *  mudou de lugar); null se o trecho não existe mais. */
+  function localizar(c) {
+    if (!editor || !c) return null;
     const root = editor.ui.getEditableElement(), all = textoEditor(), selected = String(c.selecionado || '');
-    if (!selected) return false;
+    if (!selected) return null;
+    const antes = c.localizado;
+    const falhou = () => {
+      c.localizado = false;
+      if (antes !== false) enviar({ tipo: 'statusComentario', comentario: c });
+      return null;
+    };
     let at = Number(c.posicao);
     if (all.slice(at, at + selected.length) !== selected) {
       const prev = String(c.anterior || '').slice(-30), next = String(c.posterior || '').slice(0, 30);
       const hits = []; let from = 0, i;
       while ((i = all.indexOf(selected, from)) >= 0) { hits.push(i); from = i + Math.max(1, selected.length); }
-      if (!hits.length) { c.localizado = false; enviar({tipo:'statusComentario', comentario:c}); return false; }
+      if (!hits.length) return falhou();
       const score = (x) => (all.slice(Math.max(0,x-prev.length),x) === prev ? 2 : 0) + (all.slice(x+selected.length,x+selected.length+next.length) === next ? 2 : 0);
       at = hits.sort((x,y) => score(y) - score(x) || Math.abs(x - Number(c.posicao || 0)) - Math.abs(y - Number(c.posicao || 0)))[0];
     }
     const r = rangeTexto(root, at, selected.length);
-    if (!r) { c.localizado = false; enviar({tipo:'statusComentario', comentario:c}); return false; }
-    c.localizado = true;
+    if (!r) return falhou();
     c.posicao = at;
-    if (window.CSS && CSS.highlights && window.Highlight) { highlightRanges.push(r); CSS.highlights.set('parecer-comentarios', new Highlight(...highlightRanges)); }
-    return true;
+    c.localizado = true;
+    if (antes === false) enviar({ tipo: 'statusComentario', comentario: c });
+    return r;
   }
+
+  function pintar(c) {
+    const r = localizar(c);
+    if (r) highlightRanges.push(r);
+    return !!r;
+  }
+
+  /** Repinta todas as marcações e o destaque do comentário selecionado. */
+  function repintar() {
+    highlightRanges = [];
+    for (const c of comentarios) pintar(c);
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      if (highlightRanges.length) CSS.highlights.set('parecer-comentarios', new Highlight(...highlightRanges));
+      else CSS.highlights.delete('parecer-comentarios');
+    }
+    return pintarAtivo();
+  }
+
+  /** Destaque do comentário selecionado: cor própria + sublinhado +
+   *  contorno e uma barra na margem (não só a cor). */
+  function pintarAtivo() {
+    const folha = document.getElementById('folha');
+    for (const el of folha.querySelectorAll('.gestor-ativo-caixa, .gestor-ativo-barra')) el.remove();
+    if (window.CSS && CSS.highlights) CSS.highlights.delete('parecer-ativo');
+    if (comentarioAtivo == null) return null;
+    const c = comentarios.find((x) => String(x.id) === String(comentarioAtivo));
+    const r = localizar(c);
+    if (!r) return null;
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      const h = new Highlight(r);
+      h.priority = 1;
+      CSS.highlights.set('parecer-ativo', h);
+    }
+    const base = folha.getBoundingClientRect();
+    const rects = [...r.getClientRects()].filter((q) => q.width > 0.5 && q.height > 0.5);
+    for (const q of rects) {
+      const d = document.createElement('div');
+      d.className = 'gestor-ativo-caixa';
+      d.style.left = (q.left - base.left - 1) + 'px';
+      d.style.top = (q.top - base.top - 1) + 'px';
+      d.style.width = (q.width + 2) + 'px';
+      d.style.height = (q.height + 2) + 'px';
+      folha.appendChild(d);
+    }
+    if (rects.length) {
+      const topo = Math.min(...rects.map((q) => q.top)) - base.top;
+      const fim = Math.max(...rects.map((q) => q.bottom)) - base.top;
+      const barra = document.createElement('div');
+      barra.className = 'gestor-ativo-barra';
+      barra.style.top = topo + 'px';
+      barra.style.height = (fim - topo) + 'px';
+      folha.appendChild(barra);
+    }
+    return r;
+  }
+  window.addEventListener('resize', () => pintarAtivo());
 
 
   // Seleção atual (ou cursor) com o contexto em volta, para o app.
@@ -485,18 +549,18 @@
         e.preventDefault();
         setTimeout(() => { reportarSelecao(); abrirMenu(e.clientX, e.clientY); }, 0);
       });
-      for (const c of comentarios) pintar(c);
+      repintar();
       editable.addEventListener('click', () => {
         const s = window.getSelection(); if (!s || !s.isCollapsed) return;
         const pos = offsetSelecao(editable, s.anchorNode, s.anchorOffset);
         const c = comentarios.find(x => x.localizado !== false && pos >= Number(x.posicao) && pos <= Number(x.posicao) + String(x.selecionado || '').length);
-        if (c) { comentarioAtivo = c.id; enviar({tipo:'comentarioClic', id:c.id}); }
+        if (c) enviar({ tipo: 'comentarioClic', id: c.id });
       });
 
       let timer = null;
       editor.model.document.on('change:data', () => {
         clearTimeout(timer);
-        timer = setTimeout(() => { enviar({ tipo: 'mudou', html: editor.getData() }); highlightRanges = []; for (const c of comentarios) pintar(c); }, 400);
+        timer = setTimeout(() => { enviar({ tipo: 'mudou', html: editor.getData() }); repintar(); }, 400);
       });
       // Sai do modo código-fonte: garante que o app receba o HTML editado.
       editor.plugins.get('SourceEditing').on('change:isSourceEditingMode', (_, __, ativo) => {
@@ -523,9 +587,23 @@
 
     definirLinks(mapa) { linksSei = mapa || {}; },
 
-    definirComentarios(lista) { comentarios = Array.isArray(lista) ? lista : []; highlightRanges = []; if (window.CSS && CSS.highlights) CSS.highlights.delete('parecer-comentarios'); for (const c of comentarios) pintar(c); },
-    ativar(id) { comentarioAtivo = id; const c = comentarios.find(x => String(x.id) === String(id)); return pintar(c); },
-    navegar(c) { comentarioAtivo = c.id; const ok = pintar(c); if (ok) { const root = editor.ui.getEditableElement(); root.scrollIntoView({block:'nearest'}); } return ok; },
+    definirComentarios(lista) { comentarios = Array.isArray(lista) ? lista : []; repintar(); return true; },
+
+    /// Seleciona o comentário [id]: destaca o trecho e, com [rolar], leva a
+    /// folha até ele. Devolve {ok:false} se o trecho não existe mais.
+    selecionarComentario(id, rolar) {
+      comentarioAtivo = id;
+      const r = repintar();
+      if (!r) return { ok: false };
+      if (rolar !== false) {
+        const area = document.getElementById('area');
+        const q = r.getBoundingClientRect(), a = area.getBoundingClientRect();
+        area.scrollTo({ top: area.scrollTop + q.top - a.top - area.clientHeight * 0.3, behavior: 'smooth' });
+      }
+      return { ok: true };
+    },
+
+    limparSelecaoComentario() { comentarioAtivo = null; pintarAtivo(); return true; },
 
     /// Reserva a última seleção (ou cursor) para uma consulta: guarda um
     /// marcador vivo e devolve o texto reservado. O relato não é alterado.

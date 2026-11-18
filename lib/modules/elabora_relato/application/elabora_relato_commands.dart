@@ -407,7 +407,9 @@ List<ModuleCommand> _comandosDoProcesso(
         'Cria um comentário ancorado num trecho do parecer, sem alterar o '
         'texto nem o que vai ao SEI. {secao (relatorio, fundamentacao, '
         'conclusao), trecho (cópia literal de uma frase da seção, sem tags, '
-        'até ~150 caracteres), texto (a anotação)} e, para DEFESA DO VOTO '
+        'até ~150 caracteres), texto (o ponto que precisa de atenção, em '
+        'frase completa)}, importancia (por que merece revisão) e sugestao '
+        '(o que fazer para melhorar), sem rótulos soltos; para DEFESA DO VOTO '
         '(categoria "defesa"): referencia (norma/documento e artigo/página), '
         'citacao_literal (copiada da fonte), explicacao_simples, importancia, '
         'pergunta_arguicao (o que um conselheiro pode perguntar ou objetar), '
@@ -434,6 +436,7 @@ List<ModuleCommand> _comandosDoProcesso(
         'citacao_literal': {'type': 'string'},
         'explicacao_simples': {'type': 'string'},
         'importancia': {'type': 'string'},
+        'sugestao': {'type': 'string'},
         'pergunta_arguicao': {'type': 'string'},
         'resposta_oral': {'type': 'string'},
         'contra_argumento': {'type': 'string'},

@@ -183,14 +183,16 @@ class _ConsultaIaDialogState extends State<ConsultaIaDialog> {
     if (r == null) return;
     final e = r.evidencias.firstOrNull;
     await widget.salvarComentario({
-      'texto': '${r.avaliacao.rotulo}: ${r.resposta}',
+      // O ponto é a resposta; a avaliação vira etiqueta (não substitui o
+      // texto).
+      'texto': r.resposta,
+      'avaliacao': r.avaliacao.rotulo,
       'categoria': 'consulta_ia',
       'pergunta': _ultimaPergunta,
       'referencia': r.evidencias.isEmpty
           ? 'Fundamento não localizado nas fontes'
           : r.evidencias.map((x) => x.fonte.referencia).toSet().join('; '),
       'citacao_literal': e != null && e.citacaoConfirmada ? e.citacao : '',
-      'explicacao_simples': r.resposta,
       'status': 'revisar',
     });
     if (mounted) setState(() => _comentado = true);

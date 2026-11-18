@@ -59,7 +59,7 @@ ${_anexo1()}
   correção do código.
 - Na interface, ao criar processo novo, aguarde o login e a unidade no SEI; só
   prossiga depois do clique do usuário em **Criar processo agora**.
-- Log completo do envio: Documentos\GestorUFU Agente\logs\progressao_sei.log.
+- Log completo do envio: DocumentosGestorUFU Agentelogsprogressao_sei.log.
 
 ## Montagem no SEI em etapas (aba Resumo, cartão "Montar processo no SEI")
 1. Processo no SEI ("Criar processo" ou "Abrir processo"/"Usar processo

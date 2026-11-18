@@ -1,20 +1,31 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:gestor_ufu/modules/integracoes_pessoais/integration_service.dart';
 
-class IntegracoesPessoaisPage extends StatefulWidget {
-  const IntegracoesPessoaisPage({super.key});
+import 'package:gestor_ufu/modules/agenda_email/application/integration_service.dart';
+import 'package:gestor_ufu/modules/agenda_email/application/preferencias_agenda.dart';
+import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
+
+/// Tela do módulo Agendas e E-mails: contas conectadas, agendas (eventos,
+/// classificação Pessoal/Profissional) e e-mails (metadados, leitura sob
+/// pedido e estado lido). Usa o mesmo serviço dos comandos do agente.
+class AgendaEmailPage extends StatefulWidget {
+  const AgendaEmailPage({
+    required this.api,
+    required this.preferencias,
+    super.key,
+  });
+
+  final IntegrationService api;
+  final PreferenciasAgenda preferencias;
+
   @override
-  State<IntegracoesPessoaisPage> createState() =>
-      _IntegracoesPessoaisPageState();
+  State<AgendaEmailPage> createState() => _AgendaEmailPageState();
 }
 
-class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
+class _AgendaEmailPageState extends State<AgendaEmailPage>
     with SingleTickerProviderStateMixin {
-  final _api = IntegrationService();
+  IntegrationService get _api => widget.api;
   final _search = TextEditingController();
   late final _tabs = TabController(length: 2, vsync: this);
   final _connected = <String, bool>{};
@@ -42,17 +53,10 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
 
   String _key(Map c) => '${c['provider_id']}:${c['id']}';
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    _defaultPersonal = prefs.getString('calendar.default.personal') ?? '';
-    _defaultProfessional =
-        prefs.getString('calendar.default.professional') ?? '';
-    final raw = prefs.getString('calendar.classification');
-    if (raw != null)
-      try {
-        _classification.addAll(
-          Map<String, String>.from(jsonDecode(raw) as Map),
-        );
-      } catch (_) {}
+    final prefs = widget.preferencias;
+    _defaultPersonal = await prefs.calendarioPessoal();
+    _defaultProfessional = await prefs.calendarioProfissional();
+    _classification.addAll(await prefs.classificacao());
     await _refreshConnections();
   }
 
@@ -106,21 +110,23 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
   });
   Future<void> _loadCalendars() async {
     if (!_connected.values.any((v) => v)) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _calendars.clear();
           _events.clear();
         });
+      }
       return;
     }
     try {
       final rows = await _api.calendars();
-      if (mounted)
+      if (mounted) {
         setState(() {
           _calendars
             ..clear()
             ..addAll(rows);
         });
+      }
       await _loadEvents();
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -141,20 +147,22 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
       DateTime(now.year, now.month, now.day + 14),
       selected,
     );
-    if (mounted)
+    if (mounted) {
       setState(() {
         _events
           ..clear()
           ..addAll(list)
           ..sort((a, b) => _eventStart(a).compareTo(_eventStart(b)));
       });
+    }
   }
 
   Future<void> _saveCalendarPrefs() async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString('calendar.default.personal', _defaultPersonal);
-    await p.setString('calendar.default.professional', _defaultProfessional);
-    await p.setString('calendar.classification', jsonEncode(_classification));
+    await widget.preferencias.salvar(
+      pessoal: _defaultPersonal,
+      profissional: _defaultProfessional,
+      classificacao: _classification,
+    );
     await _loadEvents();
     if (mounted) setState(() {});
   }
@@ -167,7 +175,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
       unreadOnly: _unread,
       page: page,
     );
-    if (mounted)
+    if (mounted) {
       setState(() {
         if (!append) _messages.clear();
         final ids = {
@@ -183,6 +191,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
               '${b['receivedDateTime']}'.compareTo('${a['receivedDateTime']}'),
         );
       });
+    }
   }
 
   DateTime _eventStart(Map e) {
@@ -264,8 +273,9 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
     if (!await _confirm(
       'Excluir evento',
       '${_title(event)}\n${_startText(event)}\n${event['account']} • ${event['provider']} • ${event['calendar']}',
-    ))
+    )) {
       return;
+    }
     await _run(() async {
       await _api.saveEvent(event, action: 'delete');
       await _loadEvents();
@@ -360,7 +370,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
                       context: ctx,
                       initialTime: TimeOfDay.fromDateTime(start),
                     );
-                    if (t != null)
+                    if (t != null) {
                       setLocal(
                         () => start = DateTime(
                           d.year,
@@ -370,6 +380,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
                           t.minute,
                         ),
                       );
+                    }
                   },
                 ),
                 ListTile(
@@ -393,7 +404,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
                       context: ctx,
                       initialTime: TimeOfDay.fromDateTime(end),
                     );
-                    if (t != null)
+                    if (t != null) {
                       setLocal(
                         () => end = DateTime(
                           d.year,
@@ -403,6 +414,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
                           t.minute,
                         ),
                       );
+                    }
                   },
                 ),
                 CheckboxListTile(
@@ -546,18 +558,26 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
     ),
   );
   @override
-  Widget build(BuildContext context) => Column(
+  Widget build(BuildContext context) => ModuleScaffold(
+    moduleId: 'agenda-email',
+    subtitle: 'Agendas e e-mails das contas Google e Microsoft',
+    actions: [
+      IconButton(
+        tooltip: 'Atualizar',
+        onPressed: _busy ? null : () => _run(_refreshConnections),
+        icon: const Icon(Icons.refresh),
+      ),
+    ],
+    body: _corpo(),
+  );
+
+  Widget _corpo() => Column(
     children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Agendas e E-mails',
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 4),
             const Text(
               'As mensagens e eventos permanecem nos provedores de origem. Senhas não são solicitadas. Permissões delegadas são exibidas pelo provedor durante OAuth.',
             ),
@@ -764,7 +784,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
             : ListView.builder(
                 itemCount: _messages.length + (_hasMoreMail ? 1 : 0),
                 itemBuilder: (ctx, i) {
-                  if (i == _messages.length)
+                  if (i == _messages.length) {
                     return Center(
                       child: TextButton.icon(
                         onPressed: _busy
@@ -774,6 +794,7 @@ class _IntegracoesPessoaisPageState extends State<IntegracoesPessoaisPage>
                         label: const Text('Carregar mais mensagens'),
                       ),
                     );
+                  }
                   final m = _messages[i];
                   return ListTile(
                     leading: Icon(
