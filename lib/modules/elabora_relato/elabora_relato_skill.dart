@@ -31,6 +31,17 @@ Os demais comandos agem no processo aberto (sem nenhum aberto, no mais
 recente) e aceitam `processo` (id) para escolher outro. Confirme com o
 usuário em qual processo trabalhar quando houver mais de um.
 
+## Documentos do processo (leitura e marcação)
+Aba "Documentos do processo": o relator anexa arquivos (PDF com texto,
+DOCX, TXT/MD, HTML) só para ler; marca trechos com cores, pergunta à IA o
+que dizem e guarda comentários. O texto não é editado.
+- `parecer.anexos.listar`; `parecer.anexos.ler` {anexo, inicio?,
+  quantidade?} (parágrafos numerados com página);
+  `parecer.anexos.marcar` {anexo, paragrafo, trecho literal,
+  comentario?, cor?}.
+Ao explicar um trecho, use só o documento e as fontes da base; cite o
+documento e a página/parágrafo.
+
 ## Etapa 1 do relatório: árvore do processo
 1. `relato.abrirSei` {url?}: abre o Edge no SEI; o usuário entra e abre o
    processo. Espere ele confirmar.

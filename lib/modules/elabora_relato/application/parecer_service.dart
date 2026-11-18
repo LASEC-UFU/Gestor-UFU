@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/anexos_processo_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
@@ -28,8 +29,10 @@ class ParecerService extends ChangeNotifier {
     required this.arvore,
     this.ia,
     BaseDocumentosService? base,
+    AnexosProcessoService? anexos,
   }) : _store = store ?? KeyValueStore(),
        base = base ?? BaseDocumentosService(store: store),
+       anexos = anexos ?? AnexosProcessoService(store: store),
        _sei = SeiParecerAutomation(arvore.automation);
 
   static const draftKey = 'parecer_relato_rascunho';
@@ -57,6 +60,9 @@ class ParecerService extends ChangeNotifier {
 
   /// Base de documentos de consulta (pasta com normas e anexos).
   final BaseDocumentosService base;
+
+  /// Documentos do processo anexados para leitura e marcação.
+  final AnexosProcessoService anexos;
   final SeiParecerAutomation _sei;
 
   Parecer _parecer = const Parecer();
@@ -174,6 +180,7 @@ class ParecerService extends ChangeNotifier {
     if (_carregado) await salvarAgora();
     await arvore.usarProcesso(id);
     await base.usarProcesso(id);
+    await anexos.usarProcesso(id);
     _processoId = id;
     _parecer = const Parecer();
     _carregado = false;

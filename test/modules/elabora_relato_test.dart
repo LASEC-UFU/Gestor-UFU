@@ -159,10 +159,18 @@ void main() {
     }
     expect(find.text('Estágio Mecânica'), findsOneWidget);
     expect(find.text('Inserir no SEI'), findsOneWidget);
-    expect(find.byType(Tab), findsNWidgets(3));
+    expect(find.byType(Tab), findsNWidgets(4));
     expect(find.text('II. FUNDAMENTAÇÃO E ANÁLISE'), findsOneWidget);
     expect(find.text('III. CONCLUSÃO'), findsOneWidget);
     expect(find.text('1 · Extrair árvore'), findsOneWidget);
     expect(find.text('Extrair árvore'), findsOneWidget);
+
+    // Aba dos documentos do processo (leitura e marcação).
+    await tester.tap(find.text('Documentos do processo'));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Anexar documento'), findsWidgets);
+    expect(find.textContaining('Marcações e comentários'), findsOneWidget);
   });
 }

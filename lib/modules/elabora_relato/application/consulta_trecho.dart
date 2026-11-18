@@ -283,4 +283,146 @@ Responda SOMENTE com JSON:
       ],
     );
   }
+
+  // ------------------------------------------- documentos anexados (leitura)
+
+  static const sistemaExplicacao = '''
+Você ajuda o relator de um conselho da Universidade Federal de Uberlândia a
+ENTENDER documentos de um processo (ofícios, pareceres, PPCs, atas,
+normas). Responda em português claro, para quem não é especialista.
+Regras obrigatórias:
+- Explique o que o TRECHO diz, usando o contexto do mesmo documento.
+- Não invente fatos, datas, números nem normas. Se o trecho não permitir
+  concluir algo, diga isso.
+- Normas e documentos externos só podem ser citados se estiverem nas
+  fontes numeradas [F1]… fornecidas; "citacao" deve ser copiada
+  literalmente da fonte.
+- "comentario" é uma anotação objetiva para o relator guardar junto ao
+  trecho: o que o trecho diz, por que importa para o parecer e o que
+  conferir (até 120 palavras).
+Responda SOMENTE com JSON:
+{"resposta": "explicação em linguagem simples (responde à pergunta)",
+ "pontos_atencao": ["..."],
+ "termos": [{"termo": "...", "significado": "..."}],
+ "evidencias": [{"fonte": "F1", "citacao": "...",
+   "relacao": "apoia|contradiz|contexto", "comentario": "..."}],
+ "comentario": "..."}''';
+
+  static String promptExplicacao({
+    required String documento,
+    required String local,
+    required String trecho,
+    required String antes,
+    required String depois,
+    required String pergunta,
+    required List<FonteConsulta> fontes,
+  }) =>
+      'DOCUMENTO DO PROCESSO: $documento ($local)\n'
+      'CONTEXTO ANTERIOR:\n${_fim(antes)}\n\n'
+      'TRECHO MARCADO:\n«$trecho»\n\n'
+      'CONTEXTO POSTERIOR:\n${_ini(depois)}\n\n'
+      'PERGUNTA DO RELATOR: ${pergunta.trim().isEmpty ? 'Explique em linguagem simples o que este trecho diz e o que ele implica para o parecer.' : pergunta.trim()}\n\n'
+      'FONTES (normas e documentos da base):\n${fontesTexto(fontes)}';
+
+  static ExplicacaoTrecho lerExplicacao(
+    String raw,
+    List<FonteConsulta> fontes,
+  ) {
+    final json = _json(raw);
+    if (json == null) {
+      return ExplicacaoTrecho(resposta: raw.trim(), estruturada: false);
+    }
+    final verificada = lerPergunta(
+      jsonEncode({'evidencias': json['evidencias'] ?? const []}),
+      fontes,
+    );
+    return ExplicacaoTrecho(
+      resposta: '${json['resposta'] ?? ''}'.trim(),
+      pontosAtencao: [
+        for (final x in (json['pontos_atencao'] as List? ?? const []))
+          if ('$x'.trim().isNotEmpty) '$x'.trim(),
+      ],
+      termos: [
+        for (final t in (json['termos'] as List? ?? const []))
+          if (t is Map && '${t['termo'] ?? ''}'.trim().isNotEmpty)
+            (
+              termo: '${t['termo']}'.trim(),
+              significado: '${t['significado'] ?? ''}'.trim(),
+            ),
+      ],
+      evidencias: verificada.evidencias,
+      descartadas: verificada.descartadas,
+      comentario: '${json['comentario'] ?? ''}'.trim(),
+    );
+  }
+
+  static const sistemaComentario = '''
+Você ajuda o relator de um conselho da Universidade Federal de Uberlândia
+a escrever anotações sobre trechos de documentos de um processo.
+Reescreva (ou complete) a anotação do relator para que fique clara,
+objetiva e útil depois: o que o trecho diz, por que importa para o parecer
+e o que conferir ou perguntar. Mantenha a opinião e as dúvidas do relator.
+Não invente fatos, números nem normas: use só o trecho, o contexto, a
+explicação dada e as fontes. Até 120 palavras, em português.
+Responda SOMENTE com o texto da anotação (sem aspas, sem títulos).''';
+
+  static String promptComentario({
+    required String documento,
+    required String local,
+    required String trecho,
+    required String antes,
+    required String depois,
+    required String anotacao,
+    String explicacao = '',
+    List<FonteConsulta> fontes = const [],
+  }) =>
+      'DOCUMENTO: $documento ($local)\n'
+      'CONTEXTO: …${_fim(antes)}\n«$trecho»\n${_ini(depois)}…\n\n'
+      '${explicacao.trim().isEmpty ? '' : 'EXPLICAÇÃO JÁ DADA:\n${explicacao.trim()}\n\n'}'
+      'ANOTAÇÃO DO RELATOR (rascunho): '
+      '${anotacao.trim().isEmpty ? '(vazia: escreva uma anotação a partir do trecho)' : anotacao.trim()}\n\n'
+      '${fontes.isEmpty ? '' : 'FONTES:\n${fontesTexto(fontes)}'}';
+
+  /// Limpa a resposta de texto puro (tira aspas e cercas de código).
+  static String lerComentario(String raw) => raw
+      .trim()
+      .replaceAll(RegExp(r'^```\w*\s*|\s*```$'), '')
+      .replaceAll(RegExp(r'^["“«]+|["”»]+$'), '')
+      .trim();
+}
+
+/// Explicação da IA sobre um trecho de documento anexado.
+class ExplicacaoTrecho {
+  const ExplicacaoTrecho({
+    required this.resposta,
+    this.pontosAtencao = const [],
+    this.termos = const [],
+    this.evidencias = const [],
+    this.descartadas = 0,
+    this.comentario = '',
+    this.estruturada = true,
+  });
+
+  final String resposta;
+  final List<String> pontosAtencao;
+  final List<({String termo, String significado})> termos;
+  final List<Evidencia> evidencias;
+  final int descartadas;
+
+  /// Anotação sugerida para guardar com a marcação.
+  final String comentario;
+
+  /// A resposta veio no JSON pedido (senão, texto livre sem conferência).
+  final bool estruturada;
+
+  /// Texto para guardar junto da marcação.
+  String get resumo => [
+    resposta,
+    if (pontosAtencao.isNotEmpty)
+      'Pontos de atenção:\n${pontosAtencao.map((x) => '• $x').join('\n')}',
+    if (termos.isNotEmpty)
+      'Termos:\n${termos.map((t) => '• ${t.termo}: ${t.significado}').join('\n')}',
+    if (evidencias.isNotEmpty)
+      'Fontes: ${evidencias.map((e) => e.fonte.referencia).toSet().join('; ')}',
+  ].where((x) => x.trim().isNotEmpty).join('\n\n');
 }

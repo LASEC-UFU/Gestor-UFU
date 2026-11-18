@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/anexos_processo_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/elabora_relato_commands.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
@@ -40,6 +41,7 @@ class ElaboraRelatoModule extends GestorModule {
       arvore: _arvore,
       ia: services.contract<AiTextService>(),
       base: BaseDocumentosService(store: services.store),
+      anexos: AnexosProcessoService(store: services.store),
     );
     _processos = ProcessosParecerService(
       parecer: _parecer,

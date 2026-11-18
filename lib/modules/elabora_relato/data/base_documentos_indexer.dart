@@ -245,36 +245,9 @@ class BaseDocumentosIndexer {
     }
     final idBase = hash.isEmpty ? 'x' : hash.substring(0, 10);
     try {
-      List<ParagrafoFonte> paragrafos;
-      var paginas = 0;
-      final semTexto = <int>[];
-      if (ext == '.pdf') {
-        final pags = await AgentFiles.pdfPages(caminho);
-        paginas = pags.length;
-        for (var i = 0; i < pags.length; i++) {
-          if (pags[i].replaceAll(RegExp(r'\s'), '').length < 20) {
-            semTexto.add(i + 1);
-          }
-        }
-        paragrafos = await Isolate.run(
-          () => [
-            for (var i = 0; i < pags.length; i++)
-              ...paragrafosDeTexto(pags[i], pagina: i + 1),
-          ],
-        );
-      } else if (ext == '.docx') {
-        final bytes = await File(caminho).readAsBytes();
-        paragrafos = await Isolate.run(() => paragrafosDeDocx(bytes));
-      } else {
-        var texto = utf8.decode(
-          await File(caminho).readAsBytes(),
-          allowMalformed: true,
-        );
-        if (ext == '.html' || ext == '.htm') {
-          texto = _textoDeHtml(texto);
-        }
-        paragrafos = paragrafosDeTexto(texto);
-      }
+      final (:paragrafos, :paginas, :semTexto) = await extrairParagrafos(
+        caminho,
+      );
       final trechos = await Isolate.run(
         () => segmentar(idBase, rel, paragrafos),
       );
@@ -318,6 +291,50 @@ class BaseDocumentosIndexer {
       final msg = e is StateError ? e.message : '$e';
       return falha(StatusDocumento.erro, msg);
     }
+  }
+
+  /// Parágrafos de um arquivo (PDF com camada de texto, DOCX, TXT/MD,
+  /// HTML), com a página (PDF) e as páginas sem texto extraível. Lança
+  /// [StateError] para formato não suportado ou falha de leitura.
+  static Future<
+    ({List<ParagrafoFonte> paragrafos, int paginas, List<int> semTexto})
+  >
+  extrairParagrafos(String caminho) async {
+    final ext = p.extension(caminho).toLowerCase();
+    if (!extensoesSuportadas.contains(ext)) {
+      throw StateError(
+        'Formato não suportado ($ext). Use PDF, DOCX, TXT, MD ou HTML.',
+      );
+    }
+    if (ext == '.pdf') {
+      final pags = await AgentFiles.pdfPages(caminho);
+      final semTexto = [
+        for (var i = 0; i < pags.length; i++)
+          if (pags[i].replaceAll(RegExp(r'\s'), '').length < 20) i + 1,
+      ];
+      final paragrafos = await Isolate.run(
+        () => [
+          for (var i = 0; i < pags.length; i++)
+            ...paragrafosDeTexto(pags[i], pagina: i + 1),
+        ],
+      );
+      return (paragrafos: paragrafos, paginas: pags.length, semTexto: semTexto);
+    }
+    if (ext == '.docx') {
+      final bytes = await File(caminho).readAsBytes();
+      final paragrafos = await Isolate.run(() => paragrafosDeDocx(bytes));
+      return (paragrafos: paragrafos, paginas: 0, semTexto: const <int>[]);
+    }
+    var texto = utf8.decode(
+      await File(caminho).readAsBytes(),
+      allowMalformed: true,
+    );
+    if (ext == '.html' || ext == '.htm') texto = _textoDeHtml(texto);
+    return (
+      paragrafos: paragrafosDeTexto(texto),
+      paginas: 0,
+      semTexto: const <int>[],
+    );
   }
 
   static String _textoDeHtml(String html) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:gestor_ufu/modules/elabora_relato/application/anexos_processo_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
@@ -40,6 +41,7 @@ class ProcessosParecerService extends ChangeNotifier {
     ParecerService.draftKey,
     SeiArvoreService.inventoryKey,
     BaseDocumentosService.pastaKey,
+    AnexosProcessoService.anexosKey,
   ];
 
   final ParecerService parecer;

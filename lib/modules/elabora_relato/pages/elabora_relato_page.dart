@@ -6,6 +6,7 @@ import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.da
 import 'package:gestor_ufu/modules/elabora_relato/application/processos_parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/processo_parecer.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/anexos_view.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/parecer_secao_view.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
@@ -413,6 +414,14 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
       ParecerSecao.conclusao.titulo,
       Icons.task_alt_rounded,
       (_) => ParecerSecaoView(secao: ParecerSecao.conclusao, service: parecer),
+    ),
+    _Funcionalidade(
+      'Documentos do processo',
+      Icons.menu_book_outlined,
+      (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(28, 14, 28, 14),
+        child: AnexosView(service: parecer),
+      ),
     ),
   ];
 

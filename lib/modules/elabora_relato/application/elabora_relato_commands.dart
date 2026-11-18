@@ -1,7 +1,9 @@
+import 'package:gestor_ufu/modules/elabora_relato/application/anexos_processo_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/processos_parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/domain/anexo_processo.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/gestor_paths.dart';
@@ -389,6 +391,134 @@ List<ModuleCommand> _comandosDoProcesso(
       return CommandResult.ok(
         message: '${service.documentos.length} documento(s) inseridos.',
       );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.anexos.listar',
+    title: 'Listar os documentos anexados ao processo',
+    description:
+        'Documentos do processo aberto anexados para leitura (id, nome, '
+        'páginas, parágrafos, marcações com comentário).',
+    inputSchema: {'type': 'object', 'properties': {}},
+    run: (input, origin) async {
+      await parecer.anexos.carregar();
+      return CommandResult.ok(
+        message: '${parecer.anexos.anexos.length} documento(s) anexado(s).',
+        data: {
+          'anexos': [
+            for (final a in parecer.anexos.anexos)
+              {
+                'id': a.id,
+                'nome': a.nome,
+                'paginas': a.paginas,
+                'paragrafos': a.paragrafos,
+                if (a.aviso.isNotEmpty) 'aviso': a.aviso,
+                'marcacoes': [
+                  for (final m in a.marcacoes)
+                    {
+                      'paragrafo': m.paragrafo,
+                      'texto': m.texto,
+                      if (m.comentario.isNotEmpty) 'comentario': m.comentario,
+                    },
+                ],
+              },
+          ],
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.anexos.ler',
+    title: 'Ler um documento anexado',
+    description:
+        'Texto de um documento anexado {anexo (id), inicio?, quantidade? '
+        '(padrão 60)} em parágrafos numerados (índice e página). Use o '
+        'índice em parecer.anexos.marcar.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'anexo': {'type': 'string'},
+        'inicio': {'type': 'integer'},
+        'quantidade': {'type': 'integer'},
+      },
+      'required': ['anexo'],
+    },
+    run: (input, origin) async {
+      await parecer.anexos.carregar();
+      final a = parecer.anexos.exigir(input.requireString('anexo'));
+      final pars = await parecer.anexos.paragrafos(a);
+      final inicio = ((input['inicio'] as num?)?.toInt() ?? 0).clamp(
+        0,
+        pars.length,
+      );
+      final qtd = ((input['quantidade'] as num?)?.toInt() ?? 60).clamp(1, 200);
+      final fim = (inicio + qtd).clamp(0, pars.length);
+      return CommandResult.ok(
+        message:
+            '${a.nome}: parágrafos $inicio a ${fim - 1} de ${pars.length}.',
+        data: {
+          'paragrafos': [
+            for (var i = inicio; i < fim; i++)
+              {
+                'indice': i,
+                if (pars[i].pagina > 0) 'pagina': pars[i].pagina,
+                'texto': pars[i].texto,
+              },
+          ],
+          if (fim < pars.length) 'continua': 'Use inicio=$fim.',
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.anexos.marcar',
+    title: 'Marcar um trecho de documento anexado',
+    description:
+        'Marca {anexo, paragrafo (índice), trecho (texto literal do '
+        'parágrafo), comentario?, cor? (amarelo, verde, azul, rosa, '
+        'laranja)}. O documento não é alterado.',
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'anexo': {'type': 'string'},
+        'paragrafo': {'type': 'integer'},
+        'trecho': {'type': 'string'},
+        'comentario': {'type': 'string'},
+        'cor': {'type': 'string'},
+      },
+      'required': ['anexo', 'paragrafo', 'trecho'],
+    },
+    run: (input, origin) async {
+      await parecer.anexos.carregar();
+      final a = parecer.anexos.exigir(input.requireString('anexo'));
+      final pars = await parecer.anexos.paragrafos(a);
+      final i = (input['paragrafo'] as num?)?.toInt() ?? -1;
+      if (i < 0 || i >= pars.length) {
+        throw CommandException(
+          'paragrafo_invalido',
+          'Parágrafo $i não existe (0 a ${pars.length - 1}).',
+        );
+      }
+      final trecho = input.requireString('trecho');
+      final at = pars[i].texto.indexOf(trecho);
+      if (at < 0) {
+        throw const CommandException(
+          'trecho_nao_encontrado',
+          'O trecho não aparece literalmente nesse parágrafo.',
+        );
+      }
+      final cor = input.optionalString('cor') ?? 'amarelo';
+      final m = AnexosProcessoService.novaMarcacao(
+        paragrafo: i,
+        textoParagrafo: pars[i].texto,
+        inicio: at,
+        fim: at + trecho.length,
+        cor: coresMarcacao.containsKey(cor) ? cor : 'amarelo',
+        comentario: input.optionalString('comentario') ?? '',
+      );
+      await parecer.anexos.salvarMarcacao(a.id, m);
+      return CommandResult.ok(message: 'Trecho marcado em "${a.nome}".');
     },
   ),
   ModuleCommand(
