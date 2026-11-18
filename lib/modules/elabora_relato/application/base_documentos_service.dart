@@ -52,10 +52,34 @@ class BaseDocumentosService extends ChangeNotifier {
   bool get preparando => _preparando;
   bool get configurada => _pasta.isNotEmpty;
 
+  String _processoId = '';
+
+  String get _pastaKey =>
+      _processoId.isEmpty ? pastaKey : '$pastaKey.$_processoId';
+
+  /// Passa à base de documentos do processo [id] (cada processo tem a sua
+  /// pasta; vários processos podem apontar para a mesma).
+  Future<void> usarProcesso(String id) async {
+    try {
+      await _emAndamento;
+    } catch (_) {}
+    _timerVigia?.cancel();
+    await _vigia?.cancel();
+    _vigia = null;
+    _processoId = id;
+    _pasta = '';
+    _base = null;
+    ultimoResumo = null;
+    ultimoErro = null;
+    atualizadaAutomaticamente = null;
+    _carregado = false;
+    await carregar();
+  }
+
   Future<void> carregar() async {
     if (_carregado) return;
     _carregado = true;
-    _pasta = (await _store.readString(pastaKey))?.trim() ?? '';
+    _pasta = (await _store.readString(_pastaKey))?.trim() ?? '';
     if (_pasta.isNotEmpty) {
       _base = await BaseDocumentosIndexer.carregar(_pasta);
     }
@@ -67,7 +91,7 @@ class BaseDocumentosService extends ChangeNotifier {
   Future<ResumoAtualizacao?> definirPasta(String pasta) async {
     await carregar();
     _pasta = pasta.trim();
-    await _store.writeString(pastaKey, _pasta);
+    await _store.writeString(_pastaKey, _pasta);
     _base = await BaseDocumentosIndexer.carregar(_pasta);
     _vigiar();
     notifyListeners();

@@ -19,6 +19,18 @@ editor HTML igual ao do SEI (CKEditor 5 com os estilos do SEI):
 "Dados do parecer": assunto, ementa, vocativo, abertura, fecho e signatário.
 PARECER Nº, PROCESSO Nº e INTERESSADO(S) são preenchidos pelo SEI.
 
+## Processos
+A tela abre numa lista de processos (como a Progressão). Cada processo tem
+o seu rascunho do parecer, comentários, inventário da árvore e pasta da
+base de documentos.
+- `parecer.processos.listar`: processos (id, nome, número SEI, assunto…)
+  e qual está aberto.
+- `parecer.processos.abrir` {id}; `parecer.processos.criar` {nome,
+  numeroSei?, copiarDe?} (copiarDe = id de um processo a copiar).
+Os demais comandos agem no processo aberto (sem nenhum aberto, no mais
+recente) e aceitam `processo` (id) para escolher outro. Confirme com o
+usuário em qual processo trabalhar quando houver mais de um.
+
 ## Etapa 1 do relatório: árvore do processo
 1. `relato.abrirSei` {url?}: abre o Edge no SEI; o usuário entra e abre o
    processo. Espere ele confirmar.
@@ -74,9 +86,12 @@ em_andamento, sem_extracao, ia_indisponivel, documento_inexistente,
 falha_sei, tempo_esgotado.
 
 ## Banco
-`sei_tree_address_url` (endereço do SEI), `parecer_relato_inventario`
-(último inventário), `parecer_relato_rascunho` (rascunho),
-`parecer_relato_estilos_sei` (estilos capturados do editor do SEI) e
-`parecer_base_documentos_pasta` (pasta da base de documentos).
+Por processo (`<id>`): `parecer_processo.<id>` (nome, número SEI, datas),
+`parecer_relato_rascunho.<id>` (rascunho e comentários),
+`parecer_relato_inventario.<id>` (inventário da árvore) e
+`parecer_base_documentos_pasta.<id>` (pasta da base). Gerais:
+`sei_tree_address_url` (endereço do SEI) e `parecer_relato_estilos_sei`
+(estilos do editor do SEI). As chaves sem `.<id>` são do rascunho único
+anterior, migrado para o processo `migrado`.
 ''',
 );

@@ -35,6 +35,29 @@ class SeiArvoreService extends ChangeNotifier {
   /// Resumos com IA em andamento.
   bool get resumindo => _resumindo;
 
+  String _processoId = '';
+
+  String get _inventoryKey =>
+      _processoId.isEmpty ? inventoryKey : '$inventoryKey.$_processoId';
+
+  /// Troca o inventário pelo do processo [id] (o Edge do SEI continua
+  /// aberto). Não troca durante uma leitura ou resumo.
+  Future<void> usarProcesso(String id) async {
+    if (_extraindo || _resumindo) {
+      throw const CommandException(
+        'em_andamento',
+        'Aguarde a leitura da árvore ou os resumos terminarem antes de '
+            'trocar de processo.',
+      );
+    }
+    _processoId = id;
+    _documentos.clear();
+    _logs.clear();
+    _carregado = false;
+    await carregarInventario();
+    notifyListeners();
+  }
+
   final List<SeiDocumento> _documentos = [];
   final List<String> _logs = [];
   String _host = '';
@@ -158,7 +181,7 @@ class SeiArvoreService extends ChangeNotifier {
     if (_carregado) return;
     _carregado = true;
     if (_documentos.isNotEmpty) return;
-    final raw = await _store.readJson(inventoryKey);
+    final raw = await _store.readJson(_inventoryKey);
     if (raw is! List) return;
     _documentos.addAll([
       for (final item in raw.whereType<Map>())
@@ -167,8 +190,9 @@ class SeiArvoreService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _salvarInventario() =>
-      _store.writeJson(inventoryKey, [for (final d in _documentos) d.toJson()]);
+  Future<void> _salvarInventario() => _store.writeJson(_inventoryKey, [
+    for (final d in _documentos) d.toJson(),
+  ]);
 
   /// Corrige data/resumo de um documento (revisão manual ou do agente).
   Future<void> atualizarDocumento(

@@ -35,6 +35,22 @@ class ParecerService extends ChangeNotifier {
   static const draftKey = 'parecer_relato_rascunho';
   static const stylesKey = 'parecer_relato_estilos_sei';
 
+  /// Chave de um dado do processo [id] (`chave.id`); sem processo, a chave
+  /// antiga (um único parecer, antes da lista de processos).
+  static String chaveDoProcesso(String chave, String id) =>
+      id.isEmpty ? chave : '$chave.$id';
+
+  String _processoId = '';
+
+  /// Processo aberto ('' = nenhum: chaves antigas).
+  String get processoId => _processoId;
+
+  String get _draftKey => chaveDoProcesso(draftKey, _processoId);
+
+  /// Chamado depois de cada gravação do rascunho (data de atualização na
+  /// lista de processos).
+  void Function()? aoSalvar;
+
   final KeyValueStore _store;
   final SeiArvoreService arvore;
   final AiTextService? ia;
@@ -145,10 +161,32 @@ class ParecerService extends ChangeNotifier {
     );
   }
 
+  /// Passa a trabalhar no processo [id]: grava o rascunho atual, troca o
+  /// rascunho, o inventário da árvore e a base de documentos.
+  Future<void> usarProcesso(String id) async {
+    if (_inserindo) {
+      throw const CommandException(
+        'em_andamento',
+        'Aguarde a inserção no SEI terminar antes de trocar de processo.',
+      );
+    }
+    if (_carregado && _processoId == id) return;
+    if (_carregado) await salvarAgora();
+    await arvore.usarProcesso(id);
+    await base.usarProcesso(id);
+    _processoId = id;
+    _parecer = const Parecer();
+    _carregado = false;
+    await carregar();
+    for (final s in ParecerSecao.values) {
+      _substituicoes.add(s);
+    }
+  }
+
   Future<void> carregar() async {
     if (_carregado) return;
     _carregado = true;
-    final raw = await _store.readJson(draftKey);
+    final raw = await _store.readJson(_draftKey);
     if (raw is Map) _parecer = Parecer.fromJson(Map<String, dynamic>.from(raw));
     final estilos = await _store.readJson(stylesKey);
     if (estilos is Map) {
@@ -216,7 +254,8 @@ class ParecerService extends ChangeNotifier {
 
   Future<void> salvarAgora() async {
     _salvarTimer?.cancel();
-    await _store.writeJson(draftKey, _parecer.toJson());
+    await _store.writeJson(_draftKey, _parecer.toJson());
+    aoSalvar?.call();
   }
 
   /// Apaga o rascunho (mantém vocativo e fecho padrão).

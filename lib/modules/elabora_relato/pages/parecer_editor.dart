@@ -99,9 +99,16 @@ class _ParecerEditorState extends State<ParecerEditor>
   @override
   bool get wantKeepAlive => true;
 
+  /// Processo deste editor: mensagens que cheguem depois de trocar de
+  /// processo não podem gravar no outro.
+  late final String _processoId = widget.service.processoId;
+
+  bool get _mesmoProcesso => widget.service.processoId == _processoId;
+
   @override
   void initState() {
     super.initState();
+    _processoId;
     widget.service.arvore.addListener(_atualizarLinks);
     _iniciar();
   }
@@ -175,6 +182,7 @@ class _ParecerEditorState extends State<ParecerEditor>
       case 'pronto':
         if (mounted) setState(() => _pronto = true);
       case 'mudou':
+        if (!_mesmoProcesso) return;
         widget.service.definirSecaoDoEditor(
           widget.secao,
           '${msg['html'] ?? ''}',

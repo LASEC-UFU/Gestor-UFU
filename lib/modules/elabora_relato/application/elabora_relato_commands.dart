@@ -1,12 +1,128 @@
 import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/processos_parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/gestor_paths.dart';
 
-/// Comandos do módulo Parecer / Relato (tela, menu "/" e agente).
+/// Comandos do módulo Parecer / Relato (tela, menu "/" e agente). Os
+/// comandos de um processo agem no processo aberto; aceitam `processo` (id)
+/// para escolher outro e, sem nenhum aberto, abrem o mais recente.
 List<ModuleCommand> elaboraRelatoCommands(
+  SeiArvoreService service,
+  ParecerService parecer,
+  ProcessosParecerService processos,
+) => [
+  ..._comandosDeProcessos(processos),
+  for (final c in _comandosDoProcesso(service, parecer))
+    ModuleCommand(
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      approval: c.approval,
+      mutates: c.mutates,
+      inputSchema: {
+        ...c.inputSchema,
+        'properties': {
+          ...(c.inputSchema['properties'] as Map? ?? const {}),
+          'processo': {
+            'type': 'string',
+            'description': 'Id do processo (parecer.processos.listar).',
+          },
+        },
+      },
+      run: (input, origin) async {
+        await processos.garantirAtivo(input.optionalString('processo'));
+        return c.run(input, origin);
+      },
+    ),
+];
+
+List<ModuleCommand> _comandosDeProcessos(ProcessosParecerService processos) => [
+  ModuleCommand(
+    id: 'parecer.processos.listar',
+    title: 'Listar os processos de parecer',
+    description:
+        'Processos do módulo Parecer / Relato (id, nome, número SEI, '
+        'assunto, documentos na árvore, comentários pendentes) e qual está '
+        'aberto.',
+    inputSchema: {'type': 'object', 'properties': {}},
+    run: (input, origin) async {
+      await processos.carregar(forcar: true);
+      return CommandResult.ok(
+        message: '${processos.processos.length} processo(s).',
+        data: {
+          'aberto': processos.ativo?.id,
+          'processos': [
+            for (final p in processos.processos)
+              {
+                ...p.toJson(),
+                'assunto': processos.resumo(p.id).assunto,
+                'documentos': processos.resumo(p.id).documentos,
+                'pendentes': processos.resumo(p.id).pendentes,
+              },
+          ],
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.processos.abrir',
+    title: 'Abrir um processo de parecer',
+    description: 'Abre o processo {id}: os demais comandos passam a agir nele.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+      },
+      'required': ['id'],
+    },
+    run: (input, origin) async {
+      await processos.abrir(input.requireString('id'));
+      return CommandResult.ok(
+        message: 'Processo "${processos.ativo!.nome}" aberto.',
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.processos.criar',
+    title: 'Criar um processo de parecer',
+    description:
+        'Cria um processo {nome, numeroSei?} e o abre. Com copiarDe (id), '
+        'cria uma cópia daquele processo (rascunho, comentários, árvore e '
+        'pasta da base).',
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'nome': {'type': 'string'},
+        'numeroSei': {'type': 'string'},
+        'copiarDe': {'type': 'string'},
+      },
+    },
+    run: (input, origin) async {
+      final origem = input.optionalString('copiarDe');
+      final p = origem == null
+          ? await processos.criar(
+              nome: input.optionalString('nome') ?? 'Novo processo',
+              numeroSei: input.optionalString('numeroSei') ?? '',
+            )
+          : await processos.duplicar(
+              origem,
+              nome: input.optionalString('nome'),
+            );
+      await processos.abrir(p.id);
+      return CommandResult.ok(
+        message: 'Processo "${p.nome}" criado e aberto.',
+        data: {'id': p.id},
+      );
+    },
+  ),
+];
+
+/// Comandos que agem no processo aberto.
+List<ModuleCommand> _comandosDoProcesso(
   SeiArvoreService service,
   ParecerService parecer,
 ) => [

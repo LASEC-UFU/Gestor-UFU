@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/elabora_relato_commands.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/processos_parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/elabora_relato_skill.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/elabora_relato_page.dart';
@@ -24,6 +25,9 @@ class ElaboraRelatoModule extends GestorModule {
 
   SeiArvoreService _arvore = SeiArvoreService();
   late ParecerService _parecer = ParecerService(arvore: _arvore);
+  late ProcessosParecerService _processos = ProcessosParecerService(
+    parecer: _parecer,
+  );
 
   @override
   Future<void> activate(GestorServices services) async {
@@ -36,6 +40,10 @@ class ElaboraRelatoModule extends GestorModule {
       arvore: _arvore,
       ia: services.contract<AiTextService>(),
       base: BaseDocumentosService(store: services.store),
+    );
+    _processos = ProcessosParecerService(
+      parecer: _parecer,
+      store: services.store,
     );
   }
 
@@ -71,7 +79,7 @@ class ElaboraRelatoModule extends GestorModule {
   List<RouteBase> get routes => [
     GoRoute(
       path: route,
-      builder: (context, state) => ElaboraRelatoPage(parecer: _parecer),
+      builder: (context, state) => ElaboraRelatoPage(processos: _processos),
     ),
     // Endereços antigos (atalhos, histórico do agente): "Extrair Árvore de
     // Processo" e "Elaborar Relato" (v1.1.42).
@@ -84,5 +92,6 @@ class ElaboraRelatoModule extends GestorModule {
   ModuleSkill get skill => elaboraRelatoSkill();
 
   @override
-  List<ModuleCommand> get commands => elaboraRelatoCommands(_arvore, _parecer);
+  List<ModuleCommand> get commands =>
+      elaboraRelatoCommands(_arvore, _parecer, _processos);
 }
