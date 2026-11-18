@@ -1,0 +1,37 @@
+# Arquivos do Poppler (oschwartz10612/poppler-windows v26.09.0-0, Library\bin)
+# empacotados no instalador: pdftotext.exe, pdftoppm.exe e as DLLs de que
+# dependem (calculadas com objdump -p). Ao trocar a versão, recalcule.
+Lerc.dll
+MSVCP140.dll
+VCRUNTIME140.dll
+VCRUNTIME140_1.dll
+api-ms-win-crt-convert-l1-1-0.dll
+api-ms-win-crt-environment-l1-1-0.dll
+api-ms-win-crt-filesystem-l1-1-0.dll
+api-ms-win-crt-heap-l1-1-0.dll
+api-ms-win-crt-locale-l1-1-0.dll
+api-ms-win-crt-math-l1-1-0.dll
+api-ms-win-crt-runtime-l1-1-0.dll
+api-ms-win-crt-stdio-l1-1-0.dll
+api-ms-win-crt-string-l1-1-0.dll
+api-ms-win-crt-time-l1-1-0.dll
+api-ms-win-crt-utility-l1-1-0.dll
+deflate.dll
+freetype.dll
+icudt78.dll
+icuuc78.dll
+jpeg8.dll
+lcms2.dll
+libcrypto-3-x64.dll
+libcurl.dll
+liblzma.dll
+libpng16.dll
+libssh2.dll
+openjp2.dll
+pdftoppm.exe
+pdftotext.exe
+poppler.dll
+psl-5.dll
+tiff.dll
+zlib.dll
+zstd.dll

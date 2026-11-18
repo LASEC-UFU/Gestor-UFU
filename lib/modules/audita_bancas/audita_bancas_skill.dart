@@ -37,8 +37,8 @@ leitura_falhou, limite, sem_aceitas, exportacao_falhou.
 
 ## Limitações
 PDFs digitalizados (sem camada de texto) não podem ser analisados (sem OCR).
-A exportação do PDF anotado precisa do Poppler (pdftotext e pdftoppm), que
-vem, por exemplo, com o MiKTeX; o PDF exportado é rasterizado.
+A exportação do PDF anotado usa o Poppler (pdftotext e pdftoppm), que vem
+no instalador do Gestor; o PDF exportado é rasterizado.
 
 ## Banco
 `audita_bancas.v1.documento.<id>`: documento e observações.

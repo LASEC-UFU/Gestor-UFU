@@ -6,10 +6,11 @@ import 'package:path/path.dart' as p;
 /// Ferramentas Poppler (`pdftotext`, `pdftoppm`) usadas para ler e
 /// renderizar PDFs.
 ///
-/// No Windows é comum haver mais de um `pdftotext` no PATH: o do Git (xpdf
-/// 4.x, sem `-bbox` nem `pdftoppm`) costuma vir antes do Poppler do MiKTeX ou
-/// de uma instalação própria. Este localizador procura, no PATH e em pastas
-/// conhecidas, um `pdftotext` que seja de fato Poppler.
+/// O instalador do Gestor traz o Poppler em `<pasta do app>\poppler\bin`,
+/// que é procurado primeiro. Fora dele (desenvolvimento), no Windows é comum
+/// haver mais de um `pdftotext` no PATH: o do Git (xpdf 4.x, sem `-bbox` nem
+/// `pdftoppm`) costuma vir antes do Poppler do MiKTeX ou de uma instalação
+/// própria; o localizador escolhe um que seja de fato Poppler.
 class Poppler {
   const Poppler._();
 
@@ -60,8 +61,8 @@ class Poppler {
       );
     } on ProcessException {
       throw StateError(
-        'Não foi possível encontrar o pdftotext (Poppler). Instale o Poppler '
-        '(ou o MiKTeX) para ler PDFs.',
+        'Não foi possível encontrar o pdftotext (Poppler), que vem com o '
+        'instalador do Gestor. Reinstale o Gestor para ler PDFs.',
       );
     }
     if (r.exitCode != 0) {
@@ -89,6 +90,8 @@ class Poppler {
     final env = Platform.environment;
     final path = env['PATH'] ?? env['Path'] ?? '';
     final pastas = <String>[
+      // O instalador do Gestor traz o Poppler em <pasta do app>\poppler\bin.
+      p.join(p.dirname(Platform.resolvedExecutable), 'poppler', 'bin'),
       ...path.split(Platform.isWindows ? ';' : ':').where((x) => x.isNotEmpty),
     ];
     if (Platform.isWindows) {

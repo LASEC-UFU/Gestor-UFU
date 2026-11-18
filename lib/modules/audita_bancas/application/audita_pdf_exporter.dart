@@ -38,7 +38,7 @@ class AuditaPdfExporter {
     if (pdftotext == null || pdftoppm == null) {
       throw StateError(
         'A exportação do PDF anotado precisa do Poppler (pdftotext e '
-        'pdftoppm). Instale o Poppler ou o MiKTeX, que o inclui.',
+        'pdftoppm), que vem com o instalador do Gestor. Reinstale o Gestor.',
       );
     }
     final temp = await Directory.systemTemp.createTemp('gestor_audita_');

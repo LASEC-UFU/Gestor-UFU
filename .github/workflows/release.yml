@@ -75,6 +75,40 @@ jobs:
       - name: Build Windows release
         run: flutter build windows --release --build-name "${{ needs.prepare.outputs.base_version }}"
 
+      # Poppler (pdftotext/pdftoppm) dentro da pasta do app: leitura de PDFs
+      # e PDF anotado do Audita Bancas sem depender de instalação externa.
+      # Versão fixa e conferida pelo SHA-256; só os arquivos necessários
+      # (windows/installer/poppler_files.txt) vão para o instalador.
+      - name: Incluir Poppler no pacote
+        shell: powershell
+        env:
+          POPPLER_URL: https://github.com/oschwartz10612/poppler-windows/releases/download/v26.09.0-0/Release-26.09.0-0.zip
+          POPPLER_SHA256: 7a6f256a0ddf7536182246a5733331bf4677cbcc34f4663774947ad34556c8d0
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP 'poppler.zip'
+          Invoke-WebRequest -Uri $env:POPPLER_URL -OutFile $zip -UseBasicParsing
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:POPPLER_SHA256) { throw "SHA-256 do Poppler não confere: $hash" }
+          $tmp = Join-Path $env:RUNNER_TEMP 'poppler'
+          Expand-Archive -Path $zip -DestinationPath $tmp -Force
+          $raiz = Get-ChildItem $tmp -Directory | Select-Object -First 1
+          $origem = Join-Path $raiz.FullName 'Library\bin'
+          $destino = 'build\windows\x64\runner\Release\poppler'
+          New-Item -ItemType Directory -Force -Path "$destino\bin" | Out-Null
+          $arquivos = Get-Content 'windows\installer\poppler_files.txt' |
+            Where-Object { $_.Trim() -and -not $_.StartsWith('#') }
+          foreach ($f in $arquivos) {
+            Copy-Item -Path (Join-Path $origem $f.Trim()) -Destination "$destino\bin" -ErrorAction Stop
+          }
+          Copy-Item -Path (Join-Path $raiz.FullName 'share\poppler\COPYING*') -Destination $destino
+          Copy-Item -Path 'windows\installer\POPPLER_LEIA-ME.txt' -Destination "$destino\LEIA-ME.txt"
+          # Confere que roda só com os arquivos copiados.
+          $versao = cmd /c "`"$destino\bin\pdftotext.exe`" -v 2>&1"
+          if ($LASTEXITCODE -ne 0) { throw "pdftotext empacotado não executou: $versao" }
+          Write-Output $versao
+          cmd /c "`"$destino\bin\pdftoppm.exe`" -v 2>&1" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'pdftoppm empacotado não executou' }
+
       - name: Adicionar WiX Toolset ao PATH
         shell: powershell
         run: |
