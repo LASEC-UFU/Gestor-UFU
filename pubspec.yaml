@@ -65,3 +65,6 @@ flutter:
   assets:
     - assets/adjust_schedule/seed.json
     - assets/parecer_editor/
+    - assets/pdf_viewer/
+    - assets/pdf_viewer/cmaps/
+    - assets/pdf_viewer/standard_fonts/

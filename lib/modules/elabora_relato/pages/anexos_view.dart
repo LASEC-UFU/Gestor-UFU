@@ -12,6 +12,7 @@ import 'package:gestor_ufu/modules/elabora_relato/domain/anexo_processo.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/base_documentos.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/marcacao_anexo_dialog.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/pdf_anexo_viewer.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 
 /// Seleção atual no documento: parágrafo e posição dentro dele.
@@ -46,13 +47,27 @@ class _AnexosViewState extends State<AnexosView> {
   int _ultimaBusca = -1;
   String _corPadrao = 'amarelo';
 
+  // Visão "PDF original".
+  final _pdf = PdfViewerController();
+  final _selPdf = ValueNotifier<SelecaoPdf?>(null);
+  List<String> _paginasPdf = const [];
+  bool _modoTexto = false;
+  String _pasta = '';
+  int _escalaPct = 100;
+
   AnexosProcessoService get anexos => widget.service.anexos;
   AnexoProcesso? get _anexo =>
       anexos.anexos.where((a) => a.id == _anexoId).firstOrNull;
 
+  /// O anexo aberto é PDF e está na visão "PDF original".
+  bool get _emPdf => _anexo?.extensao == '.pdf' && !_modoTexto;
+
   @override
   void initState() {
     super.initState();
+    anexos.pasta().then((p) {
+      if (mounted) setState(() => _pasta = p);
+    });
     anexos.addListener(_mudou);
     anexos.carregar().then((_) {
       if (mounted && _anexoId == null && anexos.anexos.isNotEmpty) {
@@ -67,6 +82,7 @@ class _AnexosViewState extends State<AnexosView> {
     _scroll.dispose();
     _busca.dispose();
     _selecao.dispose();
+    _selPdf.dispose();
     super.dispose();
   }
 
@@ -93,8 +109,11 @@ class _AnexosViewState extends State<AnexosView> {
       _ativa = null;
       _ultimaBusca = -1;
       _chaves.clear();
+      _paginasPdf = const [];
+      _modoTexto = false;
     });
     _selecao.value = null;
+    _selPdf.value = null;
     try {
       final pars = await anexos.paragrafos(anexos.exigir(id));
       if (mounted && _anexoId == id) setState(() => _pars = pars);
@@ -228,19 +247,40 @@ class _AnexosViewState extends State<AnexosView> {
   // ------------------------------------------------------------ marcações
 
   Future<void> _marcar({bool dialogo = false, bool perguntar = false}) async {
-    final s = _selecao.value;
     final a = _anexo;
-    if (s == null || a == null || s.fim <= s.ini || s.par >= _pars.length) {
-      return;
+    if (a == null) return;
+    final MarcacaoAnexo m;
+    if (_emPdf) {
+      final s = _selPdf.value;
+      if (s == null || s.pagina < 1 || s.pagina > _paginasPdf.length) return;
+      m = AnexosProcessoService.novaMarcacaoPdf(
+        pagina: s.pagina,
+        textoPagina: _paginasPdf[s.pagina - 1],
+        inicio: s.inicio,
+        fim: s.fim,
+        pars: _pars,
+        cor: _corPadrao,
+      );
+      _selPdf.value = null;
+    } else {
+      final s = _selecao.value;
+      if (s == null || s.fim <= s.ini || s.par >= _pars.length) return;
+      var nova = AnexosProcessoService.novaMarcacao(
+        paragrafo: s.par,
+        textoParagrafo: _pars[s.par].texto,
+        inicio: s.ini,
+        fim: s.fim,
+        cor: _corPadrao,
+      );
+      // Já ancora no PDF, se as páginas foram lidas.
+      if (_paginasPdf.isNotEmpty) {
+        nova =
+            AnexosProcessoService.ancorarNoPdf(nova, _paginasPdf, _pars) ??
+            nova;
+      }
+      m = nova;
+      _selecao.value = null;
     }
-    final m = AnexosProcessoService.novaMarcacao(
-      paragrafo: s.par,
-      textoParagrafo: _pars[s.par].texto,
-      inicio: s.ini,
-      fim: s.fim,
-      cor: _corPadrao,
-    );
-    _selecao.value = null;
     if (!dialogo) {
       await anexos.salvarMarcacao(a.id, m);
       setState(() => _ativa = m.id);
@@ -256,14 +296,21 @@ class _AnexosViewState extends State<AnexosView> {
   }) async {
     final a = _anexo;
     if (a == null) return;
-    final ctx = AnexosProcessoService.contexto(_pars, m.paragrafo);
+    final ctx = m.pdfPagina > 0 && _paginasPdf.isNotEmpty
+        ? AnexosProcessoService.contextoPdf(
+            _paginasPdf,
+            m.pdfPagina,
+            m.pdfInicio,
+            m.pdfFim,
+          )
+        : AnexosProcessoService.contexto(_pars, m.paragrafo);
     final r = await showDialog<MarcacaoAnexo>(
       context: context,
       barrierDismissible: false,
       builder: (_) => MarcacaoAnexoDialog(
         service: widget.service,
         documento: a.nome,
-        local: AnexosProcessoService.local(_pars, m.paragrafo),
+        local: AnexosProcessoService.localMarcacao(m, _pars),
         marcacao: m,
         antes: ctx.antes,
         depois: ctx.depois,
@@ -282,7 +329,7 @@ class _AnexosViewState extends State<AnexosView> {
         .replaceAll('&', '&amp;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;');
-    final local = AnexosProcessoService.local(_pars, m.paragrafo);
+    final local = AnexosProcessoService.localMarcacao(m, _pars);
     widget.service.inserirNoEditor(
       secao,
       '<p class="Citacao">“${esc(m.texto.trim())}” (${esc(a.nome)}, '
@@ -316,7 +363,59 @@ class _AnexosViewState extends State<AnexosView> {
     }
   }
 
+  /// Leva até a marcação na visão aberta.
+  void _irParaMarcacao(MarcacaoAnexo m) {
+    setState(() => _ativa = m.id);
+    if (_emPdf) {
+      if (m.pdfPagina > 0) {
+        _pdf.irPara(m);
+      } else {
+        _mensagem(
+          'Esta marcação não foi localizada no PDF; veja-a na visão "Texto".',
+        );
+      }
+    } else if (m.paragrafo >= 0) {
+      _irPara(m.paragrafo);
+    } else {
+      _mensagem(
+        'Esta marcação não foi localizada na visão "Texto"; veja-a no PDF.',
+      );
+    }
+  }
+
+  /// Páginas do PDF lidas pelo visualizador: guarda o texto e ancora no PDF
+  /// as marcações feitas na visão "Texto" (ou pelo agente).
+  Future<void> _aoReceberPaginas(List<String> paginas) async {
+    final a = _anexo;
+    if (a == null) return;
+    setState(() => _paginasPdf = paginas);
+    final novas = <MarcacaoAnexo>[];
+    var naoAchadas = 0;
+    for (final m in a.marcacoes) {
+      if (m.pdfPagina > 0) continue;
+      final r = AnexosProcessoService.ancorarNoPdf(m, paginas, _pars);
+      if (r == null) {
+        naoAchadas++;
+      } else {
+        novas.add(r);
+      }
+    }
+    await anexos.atualizarMarcacoes(a.id, novas);
+    if (naoAchadas > 0) {
+      _mensagem(
+        '$naoAchadas marcação(ões) não foram localizadas no PDF; aparecem só '
+        'na visão "Texto".',
+      );
+    }
+  }
+
   void _buscar({bool proxima = true}) {
+    if (_emPdf) {
+      if (_busca.text.trim().isNotEmpty) {
+        _pdf.buscar(_busca.text.trim(), proxima: proxima);
+      }
+      return;
+    }
     final termo = TextoBusca.semAcentos(_busca.text.trim());
     if (termo.isEmpty || _pars.isEmpty) return;
     final n = _pars.length;
@@ -520,6 +619,57 @@ class _AnexosViewState extends State<AnexosView> {
             ),
           ],
         ),
+        if (a.extensao == '.pdf')
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(
+              children: [
+                SegmentedButton<bool>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: const [
+                    ButtonSegment(
+                      value: false,
+                      icon: Icon(Icons.picture_as_pdf_outlined, size: 17),
+                      label: Text('PDF original'),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      icon: Icon(Icons.notes_rounded, size: 17),
+                      label: Text('Texto'),
+                    ),
+                  ],
+                  selected: {_modoTexto},
+                  onSelectionChanged: (s) => setState(() {
+                    _modoTexto = s.first;
+                    _selecao.value = null;
+                    _selPdf.value = null;
+                  }),
+                ),
+                const Spacer(),
+                if (_emPdf) ...[
+                  IconButton(
+                    tooltip: 'Diminuir',
+                    onPressed: () => _pdf.zoom('-'),
+                    icon: const Icon(Icons.zoom_out),
+                  ),
+                  Text('$_escalaPct%', style: const TextStyle(fontSize: 12)),
+                  IconButton(
+                    tooltip: 'Aumentar (ou Ctrl + roda do mouse)',
+                    onPressed: () => _pdf.zoom('+'),
+                    icon: const Icon(Icons.zoom_in),
+                  ),
+                  IconButton(
+                    tooltip: 'Ajustar à largura',
+                    onPressed: () => _pdf.zoom('largura'),
+                    icon: const Icon(Icons.fit_screen_outlined),
+                  ),
+                ],
+              ],
+            ),
+          ),
         if (a.aviso.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -538,7 +688,46 @@ class _AnexosViewState extends State<AnexosView> {
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppTheme.divider),
             ),
-            child: _lendo
+            clipBehavior: Clip.antiAlias,
+            child: _emPdf
+                ? (_pasta.isEmpty
+                      ? const Center(child: CircularProgressIndicator())
+                      : PdfAnexoViewer(
+                          key: ValueKey('pdf-${a.id}'),
+                          pasta: _pasta,
+                          arquivo: a.arquivoGuardado,
+                          marcacoes: a.marcacoes,
+                          ativa: _ativa,
+                          controller: _pdf,
+                          onPaginas: _aoReceberPaginas,
+                          onSelecao: (s) => _selPdf.value = s,
+                          onAcao: (acao, s) {
+                            _selPdf.value = s;
+                            _marcar(
+                              dialogo: acao != 'marcar',
+                              perguntar: acao == 'perguntar',
+                            );
+                          },
+                          onMarcacao: (id, abrir) {
+                            final m = a.marcacoes
+                                .where((x) => x.id == id)
+                                .firstOrNull;
+                            if (m == null) return;
+                            setState(() => _ativa = id);
+                            if (abrir) _abrirMarcacao(m);
+                          },
+                          onBusca: (achou, _) {
+                            if (!achou) {
+                              _mensagem(
+                                '"${_busca.text.trim()}" não aparece no '
+                                'documento.',
+                              );
+                            }
+                          },
+                          onEscala: (e) =>
+                              setState(() => _escalaPct = (e * 100).round()),
+                        ))
+                : _lendo
                 ? const Center(child: CircularProgressIndicator())
                 : _erroLeitura != null
                 ? Center(
@@ -573,10 +762,11 @@ class _AnexosViewState extends State<AnexosView> {
     );
   }
 
-  Widget _barraSelecao() => ValueListenableBuilder<_Selecao?>(
-    valueListenable: _selecao,
-    builder: (context, s, _) {
-      final ativo = s != null && s.fim > s.ini;
+  Widget _barraSelecao() => ListenableBuilder(
+    listenable: Listenable.merge([_selecao, _selPdf]),
+    builder: (context, _) {
+      final s = _selecao.value;
+      final ativo = _emPdf ? _selPdf.value != null : s != null && s.fim > s.ini;
       return Wrap(
         spacing: 6,
         runSpacing: 4,
@@ -789,10 +979,7 @@ class _AnexosViewState extends State<AnexosView> {
                         ? Theme.of(context).colorScheme.secondaryContainer
                         : null,
                     child: InkWell(
-                      onTap: () {
-                        setState(() => _ativa = m.id);
-                        _irPara(m.paragrafo);
-                      },
+                      onTap: () => _irParaMarcacao(m),
                       onDoubleTap: () => _abrirMarcacao(m),
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(10, 8, 0, 8),
@@ -839,7 +1026,7 @@ class _AnexosViewState extends State<AnexosView> {
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           [
-            AnexosProcessoService.local(_pars, m.paragrafo),
+            AnexosProcessoService.localMarcacao(m, _pars),
             if (m.explicacaoIa.isNotEmpty) 'explicação da IA',
           ].join(' · '),
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 11),
@@ -870,7 +1057,7 @@ class _AnexosViewState extends State<AnexosView> {
           ClipboardData(
             text:
                 '“${m.texto.trim()}” (${a.nome}, '
-                '${AnexosProcessoService.local(_pars, m.paragrafo)})',
+                '${AnexosProcessoService.localMarcacao(m, _pars)})',
           ),
         );
       } else if (v.startsWith('citar:')) {

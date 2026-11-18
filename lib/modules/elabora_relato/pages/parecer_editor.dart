@@ -15,6 +15,7 @@ import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.da
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/base_documentos_dialog.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/consulta_ia_dialog.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/webview_local.dart';
 
 /// Arquivos do editor (CKEditor 5 + estilos do SEI) copiados dos assets para
 /// uma pasta local servida ao WebView2 por um host virtual.
@@ -29,7 +30,6 @@ class _EditorArquivos {
   ];
 
   static Future<String>? _pasta;
-  static bool _ambiente = false;
 
   static Future<String> pasta() => _pasta ??= _copiar();
 
@@ -48,21 +48,9 @@ class _EditorArquivos {
     return dir.path;
   }
 
-  /// O ambiente do WebView2 é único por processo e precisa vir antes do
-  /// primeiro controlador.
-  static Future<void> ambiente() async {
-    if (_ambiente) return;
-    _ambiente = true;
-    final base =
-        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
-    try {
-      await WebviewController.initializeEnvironment(
-        userDataPath: p.join(base, 'GestorUFU', 'ParecerEditor', 'perfil'),
-      );
-    } on PlatformException {
-      // Já inicializado por outra tela.
-    }
-  }
+  /// O ambiente do WebView2 é único por processo (compartilhado com o
+  /// visualizador de PDF).
+  static Future<void> ambiente() => WebviewLocal.ambiente();
 }
 
 /// Editor HTML de uma seção do parecer, com os recursos de edição do SEI

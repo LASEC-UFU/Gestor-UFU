@@ -22,11 +22,21 @@ class MarcacaoAnexo {
     this.pergunta = '',
     this.criadoEm,
     this.atualizadoEm,
+    this.pdfPagina = 0,
+    this.pdfInicio = 0,
+    this.pdfFim = 0,
   });
 
   final String id;
 
-  /// Índice (0, 1, …) do parágrafo no texto extraído do documento.
+  /// Âncora na visão "PDF original": página (1, 2, …; 0 = ainda não
+  /// localizada) e posição no texto da página extraído pelo pdf.js.
+  final int pdfPagina;
+  final int pdfInicio;
+  final int pdfFim;
+
+  /// Índice (0, 1, …) do parágrafo no texto extraído do documento
+  /// (-1 = não localizada na visão "Texto").
   final int paragrafo;
 
   /// Posição do trecho dentro do parágrafo.
@@ -63,6 +73,34 @@ class MarcacaoAnexo {
     pergunta: pergunta ?? this.pergunta,
     criadoEm: criadoEm,
     atualizadoEm: DateTime.now(),
+    pdfPagina: pdfPagina,
+    pdfInicio: pdfInicio,
+    pdfFim: pdfFim,
+  );
+
+  /// A mesma marcação com outras âncoras (texto e/ou PDF).
+  MarcacaoAnexo ancorada({
+    int? paragrafo,
+    int? inicio,
+    int? fim,
+    int? pdfPagina,
+    int? pdfInicio,
+    int? pdfFim,
+  }) => MarcacaoAnexo(
+    id: id,
+    paragrafo: paragrafo ?? this.paragrafo,
+    inicio: inicio ?? this.inicio,
+    fim: fim ?? this.fim,
+    texto: texto,
+    cor: cor,
+    comentario: comentario,
+    explicacaoIa: explicacaoIa,
+    pergunta: pergunta,
+    criadoEm: criadoEm,
+    atualizadoEm: atualizadoEm,
+    pdfPagina: pdfPagina ?? this.pdfPagina,
+    pdfInicio: pdfInicio ?? this.pdfInicio,
+    pdfFim: pdfFim ?? this.pdfFim,
   );
 
   factory MarcacaoAnexo.fromJson(Map<String, dynamic> j) => MarcacaoAnexo(
@@ -77,10 +115,15 @@ class MarcacaoAnexo {
     pergunta: '${j['pergunta'] ?? ''}',
     criadoEm: DateTime.tryParse('${j['criado_em'] ?? ''}'),
     atualizadoEm: DateTime.tryParse('${j['atualizado_em'] ?? ''}'),
+    pdfPagina: ((j['pdf'] as Map?)?['pagina'] as num?)?.toInt() ?? 0,
+    pdfInicio: ((j['pdf'] as Map?)?['inicio'] as num?)?.toInt() ?? 0,
+    pdfFim: ((j['pdf'] as Map?)?['fim'] as num?)?.toInt() ?? 0,
   );
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    if (pdfPagina > 0)
+      'pdf': {'pagina': pdfPagina, 'inicio': pdfInicio, 'fim': pdfFim},
     'paragrafo': paragrafo,
     'inicio': inicio,
     'fim': fim,
@@ -208,4 +251,73 @@ List<SegmentoMarcado> segmentarParagrafo(
     }
   }
   return out;
+}
+
+/// Procura o trecho [alvo] em [texto] ignorando diferenças de espaços,
+/// quebras de linha, hifenização no fim da linha, maiúsculas e acentos
+/// (o texto extraído pelo pdftotext e pelo pdf.js difere nesses pontos).
+/// Havendo várias ocorrências, fica a mais próxima de [perto]. Devolve a
+/// posição em [texto] ou null.
+({int inicio, int fim})? localizarTrecho(
+  String alvo,
+  String texto, {
+  int perto = 0,
+}) {
+  final (norm, mapa) = _normalizarComMapa(texto);
+  final (chave, _) = _normalizarComMapa(alvo);
+  final busca = chave.trim();
+  if (busca.isEmpty) return null;
+  var melhor = -1;
+  var distancia = 1 << 30;
+  for (var i = norm.indexOf(busca); i >= 0; i = norm.indexOf(busca, i + 1)) {
+    final d = (mapa[i] - perto).abs();
+    if (d < distancia) {
+      distancia = d;
+      melhor = i;
+    }
+  }
+  if (melhor < 0) return null;
+  return (inicio: mapa[melhor], fim: mapa[melhor + busca.length - 1] + 1);
+}
+
+const _acentos = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+const _semAcento = 'aaaaaeeeeiiiiooooouuuucn';
+
+/// Texto normalizado e, para cada caractere dele, a posição no original.
+(String, List<int>) _normalizarComMapa(String t) {
+  final b = StringBuffer();
+  final mapa = <int>[];
+  var espaco = false;
+  for (var i = 0; i < t.length; i++) {
+    var c = t[i];
+    // Hífen de quebra de linha ("trans-" + quebra + "formação") e hífen
+    // invisível (U+00AD).
+    if (c.codeUnitAt(0) == 0xAD) continue;
+    if (c == '-' &&
+        i + 1 < t.length &&
+        (t[i + 1] == '\n' || t[i + 1] == '\r')) {
+      var j = i + 1;
+      while (j < t.length && RegExp(r'\s').hasMatch(t[j])) {
+        j++;
+      }
+      if (j < t.length && RegExp(r'[a-zà-ÿ]').hasMatch(t[j])) {
+        i = j - 1;
+        continue;
+      }
+    }
+    if (RegExp(r'\s').hasMatch(c)) {
+      if (!espaco && b.isNotEmpty) {
+        b.write(' ');
+        mapa.add(i);
+      }
+      espaco = true;
+      continue;
+    }
+    espaco = false;
+    c = c.toLowerCase();
+    final k = _acentos.indexOf(c);
+    b.write(k < 0 ? c : _semAcento[k]);
+    mapa.add(i);
+  }
+  return (b.toString(), mapa);
 }

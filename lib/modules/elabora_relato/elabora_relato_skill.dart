@@ -34,7 +34,10 @@ usuário em qual processo trabalhar quando houver mais de um.
 ## Documentos do processo (leitura e marcação)
 Aba "Documentos do processo": o relator anexa arquivos (PDF com texto,
 DOCX, TXT/MD, HTML) só para ler; marca trechos com cores, pergunta à IA o
-que dizem e guarda comentários. O texto não é editado.
+que dizem e guarda comentários. O texto não é editado. PDFs abrem na
+visão "PDF original" (pdf.js, como no arquivo, com as marcações por
+cima) ou na visão "Texto"; cada marcação guarda a página do PDF e o
+parágrafo do texto (`parecer.anexos.listar` mostra os dois).
 - `parecer.anexos.listar`; `parecer.anexos.ler` {anexo, inicio?,
   quantidade?} (parágrafos numerados com página);
   `parecer.anexos.marcar` {anexo, paragrafo, trecho literal,

@@ -417,6 +417,7 @@ List<ModuleCommand> _comandosDoProcesso(
                   for (final m in a.marcacoes)
                     {
                       'paragrafo': m.paragrafo,
+                      if (m.pdfPagina > 0) 'pagina': m.pdfPagina,
                       'texto': m.texto,
                       if (m.comentario.isNotEmpty) 'comentario': m.comentario,
                     },

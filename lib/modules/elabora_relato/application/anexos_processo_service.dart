@@ -76,6 +76,9 @@ class AnexosProcessoService extends ChangeNotifier {
     return a;
   }
 
+  /// Pasta das cópias guardadas (e do visualizador de PDF).
+  Future<String> pasta() => _pastaFn();
+
   /// Caminho da cópia guardada do anexo.
   Future<String> caminho(AnexoProcesso a) async =>
       p.join(await _pastaFn(), a.arquivoGuardado);
@@ -122,9 +125,9 @@ class AnexosProcessoService extends ChangeNotifier {
     await _gravarCache(hash, lido.paragrafos);
     final aviso = lido.paragrafos.isEmpty
         ? (ext == '.pdf'
-              ? 'PDF sem camada de texto (digitalizado como imagem): não dá '
-                    'para marcar nem consultar a IA sem OCR, que o Gestor não '
-                    'faz. Use "Abrir original" para ler.'
+              ? 'PDF sem camada de texto (digitalizado como imagem): dá para '
+                    'ler na visão "PDF original", mas não para selecionar, '
+                    'marcar nem consultar a IA sem OCR, que o Gestor não faz.'
               : 'Nenhum texto encontrado no arquivo.')
         : lido.semTexto.isNotEmpty
         ? '${lido.semTexto.length} página(s) sem texto extraível '
@@ -232,14 +235,35 @@ class AnexosProcessoService extends ChangeNotifier {
     } else {
       lista[i] = m;
     }
-    lista.sort(
-      (x, y) => x.paragrafo != y.paragrafo
-          ? x.paragrafo.compareTo(y.paragrafo)
-          : x.inicio.compareTo(y.inicio),
-    );
+    _ordenar(lista);
     _substituir(a.copyWith(marcacoes: lista));
     await _gravar();
   }
+
+  /// Troca várias marcações de uma vez (ex.: âncoras relocalizadas).
+  Future<void> atualizarMarcacoes(
+    String anexoId,
+    List<MarcacaoAnexo> novas,
+  ) async {
+    if (novas.isEmpty) return;
+    final a = exigir(anexoId);
+    final porId = {for (final m in novas) m.id: m};
+    final lista = [for (final m in a.marcacoes) porId[m.id] ?? m];
+    _ordenar(lista);
+    _substituir(a.copyWith(marcacoes: lista));
+    await _gravar();
+  }
+
+  /// Ordem do documento: página do PDF (se houver), parágrafo, posição.
+  static void _ordenar(List<MarcacaoAnexo> lista) => lista.sort((x, y) {
+    final px = x.pdfPagina, py = y.pdfPagina;
+    if (px > 0 && py > 0 && px != py) return px.compareTo(py);
+    if (px > 0 && py > 0 && x.paragrafo < 0 && y.paragrafo < 0) {
+      return x.pdfInicio.compareTo(y.pdfInicio);
+    }
+    if (x.paragrafo != y.paragrafo) return x.paragrafo.compareTo(y.paragrafo);
+    return x.inicio.compareTo(y.inicio);
+  });
 
   Future<void> excluirMarcacao(String anexoId, String marcacaoId) async {
     final a = exigir(anexoId);
@@ -273,6 +297,120 @@ class AnexosProcessoService extends ChangeNotifier {
       comentario: comentario,
       criadoEm: agora,
       atualizadoEm: agora,
+    );
+  }
+
+  /// Nova marcação feita na visão "PDF original": âncora no texto da
+  /// [pagina] e, se o trecho for achado, também no parágrafo da visão
+  /// "Texto".
+  static MarcacaoAnexo novaMarcacaoPdf({
+    required int pagina,
+    required String textoPagina,
+    required int inicio,
+    required int fim,
+    required List<ParagrafoFonte> pars,
+    String cor = 'amarelo',
+  }) {
+    final a = inicio.clamp(0, textoPagina.length);
+    final b = fim.clamp(a, textoPagina.length);
+    final agora = DateTime.now();
+    final m = MarcacaoAnexo(
+      id: const Uuid().v4(),
+      paragrafo: -1,
+      inicio: 0,
+      fim: 0,
+      texto: textoPagina.substring(a, b).replaceAll(RegExp(r'\s+'), ' ').trim(),
+      cor: cor,
+      criadoEm: agora,
+      atualizadoEm: agora,
+      pdfPagina: pagina,
+      pdfInicio: a,
+      pdfFim: b,
+    );
+    return ancorarNoTexto(m, pars);
+  }
+
+  /// Localiza a marcação nos parágrafos da visão "Texto" (preferindo os da
+  /// mesma página); sem achar, fica com parágrafo -1.
+  static MarcacaoAnexo ancorarNoTexto(
+    MarcacaoAnexo m,
+    List<ParagrafoFonte> pars,
+  ) {
+    final ordem = [
+      for (var i = 0; i < pars.length; i++)
+        if (pars[i].pagina == m.pdfPagina) i,
+      for (var i = 0; i < pars.length; i++)
+        if (pars[i].pagina != m.pdfPagina) i,
+    ];
+    for (final i in ordem) {
+      final r = localizarTrecho(m.texto, pars[i].texto);
+      if (r != null) {
+        return m.ancorada(paragrafo: i, inicio: r.inicio, fim: r.fim);
+      }
+    }
+    return m.ancorada(paragrafo: -1, inicio: 0, fim: 0);
+  }
+
+  /// Localiza a marcação no texto das páginas do PDF ([paginas], na ordem;
+  /// preferindo a página do parágrafo). Null se não achar.
+  static MarcacaoAnexo? ancorarNoPdf(
+    MarcacaoAnexo m,
+    List<String> paginas,
+    List<ParagrafoFonte> pars,
+  ) {
+    final preferida = m.paragrafo >= 0 && m.paragrafo < pars.length
+        ? pars[m.paragrafo].pagina
+        : 0;
+    final ordem = [
+      if (preferida > 0 && preferida <= paginas.length) preferida,
+      for (var n = 1; n <= paginas.length; n++)
+        if (n != preferida) n,
+    ];
+    for (final n in ordem) {
+      final r = localizarTrecho(m.texto, paginas[n - 1]);
+      if (r != null) {
+        return m.ancorada(pdfPagina: n, pdfInicio: r.inicio, pdfFim: r.fim);
+      }
+    }
+    return null;
+  }
+
+  /// Localização legível de uma marcação ("p. 3, parágrafo 12").
+  static String localMarcacao(MarcacaoAnexo m, List<ParagrafoFonte> pars) {
+    if (m.pdfPagina > 0) {
+      return m.paragrafo >= 0
+          ? 'p. ${m.pdfPagina}, parágrafo ${m.paragrafo + 1}'
+          : 'p. ${m.pdfPagina}';
+    }
+    return local(pars, m.paragrafo);
+  }
+
+  /// Contexto de um trecho do PDF para a IA: o que vem antes e depois na
+  /// página (e o fim da anterior / início da seguinte).
+  static ({String antes, String depois}) contextoPdf(
+    List<String> paginas,
+    int pagina,
+    int inicio,
+    int fim, {
+    int tamanho = 1500,
+  }) {
+    if (pagina < 1 || pagina > paginas.length) return (antes: '', depois: '');
+    final t = paginas[pagina - 1];
+    final a = inicio.clamp(0, t.length);
+    final b = fim.clamp(a, t.length);
+    var antes = t.substring(0, a);
+    var depois = t.substring(b);
+    if (antes.length < tamanho && pagina > 1) {
+      antes = '${paginas[pagina - 2]}\n$antes';
+    }
+    if (depois.length < tamanho && pagina < paginas.length) {
+      depois = '$depois\n${paginas[pagina]}';
+    }
+    return (
+      antes: antes.length <= tamanho
+          ? antes
+          : antes.substring(antes.length - tamanho),
+      depois: depois.length <= tamanho ? depois : depois.substring(0, tamanho),
     );
   }
 
