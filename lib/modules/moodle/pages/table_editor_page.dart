@@ -871,12 +871,11 @@ class _TableEditorPageState extends State<TableEditorPage> {
       buildDefaultDragHandles: false,
       proxyDecorator: (child, index, animation) =>
           Material(color: Colors.transparent, elevation: 0, child: child),
-      // onReorderItem entrega o destino já ajustado; o controlador espera
-      // a convenção antiga (antes de remover o item).
-      onReorderItem: (oldIndex, newIndex) => ctrl.reorderSections(
-        oldIndex,
-        newIndex > oldIndex ? newIndex + 1 : newIndex,
-      ),
+      // onReorderItem só existe a partir do Flutter 3.42; o build de
+      // release usa o 3.41.9.
+      // ignore: deprecated_member_use
+      onReorder: (oldIndex, newIndex) =>
+          ctrl.reorderSections(oldIndex, newIndex),
       itemCount: config.sections.length,
       itemBuilder: (context, index) {
         final section = config.sections[index];
@@ -1309,11 +1308,12 @@ class _TableEditorPageState extends State<TableEditorPage> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               buildDefaultDragHandles: false,
-                              onReorderItem: (oldIdx, newIdx) =>
+                              // ignore: deprecated_member_use
+                              onReorder: (oldIdx, newIdx) =>
                                   ctrl.reorderActivities(
                                     section.id,
                                     oldIdx,
-                                    newIdx > oldIdx ? newIdx + 1 : newIdx,
+                                    newIdx,
                                   ),
                               children: [
                                 for (
