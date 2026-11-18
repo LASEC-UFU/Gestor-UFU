@@ -1,7 +1,7 @@
 name: gestor_ufu
 description: "Ferramentas acadêmicas UFU, incluindo gestão de disciplinas Moodle."
 publish_to: 'none'
-version: 1.1.62+63
+version: 1.1.63+64
 
 environment:
   sdk: ^3.11.3
