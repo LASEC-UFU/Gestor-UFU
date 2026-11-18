@@ -220,6 +220,13 @@ class ParecerBarra extends StatelessWidget {
   final String titulo;
   final Widget? extra;
 
+  /// O tema do app estica os botões contornados na largura toda; aqui eles
+  /// ficam do tamanho do texto, na mesma linha do título da seção.
+  static final _compacto = OutlinedButton.styleFrom(
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+  );
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: service,
@@ -241,6 +248,7 @@ class ParecerBarra extends StatelessWidget {
           ?extra,
           const SizedBox(width: 4),
           OutlinedButton.icon(
+            style: _compacto,
             onPressed: () => showDialog<void>(
               context: context,
               builder: (_) => DadosParecerDialog(service: service),
@@ -253,6 +261,7 @@ class ParecerBarra extends StatelessWidget {
             ),
           ),
           OutlinedButton.icon(
+            style: _compacto,
             onPressed: () => mostrarSimuladoArguicao(context, service),
             icon: const Icon(Icons.record_voice_over_outlined, size: 18),
             label: Text(

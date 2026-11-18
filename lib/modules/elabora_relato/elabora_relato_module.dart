@@ -90,6 +90,16 @@ class ElaboraRelatoModule extends GestorModule {
     GoRoute(path: '/parecer-relato', redirect: (context, state) => route),
   ];
 
+  /// Gravação do agente direto no banco ou dados vindos de outro computador:
+  /// relê o rascunho aberto para a tela não sobrescrevê-los.
+  @override
+  Future<void> onExternalDataChanged() async {
+    await _parecer.recarregarDoBanco();
+    await _arvore.recarregarDoBanco();
+    await _parecer.anexos.recarregarDoBanco();
+    await _processos.carregar(forcar: true);
+  }
+
   @override
   ModuleSkill get skill => elaboraRelatoSkill();
 

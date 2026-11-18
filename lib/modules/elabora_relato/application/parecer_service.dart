@@ -73,6 +73,7 @@ class ParecerService extends ChangeNotifier {
   List<Map<String, dynamic>> _estilos = const [];
   final _insercoes = StreamController<InsercaoNoEditor>.broadcast();
   final _substituicoes = StreamController<ParecerSecao>.broadcast();
+  final _comentariosExternos = StreamController<ParecerSecao>.broadcast();
 
   Parecer get parecer => _parecer;
   bool get inserindo => _inserindo;
@@ -89,6 +90,87 @@ class ParecerService extends ChangeNotifier {
 
   /// Seção trocada por fora do editor (agente/comando): o editor recarrega.
   Stream<ParecerSecao> get substituicoes => _substituicoes.stream;
+
+  /// Comentários da seção criados ou excluídos por fora do editor (agente):
+  /// o editor repinta os destaques.
+  Stream<ParecerSecao> get comentariosAlterados => _comentariosExternos.stream;
+
+  /// Campos que o agente pode preencher numa anotação (o resto — âncora,
+  /// id, seção — é calculado aqui).
+  static const camposAnotacao = [
+    'texto',
+    'categoria',
+    'status',
+    'referencia',
+    'citacao_literal',
+    'explicacao_simples',
+    'importancia',
+    'pergunta_arguicao',
+    'resposta_oral',
+    'contra_argumento',
+  ];
+
+  /// Texto da seção como o editor o enxerga (`textContent`): sem tags e sem
+  /// quebras entre parágrafos. É nele que a âncora do comentário é buscada.
+  static String textoDoEditor(String html) => html
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&');
+
+  /// Cria um comentário ancorado no [trecho] (texto literal da seção, como
+  /// aparece no editor). Usado pelo agente para as anotações de defesa.
+  Future<Map<String, dynamic>> anotarTrecho(
+    ParecerSecao secao,
+    String trecho,
+    Map<String, dynamic> campos,
+  ) async {
+    await carregar();
+    final texto = textoDoEditor(_parecer.secao(secao));
+    final t = trecho.trim();
+    final at = t.isEmpty ? -1 : texto.indexOf(t);
+    if (at < 0) {
+      throw CommandException(
+        'trecho_nao_encontrado',
+        'O trecho não aparece literalmente em "${secao.titulo}". Copie-o do '
+            'texto da seção (parecer.ler), sem tags e sem quebras de linha.',
+      );
+    }
+    final c = <String, dynamic>{
+      'id': 'a${DateTime.now().microsecondsSinceEpoch}',
+      'secao': secao.id,
+      'selecionado': t,
+      'anterior': texto.substring((at - 80).clamp(0, at), at),
+      'posterior': texto.substring(
+        at + t.length,
+        (at + t.length + 80).clamp(0, texto.length),
+      ),
+      'posicao': at,
+      'trecho': t.length <= 100 ? t : t.substring(0, 100),
+      'localizado': true,
+      for (final k in camposAnotacao)
+        if (campos[k] is String && '${campos[k]}'.trim().isNotEmpty)
+          k: '${campos[k]}'.trim(),
+      'criado_em': DateTime.now().toIso8601String(),
+    };
+    await salvarComentario(c);
+    _comentariosExternos.add(secao);
+    return c;
+  }
+
+  /// Exclui um comentário pelo agente e avisa o editor da seção.
+  Future<bool> excluirAnotacao(String id) async {
+    await carregar();
+    final c = _parecer.comentarios.where((x) => '${x['id']}' == id).firstOrNull;
+    if (c == null) return false;
+    await excluirComentario(id);
+    final secao = ParecerSecao.porId('${c['secao']}');
+    if (secao != null) _comentariosExternos.add(secao);
+    return true;
+  }
 
   /// Comentários (anotações privadas) da [secao], fora do HTML do parecer.
   List<Map<String, dynamic>> comentarios(ParecerSecao secao) => [
@@ -204,6 +286,34 @@ class ParecerService extends ChangeNotifier {
       ];
     }
     notifyListeners();
+  }
+
+  /// Relê o rascunho do banco quando ele foi alterado por fora (agente de IA
+  /// gravando direto na chave, outro computador pela pasta compartilhada).
+  /// Sem isso, o próximo salvamento da tela regravaria a cópia antiga da
+  /// memória por cima (ex.: apagando comentários gravados pelo agente).
+  /// Retorna se algo mudou.
+  Future<bool> recarregarDoBanco() async {
+    if (!_carregado || _inserindo) return false;
+    final raw = await _store.readJson(_draftKey);
+    if (raw is! Map) return false;
+    final novo = Parecer.fromJson(Map<String, dynamic>.from(raw));
+    if (jsonEncode(novo.toJson()) == jsonEncode(_parecer.toJson())) {
+      return false;
+    }
+    // O banco prevalece: um salvamento pendente gravaria a versão antiga.
+    _salvarTimer?.cancel();
+    final antigo = _parecer;
+    _parecer = novo;
+    for (final s in ParecerSecao.values) {
+      if (novo.secao(s) != antigo.secao(s)) {
+        _substituicoes.add(s); // o editor recarrega o texto e repinta
+      } else {
+        _comentariosExternos.add(s);
+      }
+    }
+    notifyListeners();
+    return true;
   }
 
   /// Atualiza os campos (sem as seções) e agenda o salvamento.
@@ -349,6 +459,7 @@ class ParecerService extends ChangeNotifier {
     _salvarTimer?.cancel();
     _insercoes.close();
     _substituicoes.close();
+    _comentariosExternos.close();
     super.dispose();
   }
 }

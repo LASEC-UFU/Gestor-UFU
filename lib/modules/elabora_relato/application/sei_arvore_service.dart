@@ -190,6 +190,43 @@ class SeiArvoreService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Relê o inventário alterado por fora (agente gravando direto na chave,
+  /// outro computador). Mantém o texto lido dos documentos (só em memória)
+  /// quando a árvore é a mesma. Não age durante leitura ou resumos.
+  Future<bool> recarregarDoBanco() async {
+    if (!_carregado || _extraindo || _resumindo) return false;
+    final raw = await _store.readJson(_inventoryKey);
+    if (raw is! List) return false;
+    final novos = [
+      for (final item in raw.whereType<Map>())
+        SeiDocumento.fromJson(Map<String, dynamic>.from(item)),
+    ];
+    String assinatura(List<SeiDocumento> l) =>
+        l.map((d) => d.toJson().toString()).join('|');
+    if (assinatura(novos) == assinatura(_documentos)) return false;
+    final mesmaArvore =
+        novos.length == _documentos.length &&
+        [
+          for (var i = 0; i < novos.length; i++)
+            novos[i].ordem == _documentos[i].ordem &&
+                novos[i].codigoSei == _documentos[i].codigoSei,
+        ].every((x) => x);
+    final atualizados = mesmaArvore
+        ? [
+            for (var i = 0; i < novos.length; i++)
+              _documentos[i].copyWith(
+                data: novos[i].data,
+                resumo: novos[i].resumo,
+              ),
+          ]
+        : novos;
+    _documentos
+      ..clear()
+      ..addAll(atualizados);
+    notifyListeners();
+    return true;
+  }
+
   Future<void> _salvarInventario() => _store.writeJson(_inventoryKey, [
     for (final d in _documentos) d.toJson(),
   ]);

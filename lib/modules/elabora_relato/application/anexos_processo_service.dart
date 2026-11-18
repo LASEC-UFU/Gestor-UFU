@@ -60,6 +60,14 @@ class AnexosProcessoService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Relê os anexos e marcações alterados por fora (agente, outro
+  /// computador). Só age se a lista já tinha sido carregada.
+  Future<void> recarregarDoBanco() async {
+    if (!_carregado) return;
+    _carregado = false;
+    await carregar();
+  }
+
   Future<void> _gravar() async {
     await _store.writeJson(_key, [for (final a in _anexos) a.toJson()]);
     notifyListeners();

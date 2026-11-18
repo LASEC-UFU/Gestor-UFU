@@ -315,7 +315,9 @@ List<ModuleCommand> _comandosDoProcesso(
         '(HTML do editor do SEI, parágrafos <p class="Texto_Justificado_'
         'Recuo_Primeira_Linha">, links SEI <a class="ancora_sei" '
         'id="lnkSei{id_documento}">{número}</a>): relatorio, fundamentacao, '
-        'conclusao. Campos omitidos não mudam.',
+        'conclusao. Campos omitidos não mudam. Depois de gravar uma seção, '
+        'crie as anotações de defesa do voto (parecer.comentarios.adicionar, '
+        'categoria "defesa"), como manda a skill do módulo.',
     inputSchema: {
       'type': 'object',
       'properties': {
@@ -357,6 +359,129 @@ List<ModuleCommand> _comandosDoProcesso(
       }
       await parecer.salvarAgora();
       return CommandResult.ok(message: 'Rascunho do parecer atualizado.');
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.comentarios.listar',
+    title: 'Listar os comentários do parecer',
+    description:
+        'Comentários (anotações privadas, fora do texto do SEI) de todas as '
+        'seções ou de uma {secao}: id, trecho, categoria, status, texto, '
+        'pergunta_arguicao e resposta_oral.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'secao': {
+          'type': 'string',
+          'enum': ['relatorio', 'fundamentacao', 'conclusao'],
+        },
+      },
+    },
+    run: (input, origin) async {
+      await parecer.carregar();
+      final secao = input.optionalString('secao');
+      final lista = [
+        for (final c in parecer.parecer.comentarios)
+          if (secao == null || '${c['secao']}' == secao)
+            {
+              for (final k in [
+                'id',
+                'secao',
+                'trecho',
+                'localizado',
+                ...ParecerService.camposAnotacao,
+              ])
+                if (c[k] != null && '${c[k]}'.isNotEmpty) k: c[k],
+            },
+      ];
+      return CommandResult.ok(
+        message: '${lista.length} comentário(s).',
+        data: {'comentarios': lista},
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.comentarios.adicionar',
+    title: 'Anotar um trecho do parecer',
+    description:
+        'Cria um comentário ancorado num trecho do parecer, sem alterar o '
+        'texto nem o que vai ao SEI. {secao (relatorio, fundamentacao, '
+        'conclusao), trecho (cópia literal de uma frase da seção, sem tags, '
+        'até ~150 caracteres), texto (a anotação)} e, para DEFESA DO VOTO '
+        '(categoria "defesa"): referencia (norma/documento e artigo/página), '
+        'citacao_literal (copiada da fonte), explicacao_simples, importancia, '
+        'pergunta_arguicao (o que um conselheiro pode perguntar ou objetar), '
+        'resposta_oral (resposta curta para falar em plenário) e '
+        'contra_argumento (se insistirem). status: anotacao (padrão), '
+        'confirmado (fato conferido na base) ou revisar (fato não conferido). '
+        'As perguntas entram no "Simulado de arguição".',
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'secao': {
+          'type': 'string',
+          'enum': ['relatorio', 'fundamentacao', 'conclusao'],
+        },
+        'trecho': {'type': 'string'},
+        'texto': {'type': 'string'},
+        'categoria': {'type': 'string'},
+        'status': {
+          'type': 'string',
+          'enum': ['anotacao', 'confirmado', 'revisar'],
+        },
+        'referencia': {'type': 'string'},
+        'citacao_literal': {'type': 'string'},
+        'explicacao_simples': {'type': 'string'},
+        'importancia': {'type': 'string'},
+        'pergunta_arguicao': {'type': 'string'},
+        'resposta_oral': {'type': 'string'},
+        'contra_argumento': {'type': 'string'},
+      },
+      'required': ['secao', 'trecho', 'texto'],
+    },
+    run: (input, origin) async {
+      final secao = ParecerSecao.porId(input.requireString('secao'));
+      if (secao == null) {
+        throw const CommandException(
+          'secao_invalida',
+          'Use relatorio, fundamentacao ou conclusao.',
+        );
+      }
+      final campos = Map<String, dynamic>.from(input);
+      if (campos['status'] == 'anotacao') campos.remove('status');
+      final c = await parecer.anotarTrecho(
+        secao,
+        input.requireString('trecho'),
+        campos,
+      );
+      return CommandResult.ok(
+        message: 'Comentário criado em ${secao.titulo}.',
+        data: {'id': c['id']},
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'parecer.comentarios.excluir',
+    title: 'Excluir um comentário do parecer',
+    description: 'Exclui o comentário {id} (parecer.comentarios.listar).',
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+      },
+      'required': ['id'],
+    },
+    run: (input, origin) async {
+      final ok = await parecer.excluirAnotacao(input.requireString('id'));
+      if (!ok) {
+        throw const CommandException(
+          'comentario_inexistente',
+          'Comentário não encontrado.',
+        );
+      }
+      return CommandResult.ok(message: 'Comentário excluído.');
     },
   ),
   ModuleCommand(

@@ -78,6 +78,45 @@ uma proposta da IA baseada em fontes, o Gestor cria um comentário
 "rastreabilidade" com arquivo, localização e trecho de cada fonte. A
 análise da seção guarda `pergunta_arguicao` e `resposta_oral`, usadas no
 "Simulado de arguição" (barra da seção).
+- `parecer.comentarios.listar` {secao?}; `parecer.comentarios.adicionar`
+  {secao, trecho, texto, categoria?, status?, referencia?,
+  citacao_literal?, explicacao_simples?, importancia?, pergunta_arguicao?,
+  resposta_oral?, contra_argumento?}; `parecer.comentarios.excluir` {id}.
+
+## OBRIGATÓRIO: anotações de defesa do voto
+Sempre que você redigir ou reescrever uma seção do parecer
+(`parecer.definir` com relatorio, fundamentacao ou conclusao), anote a
+seção em seguida, na mesma tarefa, sem esperar o usuário pedir. O relator
+será interpelado em plenário e precisa ter, em cada ponto do texto, a
+defesa pronta. Não entregue o parecer sem essas anotações.
+1. Releia a seção (`parecer.ler`) e escolha os pontos que podem ser
+   contestados: cada afirmação de fato (datas, votações, documentos),
+   cada norma citada, cada conclusão jurídica, cada pedido acolhido ou
+   negado e cada item do voto. Em geral, de 4 a 10 por seção. A
+   conclusão deve ter uma anotação para cada item do voto.
+2. Para cada ponto, chame `parecer.comentarios.adicionar` com
+   `categoria: "defesa"` e:
+   - `trecho`: cópia literal de uma frase curta da seção (o texto visível,
+     sem tags e sem quebra de linha); se falhar com trecho_nao_encontrado,
+     use um pedaço menor da mesma frase;
+   - `texto`: o que o trecho afirma e por que se sustenta (2 a 4 frases);
+   - `referencia` e `citacao_literal`: a fonte exata (arquivo da base,
+     artigo, página ou ata), conferida com `parecer.base.buscar`; a citação
+     é copiada da fonte, nunca reescrita;
+   - `explicacao_simples`: o argumento em linguagem de conversa;
+   - `pergunta_arguicao`: a objeção mais provável de quem discorda (use os
+     argumentos da parte contrária, do recurso ou das atas);
+   - `resposta_oral`: resposta de até 3 frases para falar em plenário;
+   - `contra_argumento`: o que dizer se a pessoa insistir, incluindo o
+     ponto fraco honesto do argumento, quando houver;
+   - `status`: `confirmado` se o fato foi conferido na base; `revisar` se
+     veio só do usuário ou de documento que não está na base (diga isso no
+     `texto`). Nunca invente norma, artigo, número, data ou placar.
+3. Ao terminar, diga ao usuário quantas anotações criou por seção e quais
+   ficaram "para revisão". Lembre que elas aparecem no editor (trecho
+   destacado; clique para ver tudo) e no "Simulado de arguição".
+Ao alterar uma seção já anotada, liste os comentários: exclua os que não
+se aplicam mais e crie os que faltam.
 
 ## Base de documentos de consulta
 O relator escolhe uma pasta com normas, resoluções e anexos. O Gestor
@@ -97,7 +136,8 @@ as propostas só entram no texto quando ele clica em "Aceitar".
 
 Códigos de erro: base_sem_pasta, consulta_vazia, endereco_invalido, sei_fechado, fora_do_sei, arvore_vazia,
 em_andamento, sem_extracao, ia_indisponivel, documento_inexistente,
-falha_sei, tempo_esgotado.
+falha_sei, tempo_esgotado, trecho_nao_encontrado, secao_invalida,
+comentario_inexistente.
 
 ## Banco
 Por processo (`<id>`): `parecer_processo.<id>` (nome, número SEI, datas),

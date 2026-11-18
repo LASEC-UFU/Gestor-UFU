@@ -58,6 +58,9 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
   Future<void> _carregar() async {
     try {
       await processos.carregar(forcar: true);
+      // Reabrir o módulo mostra o que está no banco (ex.: gravado pelo
+      // agente de IA enquanto a tela estava fechada).
+      await parecer.recarregarDoBanco();
     } catch (e) {
       _mensagem('Não foi possível ler os processos: $e');
     }

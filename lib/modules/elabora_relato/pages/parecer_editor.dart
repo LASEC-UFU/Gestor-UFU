@@ -132,13 +132,22 @@ class _ParecerEditorState extends State<ParecerEditor>
             ),
       );
       _subs.add(
-        widget.service.substituicoes
+        widget.service.substituicoes.where((s) => s == widget.secao).listen((
+          _,
+        ) async {
+          await _js(
+            'window.parecer.definir(${jsonEncode(widget.service.parecer.secao(widget.secao))})',
+          );
+          _repintarComentarios();
+        }),
+      );
+      _subs.add(
+        widget.service.comentariosAlterados
             .where((s) => s == widget.secao)
-            .listen(
-              (_) => _js(
-                'window.parecer.definir(${jsonEncode(widget.service.parecer.secao(widget.secao))})',
-              ),
-            ),
+            .listen((_) {
+              _repintarComentarios();
+              if (mounted) setState(() {});
+            }),
       );
       await _web.setBackgroundColor(const Color(0xFFE9EAEE));
       await _web.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
@@ -501,6 +510,7 @@ class _ParecerEditorState extends State<ParecerEditor>
         'analise_normativa' => 'Análise normativa',
         'consulta_ia' => 'Consulta à IA',
         'rastreabilidade' => 'Fontes do texto aceito',
+        'defesa' => 'Defesa do voto',
         final x => x,
       };
 
@@ -537,6 +547,7 @@ class _ParecerEditorState extends State<ParecerEditor>
       'Por que importa': '${c['importancia'] ?? ''}',
       'Possível pergunta na arguição': '${c['pergunta_arguicao'] ?? ''}',
       'Resposta oral sugerida': '${c['resposta_oral'] ?? ''}',
+      'Se insistirem (contra-argumento)': '${c['contra_argumento'] ?? ''}',
       'Fontes usadas': [
         for (final f in (c['fontes'] as List? ?? const []))
           if (f is Map)

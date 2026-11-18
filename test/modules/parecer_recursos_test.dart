@@ -11,6 +11,7 @@ import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service
 import 'package:gestor_ufu/modules/elabora_relato/data/base_documentos_indexer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/base_documentos.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
+import 'package:gestor_ufu/platform/command/module_command.dart';
 
 BaseDocumentos _base(String arquivo, String texto) => BaseDocumentos(
   pasta: '',
@@ -164,6 +165,87 @@ void main() {
             as Map)['acertos'],
         1,
       );
+    });
+  });
+
+  group('anotações do agente', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    test('ancora no texto visível e avisa o editor', () async {
+      final service = ParecerService(arvore: SeiArvoreService());
+      await service.carregar();
+      await service.substituirSecao(
+        ParecerSecao.conclusao,
+        '<p class="x">I &ndash; CONHECER do recurso;</p>'
+        '<p>II &#8211; INDEFERIR o efeito suspensivo &amp; o resto.</p>',
+      );
+      final avisos = <ParecerSecao>[];
+      final sub = service.comentariosAlterados.listen(avisos.add);
+      final c = await service.anotarTrecho(
+        ParecerSecao.conclusao,
+        'INDEFERIR o efeito suspensivo & o resto',
+        {
+          'texto': 'Sem risco de dano.',
+          'categoria': 'defesa',
+          'pergunta_arguicao': 'Por que não suspender?',
+          'resposta_oral': 'Nada é implantado sem ato próprio.',
+          'id': 'ignorado',
+        },
+      );
+      final texto = ParecerService.textoDoEditor(
+        service.parecer.secao(ParecerSecao.conclusao),
+      );
+      expect(
+        texto.substring(c['posicao'] as int).startsWith('INDEFERIR'),
+        isTrue,
+      );
+      expect(c['secao'], 'conclusao');
+      expect(c['id'], isNot('ignorado'));
+      expect(service.perguntasArguicao().single['id'], c['id']);
+
+      await expectLater(
+        service.anotarTrecho(ParecerSecao.conclusao, 'não existe', {}),
+        throwsA(isA<CommandException>()),
+      );
+
+      expect(await service.excluirAnotacao('${c['id']}'), isTrue);
+      expect(service.parecer.comentarios, isEmpty);
+      await Future<void>.delayed(Duration.zero);
+      expect(avisos, [ParecerSecao.conclusao, ParecerSecao.conclusao]);
+      await sub.cancel();
+    });
+  });
+
+  group('alteração externa do banco', () {
+    setUp(() => SharedPreferences.setMockInitialValues({}));
+
+    test('relê o rascunho e não sobrescreve os comentários', () async {
+      final service = ParecerService(arvore: SeiArvoreService());
+      await service.carregar();
+      await service.substituirSecao(ParecerSecao.conclusao, '<p>Voto.</p>');
+      // Agente grava direto na chave (outra instância do serviço).
+      final agente = ParecerService(arvore: SeiArvoreService());
+      await agente.carregar();
+      await agente.salvarComentario({
+        'id': 'x',
+        'secao': 'conclusao',
+        'selecionado': 'Voto.',
+        'pergunta_arguicao': 'Por quê?',
+      });
+      final avisos = <ParecerSecao>[];
+      final sub = service.comentariosAlterados.listen(avisos.add);
+      expect(await service.recarregarDoBanco(), isTrue);
+      expect(service.parecer.comentarios.single['id'], 'x');
+      expect(await service.recarregarDoBanco(), isFalse);
+      // O próximo salvamento da tela mantém o comentário.
+      service.definirSecaoDoEditor(ParecerSecao.conclusao, '<p>Voto!</p>');
+      await service.salvarAgora();
+      final relido = ParecerService(arvore: SeiArvoreService());
+      await relido.carregar();
+      expect(relido.parecer.comentarios.single['id'], 'x');
+      await Future<void>.delayed(Duration.zero);
+      expect(avisos, contains(ParecerSecao.conclusao));
+      await sub.cancel();
     });
   });
 
