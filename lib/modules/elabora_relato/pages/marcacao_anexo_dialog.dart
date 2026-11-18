@@ -41,6 +41,7 @@ class _MarcacaoAnexoDialogState extends State<MarcacaoAnexoDialog> {
     text: widget.marcacao.comentario,
   );
   late String _cor = widget.marcacao.cor;
+  late String _revisao = widget.marcacao.revisao;
   late String _explicacaoGuardada = widget.marcacao.explicacaoIa;
   ExplicacaoTrecho? _explicacao;
   List<FonteConsulta> _fontes = const [];
@@ -195,6 +196,7 @@ class _MarcacaoAnexoDialogState extends State<MarcacaoAnexoDialog> {
       comentario: _comentario.text.trim(),
       explicacaoIa: _explicacaoGuardada,
       pergunta: _explicacao == null ? m.pergunta : _pergunta.text.trim(),
+      revisao: _revisao,
     ),
   );
 
@@ -284,6 +286,29 @@ class _MarcacaoAnexoDialogState extends State<MarcacaoAnexoDialog> {
                   isDense: true,
                 ),
               ),
+              if (m.pergunta == 'audita_banco') ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: _revisao,
+                  decoration: const InputDecoration(
+                    labelText: 'Revisão da observação',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: 'pendente',
+                      child: Text('Pendente'),
+                    ),
+                    DropdownMenuItem(value: 'aceito', child: Text('Aceitar')),
+                    DropdownMenuItem(
+                      value: 'rejeitado',
+                      child: Text('Rejeitar'),
+                    ),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) setState(() => _revisao = v);
+                  },
+                ),
+              ],
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,

@@ -229,12 +229,37 @@ function pintar(p) {
       camada.appendChild(d);
     }
   };
+  let selecionada = null;
   for (const m of marcacoes) {
     if (m.pagina !== p.n) continue;
-    const classes = [m.id === ativa ? 'ativa' : '', m.comentario ? 'comentada' : ''].join(' ');
-    desenhar(m.inicio, m.fim, classes, CORES[m.cor] || CORES.amarelo);
+    if (m.id === ativa) { selecionada = m; continue; }
+    desenhar(m.inicio, m.fim, m.comentario ? 'comentada' : '', cor(m.cor));
+  }
+  // O trecho do comentário selecionado por cima, com cor e contorno
+  // próprios e um marcador na margem (não só a cor).
+  if (selecionada) {
+    desenhar(selecionada.inicio, selecionada.fim, 'ativa', null);
+    const rs = retangulos(p, selecionada.inicio, selecionada.fim);
+    if (rs.length) {
+      const topo = Math.min(...rs.map((r) => r.y));
+      const base = Math.max(...rs.map((r) => r.y + r.h));
+      const mk = document.createElement('div');
+      mk.className = 'marcador';
+      mk.style.top = topo + 'px';
+      mk.style.height = (base - topo) + 'px';
+      camada.appendChild(mk);
+    }
   }
   if (busca && busca.pagina === p.n) desenhar(busca.inicio, busca.fim, 'busca', null);
+}
+
+/** Cor da marca: nome antigo ("amarelo") ou "#rrggbb", translúcida. */
+function cor(valor) {
+  if (CORES[valor]) return CORES[valor];
+  const m = /^#([0-9a-f]{6})$/i.exec(String(valor || ''));
+  if (!m) return CORES.amarelo;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, .5)`;
 }
 
 function pintarTudo() { for (const p of paginas) pintar(p); }
@@ -305,7 +330,7 @@ area.addEventListener('mouseup', (e) => {
     if (sel) { enviar(Object.assign({ tipo: 'selecao' }, sel)); return; }
     enviar({ tipo: 'selecao', vazio: true });
     const m = marcacaoNoPonto(e.clientX, e.clientY);
-    if (m) enviar({ tipo: 'marcacao', id: m.id, abrir: e.detail >= 2 });
+    if (m) enviar({ tipo: 'marcacao', id: m.id });
   }, 0);
 });
 
@@ -332,7 +357,7 @@ area.addEventListener('contextmenu', (e) => {
   item('Marcar', acao('marcar'), !!sel);
   item('Comentar…', acao('comentar'), !!sel);
   item('✦ Perguntar à IA…', acao('perguntar'), !!sel);
-  if (sobre) item('Abrir marcação', () => enviar({ tipo: 'marcacao', id: sobre.id, abrir: true }));
+  if (sobre) item('Ver o comentário', () => enviar({ tipo: 'marcacao', id: sobre.id }));
   item('Copiar', () => document.execCommand('copy'), !!sel);
   const dica = document.createElement('div');
   dica.className = 'dica';
@@ -375,15 +400,22 @@ window.addEventListener('resize', () => {
   redimensionar = setTimeout(() => zoom('largura'), 200);
 });
 
+/** Rola até o trecho; true se ele foi encontrado na página. */
 async function irPara(alvo) {
   if (!alvo || !paginas.length) return false;
-  const p = paginas[Math.max(1, Math.min(paginas.length, Number(alvo.pagina) || 1)) - 1];
+  const n = Number(alvo.pagina) || 0;
+  if (n < 1 || n > paginas.length) return false;
+  const p = paginas[n - 1];
   area.scrollTop = p.div.offsetTop - 12;
-  await renderizar(p);
-  if (alvo.fim > alvo.inicio) {
-    const rs = retangulos(p, alvo.inicio, alvo.fim);
-    if (rs.length) area.scrollTop = p.div.offsetTop + rs[0].y - area.clientHeight * 0.3;
+  renderizar(p);
+  // Espera a página (que pode estar sendo desenhada) ficar pronta.
+  for (let i = 0; i < 60 && !p.renderizada; i++) {
+    await new Promise((r) => setTimeout(r, 50));
   }
+  if (!(alvo.fim > alvo.inicio)) return p.renderizada;
+  const rs = retangulos(p, alvo.inicio, alvo.fim);
+  if (!rs.length) return false;
+  area.scrollTop = p.div.offsetTop + rs[0].y - area.clientHeight * 0.3;
   return true;
 }
 
@@ -434,7 +466,12 @@ window.pdfv = {
     pintarTudo();
     return true;
   },
-  irPara(alvo) { irPara(alvo); return true; },
+  irPara(alvo) {
+    irPara(alvo).then((ok) => {
+      if (alvo && alvo.pedido !== undefined) enviar({ tipo: 'navegou', pedido: alvo.pedido, ok });
+    });
+    return true;
+  },
   buscar(termo, proxima) {
     buscar(termo, proxima !== false).then((r) => enviar(Object.assign({ tipo: 'busca', termo }, r)));
     return true;

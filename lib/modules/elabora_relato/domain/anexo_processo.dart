@@ -20,6 +20,7 @@ class MarcacaoAnexo {
     this.comentario = '',
     this.explicacaoIa = '',
     this.pergunta = '',
+    this.revisao = 'pendente',
     this.criadoEm,
     this.atualizadoEm,
     this.pdfPagina = 0,
@@ -53,6 +54,9 @@ class MarcacaoAnexo {
 
   /// Pergunta feita à IA sobre o trecho.
   final String pergunta;
+
+  /// Status de revisão, usado pelo Audita Banco (compatível com dados antigos).
+  final String revisao;
   final DateTime? criadoEm;
   final DateTime? atualizadoEm;
 
@@ -61,6 +65,7 @@ class MarcacaoAnexo {
     String? comentario,
     String? explicacaoIa,
     String? pergunta,
+    String? revisao,
   }) => MarcacaoAnexo(
     id: id,
     paragrafo: paragrafo,
@@ -71,6 +76,7 @@ class MarcacaoAnexo {
     comentario: comentario ?? this.comentario,
     explicacaoIa: explicacaoIa ?? this.explicacaoIa,
     pergunta: pergunta ?? this.pergunta,
+    revisao: revisao ?? this.revisao,
     criadoEm: criadoEm,
     atualizadoEm: DateTime.now(),
     pdfPagina: pdfPagina,
@@ -96,6 +102,7 @@ class MarcacaoAnexo {
     comentario: comentario,
     explicacaoIa: explicacaoIa,
     pergunta: pergunta,
+    revisao: revisao,
     criadoEm: criadoEm,
     atualizadoEm: atualizadoEm,
     pdfPagina: pdfPagina ?? this.pdfPagina,
@@ -113,6 +120,9 @@ class MarcacaoAnexo {
     comentario: '${j['comentario'] ?? ''}',
     explicacaoIa: '${j['explicacao_ia'] ?? ''}',
     pergunta: '${j['pergunta'] ?? ''}',
+    revisao: ['pendente', 'aceito', 'rejeitado'].contains(j['revisao'])
+        ? '${j['revisao']}'
+        : 'pendente',
     criadoEm: DateTime.tryParse('${j['criado_em'] ?? ''}'),
     atualizadoEm: DateTime.tryParse('${j['atualizado_em'] ?? ''}'),
     pdfPagina: ((j['pdf'] as Map?)?['pagina'] as num?)?.toInt() ?? 0,
@@ -132,6 +142,7 @@ class MarcacaoAnexo {
     if (comentario.isNotEmpty) 'comentario': comentario,
     if (explicacaoIa.isNotEmpty) 'explicacao_ia': explicacaoIa,
     if (pergunta.isNotEmpty) 'pergunta': pergunta,
+    if (revisao != 'pendente') 'revisao': revisao,
     if (criadoEm != null) 'criado_em': criadoEm!.toIso8601String(),
     if (atualizadoEm != null) 'atualizado_em': atualizadoEm!.toIso8601String(),
   };

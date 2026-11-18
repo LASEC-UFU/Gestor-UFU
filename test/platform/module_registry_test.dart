@@ -15,6 +15,8 @@ void main() {
 
   test('registra os módulos na ordem padrão do painel', () {
     expect(registry.modules.map((m) => m.id), [
+      'audita-banco',
+      'agenda-email',
       'moodle',
       'diario',
       'elabora-relato',
