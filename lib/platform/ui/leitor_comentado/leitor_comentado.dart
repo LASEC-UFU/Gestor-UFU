@@ -92,44 +92,82 @@ class _LeitorComentadoState extends State<LeitorComentado> {
     setState(() {});
     final sel = c.selecionado;
     if (sel != null && sel != _ultimoVisto) {
-      // Leva o foco do teclado ao leitor (Alt + ↑/↓, Esc), sem tirá-lo da
-      // busca se o usuário estiver nela.
-      if (!_foco.hasFocus) _foco.requestFocus();
-      // Mostra o cartão selecionado na lista.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final ctx = _chaves[sel]?.currentContext;
-        if (ctx != null && ctx.mounted) {
-          Scrollable.ensureVisible(
-            ctx,
-            alignment: 0.1,
-            duration: const Duration(milliseconds: 150),
-          );
-        }
-      });
+      _mostrarCartao(sel);
     }
     _ultimoVisto = sel;
   }
 
+  /// Rola a lista até o cartão [id]. A lista só monta os cartões perto da
+  /// área visível: se o cartão ainda não existe, salta para a posição
+  /// estimada e tenta de novo no quadro seguinte.
+  Future<void> _mostrarCartao(String id) async {
+    for (var tentativa = 0; tentativa < 8; tentativa++) {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || c.selecionado != id) return;
+      final ctx = _chaves[id]?.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.1,
+          duration: const Duration(milliseconds: 150),
+        );
+        return;
+      }
+      if (!_lista.hasClients) return;
+      final visiveis = c.visiveis;
+      final i = visiveis.indexWhere((x) => x.id == id);
+      if (i < 0) return;
+      final pos = _lista.position;
+      _lista.jumpTo(
+        (pos.maxScrollExtent * i / (visiveis.length - 1).clamp(1, 1 << 30))
+            .clamp(0.0, pos.maxScrollExtent),
+      );
+    }
+  }
+
+  /// A navegação por teclado fica restrita ao painel que está com foco.
+  /// Paisagem usa ←/→; retrato usa ↑/↓. Campos editáveis mantêm suas setas.
+  KeyEventResult _tecla(FocusNode _, KeyEvent e) {
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final ctx = FocusManager.instance.primaryFocus?.context;
+    final emTexto =
+        ctx != null &&
+        (ctx.widget is EditableText ||
+            ctx.findAncestorWidgetOfExactType<EditableText>() != null);
+    if (emTexto) return KeyEventResult.ignored;
+
+    final paisagem = MediaQuery.orientationOf(context) == Orientation.landscape;
+    final anterior = paisagem
+        ? e.logicalKey == LogicalKeyboardKey.arrowLeft
+        : e.logicalKey == LogicalKeyboardKey.arrowUp;
+    final proximo = paisagem
+        ? e.logicalKey == LogicalKeyboardKey.arrowRight
+        : e.logicalKey == LogicalKeyboardKey.arrowDown;
+    if (anterior || proximo) {
+      if (anterior) {
+        if (c.temAnterior) c.anterior();
+      } else if (c.temProximo) {
+        c.proximo();
+      }
+      return KeyEventResult.handled;
+    }
+    if (e.logicalKey == LogicalKeyboardKey.escape && c.selecionado != null) {
+      c.limparSelecao();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
-            c.proximo,
-        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
-            c.anterior,
-        const SingleActivator(LogicalKeyboardKey.escape): c.limparSelecao,
-      },
-      child: Focus(
-        focusNode: _foco,
-        child: LayoutBuilder(
-          builder: (context, box) => box.maxWidth < widget.limiteEstreito
-              ? _estreito(box)
-              : _largo(box),
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, box) =>
+          box.maxWidth < widget.limiteEstreito ? _estreito(box) : _largo(box),
     );
   }
+
+  Widget _painelComFoco(Widget child) =>
+      Focus(focusNode: _foco, onKeyEvent: _tecla, child: child);
 
   // --------------------------------------------------------------- desktop
 
@@ -167,7 +205,10 @@ class _LeitorComentadoState extends State<LeitorComentado> {
           maxima: maxima,
           aoMudar: c.definirLargura,
         ),
-        SizedBox(width: largura, child: _painel(estreito: false)),
+        SizedBox(
+          width: largura,
+          child: _painelComFoco(_painel(estreito: false)),
+        ),
       ],
     );
   }
@@ -207,9 +248,9 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                 alignment: Alignment.bottomCenter,
                 child: SizedBox(
                   height: altura,
-                  child: compacta
-                      ? _folhaCompacta(ativo)
-                      : _painel(estreito: true),
+                  child: _painelComFoco(
+                    compacta ? _folhaCompacta(ativo) : _painel(estreito: true),
+                  ),
                 ),
               ),
             ),
@@ -414,14 +455,24 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Comentário anterior (Alt + ↑)',
+                  tooltip: 'Comentário anterior (↑)',
                   icon: const Icon(Icons.keyboard_arrow_up),
-                  onPressed: c.temAnterior ? c.anterior : null,
+                  onPressed: c.temAnterior
+                      ? () {
+                          _foco.requestFocus();
+                          c.anterior();
+                        }
+                      : null,
                 ),
                 IconButton(
-                  tooltip: 'Próximo comentário (Alt + ↓)',
+                  tooltip: 'Próximo comentário (↓)',
                   icon: const Icon(Icons.keyboard_arrow_down),
-                  onPressed: c.temProximo ? c.proximo : null,
+                  onPressed: c.temProximo
+                      ? () {
+                          _foco.requestFocus();
+                          c.proximo();
+                        }
+                      : null,
                 ),
               ],
             ),
@@ -465,6 +516,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                           aviso: c.aviso(com.id),
                           numero: widget.comentarios.indexOf(com) + 1,
                           aoTocar: () async {
+                            _foco.requestFocus();
                             await c.alternar(com.id);
                             // No celular, depois de escolher, mostra o
                             // documento com o comentário ativo embaixo.
@@ -472,7 +524,10 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                               c.definirFolhaCompacta(true);
                             }
                           },
-                          aoExpandir: () => c.alternarExpansao(com.id),
+                          aoExpandir: () {
+                            _foco.requestFocus();
+                            c.alternarExpansao(com.id);
+                          },
                         ),
                       );
                     },

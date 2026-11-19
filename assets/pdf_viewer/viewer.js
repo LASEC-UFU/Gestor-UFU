@@ -317,20 +317,42 @@ function marcacaoEm(pagina, o) {
 }
 
 function marcacaoNoPonto(x, y) {
-  const r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
-  if (!r) return null;
-  const pt = ponto(r.startContainer, r.startOffset);
+  const r = document.caretRangeFromPoint?.(x, y);
+  let caret;
+  if (r) {
+    caret = { no: r.startContainer, offset: r.startOffset };
+  } else {
+    const p = document.caretPositionFromPoint?.(x, y);
+    caret = p ? { no: p.offsetNode, offset: p.offset } : null;
+  }
+  if (!caret) return null;
+  const pt = ponto(caret.no, caret.offset);
   return pt ? marcacaoEm(pt.p.n, pt.o) : null;
 }
 
+let pontoMouseBaixado = null;
+area.addEventListener('mousedown', (e) => {
+  pontoMouseBaixado = e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+});
+
 area.addEventListener('mouseup', (e) => {
   if (e.button !== 0) return;
+  const inicio = pontoMouseBaixado;
+  pontoMouseBaixado = null;
+  const clique = inicio && Math.hypot(e.clientX - inicio.x, e.clientY - inicio.y) <= 8;
   setTimeout(() => {
+    // Prefer the mark under a simple click, even if an old text selection is
+    // still active. A drag remains a text selection and must not navigate.
+    if (clique) {
+      const m = marcacaoNoPonto(e.clientX, e.clientY);
+      if (m) {
+        enviar({ tipo: 'marcacao', id: m.id });
+        return;
+      }
+    }
     const sel = selecaoAtual();
     if (sel) { enviar(Object.assign({ tipo: 'selecao' }, sel)); return; }
     enviar({ tipo: 'selecao', vazio: true });
-    const m = marcacaoNoPonto(e.clientX, e.clientY);
-    if (m) enviar({ tipo: 'marcacao', id: m.id });
   }, 0);
 });
 

@@ -60,6 +60,10 @@ class LeitorComentadoController extends ChangeNotifier {
     _todos = lista;
     final ids = {for (final c in lista) c.id};
     _expandidos.retainAll(ids);
+    final expandidoSelecionado =
+        _selecionado != null && _expandidos.contains(_selecionado);
+    _expandidos.clear();
+    if (expandidoSelecionado) _expandidos.add(_selecionado!);
     _avisos.removeWhere((k, _) => !ids.contains(k));
     if (_selecionado != null && !ids.contains(_selecionado)) {
       _selecionado = null;
@@ -81,8 +85,15 @@ class LeitorComentadoController extends ChangeNotifier {
   }) async {
     final c = _todos.where((x) => x.id == id).firstOrNull;
     if (c == null) return;
+    // Ao clicar numa marca do documento, transfere a expansão atual para o
+    // novo destaque. Se o comentário anterior estava recolhido, mantém esse
+    // estado; sem seleção anterior, o primeiro destaque abre por padrão.
+    final manterExpandido = rolar
+        ? expandir
+        : _selecionado == null || _expandidos.contains(_selecionado);
     _selecionado = id;
-    if (expandir) _expandidos.add(id);
+    _expandidos.clear();
+    if (manterExpandido) _expandidos.add(id);
     _avisos.remove(id);
     if (!painelAberto) painelAberto = true;
     notifyListeners();
@@ -122,14 +133,18 @@ class LeitorComentadoController extends ChangeNotifier {
   }
 
   /// Recolhe/expande sem mudar a seleção (botão de seta do cartão).
-  void alternarExpansao(String id) {
-    if (!_expandidos.remove(id)) _expandidos.add(id);
-    notifyListeners();
+  Future<void> alternarExpansao(String id) async {
+    if (_expandidos.remove(id)) {
+      notifyListeners();
+      return;
+    }
+    await selecionar(id);
   }
 
   void limparSelecao() {
     if (_selecionado == null) return;
     _selecionado = null;
+    _expandidos.clear();
     aoLimpar?.call();
     notifyListeners();
   }
@@ -141,7 +156,7 @@ class LeitorComentadoController extends ChangeNotifier {
     return v.isNotEmpty && indiceSelecionado < v.length - 1;
   }
 
-  bool get temAnterior => visiveis.isNotEmpty && indiceSelecionado != 0;
+  bool get temAnterior => indiceSelecionado > 0;
 
   Future<void> proximo() async {
     final v = visiveis;
@@ -157,8 +172,8 @@ class LeitorComentadoController extends ChangeNotifier {
     final v = visiveis;
     if (v.isEmpty) return;
     final i = indiceSelecionado;
-    if (i == 0) return;
-    final alvo = i < 0 ? v.last : v[i - 1];
+    if (i <= 0) return;
+    final alvo = v[i - 1];
     _expandidos.remove(_selecionado);
     await selecionar(alvo.id);
   }

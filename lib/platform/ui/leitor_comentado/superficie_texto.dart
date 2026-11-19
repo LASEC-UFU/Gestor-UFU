@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/rendering.dart' show RenderEditable;
 
 import 'package:gestor_ufu/platform/ui/leitor_comentado/comentario_documento.dart';
 import 'package:gestor_ufu/platform/ui/leitor_comentado/marca_documento.dart';
@@ -49,6 +51,8 @@ class SuperficieTexto extends StatefulWidget {
 class _SuperficieTextoState extends State<SuperficieTexto> {
   final _scroll = ScrollController();
   final _chaves = <int, GlobalKey>{};
+  final _chavesTexto = <int, GlobalKey>{};
+  final Map<int, ({int paragrafo, Offset ponto})> _pontosPressionados = {};
   int _ultimaBusca = -1;
 
   @override
@@ -189,17 +193,23 @@ class _SuperficieTextoState extends State<SuperficieTexto> {
               ),
             ),
           ),
-          child: SelectableText.rich(
-            TextSpan(
-              style: base,
-              children: [
-                for (final s in segmentarTexto(par.texto, marcas))
-                  TextSpan(text: s.texto, style: _estilo(s.marca)),
-              ],
+          child: Listener(
+            key: _chavesTexto.putIfAbsent(i, GlobalKey.new),
+            onPointerDown: (e) => _pressionar(i, e),
+            onPointerUp: (e) => _soltar(i, e, marcas),
+            onPointerCancel: (e) => _pontosPressionados.remove(e.pointer),
+            child: SelectableText.rich(
+              TextSpan(
+                style: base,
+                children: [
+                  for (final s in segmentarTexto(par.texto, marcas))
+                    TextSpan(text: s.texto, style: _estilo(s.marca)),
+                ],
+              ),
+              onSelectionChanged: (sel, _) => _aoSelecionar(i, sel, marcas),
+              contextMenuBuilder: (context, state) =>
+                  _menu(context, state, i, marcas),
             ),
-            onSelectionChanged: (sel, _) => _aoSelecionar(i, sel, marcas),
-            contextMenuBuilder: (context, state) =>
-                _menu(context, state, i, marcas),
           ),
         ),
       ],
@@ -228,13 +238,36 @@ class _SuperficieTextoState extends State<SuperficieTexto> {
     if (!sel.isValid) return;
     if (sel.isCollapsed) {
       widget.aoSelecionar(null);
-      final m = marcas
-          .where((x) => sel.baseOffset >= x.inicio && sel.baseOffset < x.fim)
-          .lastOrNull;
-      if (m != null) widget.aoTocarMarca(m.id);
       return;
     }
     widget.aoSelecionar((paragrafo: i, inicio: sel.start, fim: sel.end));
+  }
+
+  TextPosition? _posicaoRender(RenderObject? atual, Offset global) {
+    if (atual is RenderEditable) return atual.getPositionForPoint(global);
+    TextPosition? encontrado;
+    atual?.visitChildren((filho) {
+      encontrado ??= _posicaoRender(filho, global);
+    });
+    return encontrado;
+  }
+
+  void _pressionar(int i, PointerDownEvent e) {
+    if ((e.buttons & kPrimaryButton) == 0) return;
+    _pontosPressionados[e.pointer] = (paragrafo: i, ponto: e.position);
+  }
+
+  void _soltar(int i, PointerUpEvent e, List<MarcaDocumento> marcas) {
+    final pressionado = _pontosPressionados.remove(e.pointer);
+    if (pressionado == null || pressionado.paragrafo != i) return;
+    if ((e.position - pressionado.ponto).distance > 12) return;
+    final contexto = _chavesTexto[i]?.currentContext;
+    final posicao = _posicaoRender(contexto?.findRenderObject(), e.position);
+    if (posicao == null) return;
+    final marca = marcas
+        .where((m) => posicao.offset >= m.inicio && posicao.offset < m.fim)
+        .lastOrNull;
+    if (marca != null) widget.aoTocarMarca(marca.id);
   }
 
   Widget _menu(

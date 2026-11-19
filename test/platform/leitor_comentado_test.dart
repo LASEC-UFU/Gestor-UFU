@@ -54,6 +54,64 @@ void main() {
       expect(idas.last, 'b:false');
     });
 
+    test(
+      'anterior só fica disponível depois de selecionar um comentário',
+      () async {
+        final c = LeitorComentadoController()..definirComentarios(_lista());
+        expect(c.selecionado, isNull);
+        expect(c.temAnterior, isFalse);
+        expect(c.temProximo, isTrue);
+
+        await c.anterior();
+        expect(c.selecionado, isNull);
+
+        await c.selecionar('b');
+        expect(c.temAnterior, isTrue);
+        await c.anterior();
+        expect(c.selecionado, 'a');
+        expect(c.temAnterior, isFalse);
+      },
+    );
+
+    test(
+      'expansão única e seleção pelo documento herda expandido/recolhido',
+      () async {
+        final c = LeitorComentadoController()
+          ..navegar = ((_, _) async => true)
+          ..definirComentarios(_lista());
+
+        await c.selecionar('a');
+        expect(
+          (c.selecionado, c.expandido('a'), c.expandido('b')),
+          ('a', true, false),
+        );
+
+        await c.selecionar('b', rolar: false);
+        expect(
+          (c.selecionado, c.expandido('a'), c.expandido('b')),
+          ('b', false, true),
+        );
+
+        await c.alternarExpansao('b');
+        expect(
+          (c.selecionado, c.expandido('a'), c.expandido('b')),
+          ('b', false, false),
+        );
+
+        await c.selecionar('a', rolar: false);
+        expect(
+          (c.selecionado, c.expandido('a'), c.expandido('b')),
+          ('a', false, false),
+        );
+
+        await c.alternarExpansao('b');
+        expect(
+          (c.selecionado, c.expandido('a'), c.expandido('b')),
+          ('b', false, true),
+        );
+      },
+    );
+
     test('clicar de novo recolhe e desfaz a seleção', () async {
       var limpou = 0;
       final c = LeitorComentadoController()
@@ -68,7 +126,7 @@ void main() {
       expect((c.selecionado, c.expandido('a')), (null, false));
       expect(limpou, 1);
       c.alternarExpansao('b');
-      expect((c.selecionado, c.expandido('b')), (null, true));
+      expect((c.selecionado, c.expandido('b')), ('b', true));
     });
 
     test('sem âncora ou trecho não achado: avisa em vez de fingir', () async {
@@ -171,13 +229,11 @@ void main() {
       expect(find.text('Como melhorar'), findsNothing);
       expect(c.selecionado, isNull);
 
-      // Próximo pelo botão e pelo teclado (Alt + ↓).
-      await tester.tap(find.byTooltip('Próximo comentário (Alt + ↓)'));
+      // Próximo pelo botão e pela seta horizontal em paisagem.
+      await tester.tap(find.byTooltip('Próximo comentário (↓)'));
       await tester.pumpAndSettle();
       expect(c.selecionado, 'a');
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
       expect(c.selecionado, 'b');
       expect(idas, ['a', 'a', 'b']);
@@ -209,10 +265,10 @@ void main() {
       await tester.tap(find.byTooltip('Fechar o painel de comentários'));
       await tester.pumpAndSettle();
       expect(find.text('Comentários (2)'), findsOneWidget); // botão de abrir
-      expect(find.byTooltip('Próximo comentário (Alt + ↓)'), findsNothing);
+      expect(find.byTooltip('Próximo comentário (↓)'), findsNothing);
       await tester.tap(find.text('Comentários (2)'));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Próximo comentário (Alt + ↓)'), findsOneWidget);
+      expect(find.byTooltip('Próximo comentário (↓)'), findsOneWidget);
     });
 
     testWidgets('busca mostra a contagem e pode ser limpa', (tester) async {
@@ -324,5 +380,200 @@ void main() {
       await ctrl.irPara(const MarcaDocumento(id: 'x', cor: Colors.amber)),
       isFalse,
     );
+  });
+
+  testWidgets('clicar num trecho marcado informa qual comentário foi tocado', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1400, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final c = LeitorComentadoController()..navegar = ((_, _) async => true);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LeitorComentado(
+            controller: c,
+            comentarios: const [
+              ComentarioDocumento(
+                id: 'comentario-a',
+                titulo: 'Comentário de teste',
+                trechoMarcado: 'Trecho com comentário',
+                local: 'p. 1',
+                cor: Colors.amber,
+              ),
+            ],
+            documento: SuperficieTexto(
+              paragrafos: const [
+                (texto: 'Trecho com comentário', pagina: 1, titulo: false),
+              ],
+              marcas: const [
+                MarcaDocumento(
+                  id: 'comentario-a',
+                  cor: Colors.amber,
+                  paragrafo: 0,
+                  inicio: 0,
+                  fim: 21,
+                ),
+              ],
+              controller: SuperficieTextoController(),
+              selecionada: c.selecionado,
+              aoSelecionar: (_) {},
+              aoPedirAcao: (_, _) {},
+              aoTocarMarca: (id) => c.selecionar(id, rolar: false),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tapAt(const Offset(55, 64));
+    await tester.pumpAndSettle();
+    expect(c.selecionado, 'comentario-a');
+    expect(find.byIcon(Icons.my_location), findsOneWidget);
+  });
+
+  group('navegação numa lista longa', () {
+    late LeitorComentadoController c;
+    late List<String> idas;
+    late List<ComentarioDocumento> lista;
+
+    Future<void> montar(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1400, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      idas = [];
+      c = LeitorComentadoController()
+        ..navegar = (com, rolar) async {
+          idas.add(com.id);
+          return true;
+        };
+      lista = [
+        for (var i = 0; i < 30; i++)
+          ComentarioDocumento(
+            id: 'c$i',
+            titulo:
+                'Comentário número $i, com texto suficiente para '
+                'ocupar duas linhas no cartão do painel lateral.',
+            cor: Colors.amber,
+            secoes: [SecaoComentario('Por que', 'Explicação. ' * 12)],
+          ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LeitorComentado(
+              controller: c,
+              comentarios: lista,
+              documento: const SizedBox.expand(),
+            ),
+          ),
+        ),
+      );
+    }
+
+    bool visivel(WidgetTester tester, String id) {
+      final f = find.text(lista.firstWhere((x) => x.id == id).titulo);
+      if (f.evaluate().isEmpty) return false;
+      final r = tester.getRect(f);
+      return r.top >= 0 && r.bottom <= 700;
+    }
+
+    testWidgets('anterior a partir do último mostra o cartão e o trecho', (
+      tester,
+    ) async {
+      await montar(tester);
+      await c.selecionar('c29');
+      await tester.pumpAndSettle();
+      expect(visivel(tester, 'c29'), isTrue);
+      for (final esperado in ['c28', 'c27', 'c26']) {
+        await tester.tap(find.byTooltip('Comentário anterior (↑)'));
+        await tester.pumpAndSettle();
+        expect(c.selecionado, esperado);
+        expect(visivel(tester, esperado), isTrue, reason: esperado);
+      }
+      expect(idas, ['c29', 'c28', 'c27', 'c26']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('em paisagem, ←/→ navegam com foco no painel de comentários', (
+      tester,
+    ) async {
+      await montar(tester);
+      // Sem seleção, as setas não navegam.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, isNull);
+
+      await tester.tap(find.text(lista[2].titulo));
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'c2');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'c3');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'c3');
+      expect(idas, ['c2', 'c3', 'c4', 'c3']);
+      expect(visivel(tester, 'c3'), isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'c3');
+
+      // Na busca, as setas são do campo de texto.
+      await tester.tap(find.byType(TextField));
+      await tester.enterText(find.byType(TextField), 'número');
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'c3');
+
+      // Esc desfaz a seleção.
+      await tester.tap(find.text(lista[3].titulo));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, isNull);
+      expect(c.expandido('c3'), isFalse);
+    });
+
+    testWidgets('em retrato, ↑/↓ navegam com foco no painel de comentários', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(420, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final c = LeitorComentadoController()..navegar = ((_, _) async => true);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LeitorComentado(
+              controller: c,
+              comentarios: _lista(),
+              documento: const ColoredBox(color: Colors.white),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('A data do ofício não confere com a da ata.'));
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'a');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'b');
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'a');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(c.selecionado, 'a');
+    });
   });
 }
