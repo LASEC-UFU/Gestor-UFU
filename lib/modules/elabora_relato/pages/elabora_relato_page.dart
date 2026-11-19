@@ -34,10 +34,15 @@ class ElaboraRelatoPage extends StatefulWidget {
   State<ElaboraRelatoPage> createState() => _ElaboraRelatoPageState();
 }
 
-class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
+class _ElaboraRelatoPageState extends State<ElaboraRelatoPage>
+    with SingleTickerProviderStateMixin {
   bool _carregando = true;
   bool _abrindo = false;
   String _filtro = '';
+  late final TabController _abas;
+  int _abaAtual = 0;
+  int? _abaPermitida;
+  bool _repondoAba = false;
 
   ProcessosParecerService get processos => widget.processos;
   ParecerService get parecer => processos.parecer;
@@ -45,13 +50,36 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
   @override
   void initState() {
     super.initState();
+    _abas = TabController(length: 4, vsync: this)..addListener(_vigiarAbas);
     _carregar();
   }
+
+  void _vigiarAbas() {
+    if (_repondoAba) return;
+    final destino = _abas.index;
+    // Só um clique direto numa aba recebe autorização explícita. Assim, um
+    // atalho que escape de um painel (ou um evento nativo do WebView) nunca
+    // muda a seção do parecer.
+    if (_abaPermitida == destino) {
+      _abaAtual = destino;
+      _abaPermitida = null;
+      return;
+    }
+    if (destino == _abaAtual) return;
+    _repondoAba = true;
+    _abas.index = _abaAtual;
+    _repondoAba = false;
+  }
+
+  void _clicouAba(int indice) => _abaPermitida = indice;
 
   @override
   void dispose() {
     // Grava o rascunho do processo aberto ao sair do módulo.
     parecer.salvarAgora();
+    _abas
+      ..removeListener(_vigiarAbas)
+      ..dispose();
     super.dispose();
   }
 
@@ -430,31 +458,36 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
 
   Widget _processo(ProcessoParecer p) {
     final itens = _funcionalidades;
-    return DefaultTabController(
-      // Cada processo recria as abas (e os editores) com os dados dele.
+    return ModuleScaffold(
       key: ValueKey('processo-${p.id}'),
-      length: itens.length,
-      child: ModuleScaffold(
-        moduleId: 'elabora-relato',
-        title: p.nome,
-        subtitle: [
-          if (p.numeroSei.isNotEmpty) 'SEI ${p.numeroSei}',
-          'Parecer / Relato',
-        ].join(' · '),
-        onBack: () => _executar(processos.fechar),
-        actions: [
-          IconButton(
-            tooltip: 'Renomear o processo',
-            onPressed: () => _renomear(p),
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          InserirSeiBotao(service: parecer),
-        ],
-        body: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(28, 0, 28, 0),
+      moduleId: 'elabora-relato',
+      title: p.nome,
+      subtitle: [
+        if (p.numeroSei.isNotEmpty) 'SEI ${p.numeroSei}',
+        'Parecer / Relato',
+      ].join(' · '),
+      onBack: () => _executar(processos.fechar),
+      actions: [
+        IconButton(
+          tooltip: 'Renomear o processo',
+          onPressed: () => _renomear(p),
+          icon: const Icon(Icons.edit_outlined),
+        ),
+        InserirSeiBotao(service: parecer),
+      ],
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 0, 28, 0),
+            // As abas continuam clicáveis, mas não podem reter foco de
+            // teclado. Em desktop, o TabBar usa ←/→ para mudar de aba;
+            // isso competia com a navegação dos comentários dentro do
+            // editor e fazia uma tecla residual avançar Relatório →
+            // Fundamentação → Conclusão.
+            child: ExcludeFocus(
               child: TabBar(
+                controller: _abas,
+                onTap: _clicouAba,
                 isScrollable: true,
                 tabAlignment: TabAlignment.start,
                 labelColor: AppTheme.textPrimary,
@@ -476,16 +509,17 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
                 ],
               ),
             ),
-            Expanded(
-              child: TabBarView(
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  for (final item in itens) Builder(builder: item.builder),
-                ],
-              ),
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _abas,
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                for (final item in itens) Builder(builder: item.builder),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

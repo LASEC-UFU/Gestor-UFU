@@ -19,6 +19,9 @@
   .gestor-ativo-barra { position: absolute; left: 6px; width: 6px; border-radius: 3px; background: #0b4fa8; pointer-events: none; z-index: 5; }
   #folha .ck-editor__editable { min-height: 24cm; padding: 1.5cm 1.8cm; border: 0 !important; box-shadow: none !important; }
   #rodape { font: 11px "Segoe UI", sans-serif; color: #5e6478; padding: 4px 10px; background: #fff; border-top: 1px solid #d6d8de; display: flex; gap: 16px; }
+  /* Alternativa quando o WebView não autorizar a Fullscreen API. */
+  body.gestor-tela-cheia #area { padding: 0; }
+  body.gestor-tela-cheia #folha { max-width: none; min-height: 100%; box-shadow: none; }
   .ck.ck-button.gestor-ativo { background: #ffe3b3 !important; }
   .ck-content a.ancora_sei { color: #1f4e9c; text-decoration: underline; cursor: default; }
   ::highlight(parecer-comentarios) { background: #ffe7a8; text-decoration: underline; text-decoration-color: #d18a00; }

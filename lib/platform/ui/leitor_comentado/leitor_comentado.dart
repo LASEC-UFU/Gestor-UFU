@@ -24,6 +24,9 @@ class LeitorComentado extends StatefulWidget {
     this.vazio,
     this.larguraPadrao = 360,
     this.limiteEstreito = 900,
+    this.onSelectionChanged,
+    this.somentePainel = false,
+    this.ocultarPainel = false,
     super.key,
   });
 
@@ -43,6 +46,18 @@ class LeitorComentado extends StatefulWidget {
 
   /// Abaixo desta largura, usa a folha inferior.
   final double limiteEstreito;
+
+  /// Informa também seleções iniciadas no próprio documento. Útil para manter
+  /// uma janela de comentários destacada no mesmo comentário ativo.
+  final ValueChanged<String?>? onSelectionChanged;
+
+  /// Exibe somente o painel. Usado pela janela destacável para preservar
+  /// exatamente os mesmos cartões, busca e comandos do painel acoplado.
+  final bool somentePainel;
+
+  /// Quando o painel foi destacado para outra janela, mantém apenas o
+  /// documento nesta janela principal.
+  final bool ocultarPainel;
 
   static const larguraMinima = 280.0;
   static const larguraMaximaAbsoluta = 640.0;
@@ -91,10 +106,25 @@ class _LeitorComentadoState extends State<LeitorComentado> {
     if (!mounted) return;
     setState(() {});
     final sel = c.selecionado;
-    if (sel != null && sel != _ultimoVisto) {
+    final mudouSelecao = sel != _ultimoVisto;
+    if (mudouSelecao) widget.onSelectionChanged?.call(sel);
+    if (sel != null && mudouSelecao) {
+      // Uma seleção vinda do documento também passa a navegação por teclado
+      // para o painel. Sem isso, ←/→ pode continuar no TabBar da página e
+      // trocar Relatório/Fundamentação em vez de trocar o comentário.
+      _assumirFocoDoPainel();
       _mostrarCartao(sel);
     }
     _ultimoVisto = sel;
+  }
+
+  /// O TabBar do editor também conhece ←/→. Não basta o painel ter um foco
+  /// ancestral: um cartão, botão ou marca clicado pode manter o foco primário
+  /// em outro controle durante o mesmo gesto. Tornamos o painel o foco
+  /// primário antes da seleção/navegação para que nenhuma seta residual seja
+  /// interpretada como troca de aba.
+  void _assumirFocoDoPainel() {
+    if (!_foco.hasPrimaryFocus) _foco.requestFocus();
   }
 
   /// Rola a lista até o cartão [id]. A lista só monta os cartões perto da
@@ -137,6 +167,12 @@ class _LeitorComentadoState extends State<LeitorComentado> {
     if (emTexto) return KeyEventResult.ignored;
 
     final paisagem = MediaQuery.orientationOf(context) == Orientation.landscape;
+    final setaHorizontal =
+        e.logicalKey == LogicalKeyboardKey.arrowLeft ||
+        e.logicalKey == LogicalKeyboardKey.arrowRight;
+    final setaVertical =
+        e.logicalKey == LogicalKeyboardKey.arrowUp ||
+        e.logicalKey == LogicalKeyboardKey.arrowDown;
     final anterior = paisagem
         ? e.logicalKey == LogicalKeyboardKey.arrowLeft
         : e.logicalKey == LogicalKeyboardKey.arrowUp;
@@ -151,6 +187,9 @@ class _LeitorComentadoState extends State<LeitorComentado> {
       }
       return KeyEventResult.handled;
     }
+    // Mesmo a direção não usada no layout não pode escapar para o TabBar,
+    // que a usaria para alternar Relatório/Fundamentação/Conclusão.
+    if (setaHorizontal || setaVertical) return KeyEventResult.handled;
     if (e.logicalKey == LogicalKeyboardKey.escape && c.selecionado != null) {
       c.limparSelecao();
       return KeyEventResult.handled;
@@ -160,6 +199,10 @@ class _LeitorComentadoState extends State<LeitorComentado> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.somentePainel) {
+      return _painelComFoco(_painel(estreito: false));
+    }
+    if (widget.ocultarPainel) return widget.documento;
     return LayoutBuilder(
       builder: (context, box) =>
           box.maxWidth < widget.limiteEstreito ? _estreito(box) : _largo(box),
@@ -459,7 +502,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                   icon: const Icon(Icons.keyboard_arrow_up),
                   onPressed: c.temAnterior
                       ? () {
-                          _foco.requestFocus();
+                          _assumirFocoDoPainel();
                           c.anterior();
                         }
                       : null,
@@ -469,7 +512,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                   icon: const Icon(Icons.keyboard_arrow_down),
                   onPressed: c.temProximo
                       ? () {
-                          _foco.requestFocus();
+                          _assumirFocoDoPainel();
                           c.proximo();
                         }
                       : null,
@@ -516,7 +559,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                           aviso: c.aviso(com.id),
                           numero: widget.comentarios.indexOf(com) + 1,
                           aoTocar: () async {
-                            _foco.requestFocus();
+                            _assumirFocoDoPainel();
                             await c.alternar(com.id);
                             // No celular, depois de escolher, mostra o
                             // documento com o comentário ativo embaixo.
@@ -525,7 +568,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
                             }
                           },
                           aoExpandir: () {
-                            _foco.requestFocus();
+                            _assumirFocoDoPainel();
                             c.alternarExpansao(com.id);
                           },
                         ),

@@ -542,6 +542,62 @@ void main() {
       expect(c.expandido('c3'), isFalse);
     });
 
+    testWidgets(
+      'seleção vinda do documento tira o foco das abas antes de navegar',
+      (tester) async {
+        tester.view.physicalSize = const Size(1400, 700);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        final focoAbas = FocusNode(debugLabel: 'Abas do parecer');
+        addTearDown(focoAbas.dispose);
+        var trocasDeAba = 0;
+        final c = LeitorComentadoController()..navegar = ((_, _) async => true);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Column(
+                children: [
+                  Focus(
+                    focusNode: focoAbas,
+                    onKeyEvent: (_, e) {
+                      if (e is! KeyUpEvent &&
+                          e.logicalKey == LogicalKeyboardKey.arrowRight) {
+                        trocasDeAba++;
+                        return KeyEventResult.handled;
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    child: const SizedBox(height: 44),
+                  ),
+                  Expanded(
+                    child: LeitorComentado(
+                      controller: c,
+                      comentarios: _lista(),
+                      documento: const ColoredBox(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        focoAbas.requestFocus();
+        await tester.pump();
+        expect(focoAbas.hasFocus, isTrue);
+
+        // Equivale ao clique numa marca do texto/PDF.
+        await c.selecionar('a', rolar: false);
+        await tester.pumpAndSettle();
+        expect(focoAbas.hasFocus, isFalse);
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.pumpAndSettle();
+        expect(c.selecionado, 'b');
+        expect(trocasDeAba, 0);
+      },
+    );
+
     testWidgets('em retrato, ↑/↓ navegam com foco no painel de comentários', (
       tester,
     ) async {

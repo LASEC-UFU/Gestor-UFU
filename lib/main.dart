@@ -22,6 +22,7 @@ import 'package:gestor_ufu/platform/services/academic_term_service.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
 import 'package:gestor_ufu/platform/services/navigation_service.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_window.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/janela_comentarios.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_text_service.dart';
 import 'package:gestor_ufu/platform/contracts/ai_text.dart';
@@ -61,6 +62,36 @@ Future<void> main(List<String> args) async {
         runApp(
           AiAgentWindowApp(
             initialSkill: payload['skill'] as String? ?? 'geral',
+            isLight: isLight,
+          ),
+        );
+        return;
+      }
+      if (payload['type'] == 'commentsPanel') {
+        final isLight = payload['isLight'] as bool? ?? false;
+        AppTheme.isLight = isLight;
+        await windowManager.ensureInitialized();
+        unawaited(
+          windowManager.waitUntilReadyToShow(
+            WindowOptions(
+              size: const Size(460, 720),
+              minimumSize: const Size(320, 420),
+              center: true,
+              title: 'Comentários - $appTitle',
+            ),
+            () async {
+              await windowManager.show();
+              await windowManager.focus();
+            },
+          ),
+        );
+        runApp(
+          JanelaComentariosApp(
+            channelName: '${payload['channel']}',
+            comentarios: (payload['comentarios'] as List)
+                .map((x) => Map<String, dynamic>.from(x as Map))
+                .toList(),
+            selecionado: payload['selecionado'] as String?,
             isLight: isLight,
           ),
         );

@@ -5,7 +5,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
@@ -86,6 +88,9 @@ class _ParecerEditorState extends State<ParecerEditor>
   double _zoom = 1;
   Map<String, dynamic>? _selecao;
   final _leitor = LeitorComentadoController();
+  WindowController? _janelaComentarios;
+  WindowMethodChannel? _canalJanelaComentarios;
+  bool _abrindoJanelaComentarios = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -152,6 +157,7 @@ class _ParecerEditorState extends State<ParecerEditor>
             .where((s) => s == widget.secao)
             .listen((_) {
               _repintarComentarios();
+              unawaited(_atualizarJanelaComentarios(_leitor.selecionado));
               if (mounted) setState(() {});
             }),
       );
@@ -243,6 +249,7 @@ class _ParecerEditorState extends State<ParecerEditor>
     // Garante que o último trecho digitado (antes do debounce) seja salvo.
     unawaited(widget.service.salvarAgora());
     if (_controladorCriado) _web.dispose();
+    unawaited(_canalJanelaComentarios?.setMethodCallHandler(null));
     _leitor.dispose();
     super.dispose();
   }
@@ -284,6 +291,8 @@ class _ParecerEditorState extends State<ParecerEditor>
           child: LeitorComentado(
             controller: _leitor,
             comentarios: _comentariosDocumento(),
+            onSelectionChanged: _atualizarJanelaComentarios,
+            ocultarPainel: _janelaComentarios != null,
             acoesPainel: _acoesPainel(),
             vazio:
                 'Selecione um trecho (ou clique no texto) e use o botão '
@@ -346,6 +355,11 @@ class _ParecerEditorState extends State<ParecerEditor>
     final temSelecao = '${_selecao?['texto'] ?? ''}'.trim().isNotEmpty;
     return [
       IconButton(
+        tooltip: 'Abrir comentários em janela separada',
+        onPressed: _abrirJanelaComentarios,
+        icon: const Icon(Icons.open_in_new_rounded),
+      ),
+      IconButton(
         tooltip:
             'Consultar a IA sobre a seleção ou o cursor (também pelo botão '
             'direito no texto)',
@@ -377,6 +391,115 @@ class _ParecerEditorState extends State<ParecerEditor>
         },
       ),
     ];
+  }
+
+  List<Map<String, dynamic>> _dadosJanelaComentarios() => [
+    for (final c in _comentariosDocumento())
+      {
+        'id': c.id,
+        'titulo': c.titulo,
+        'cor': c.cor.toARGB32(),
+        'local': c.local,
+        'etiquetas': c.etiquetas,
+        'ancorado': c.ancorado,
+        'trechoMarcado': c.trechoMarcado,
+        'secoes': [
+          for (final s in c.secoes)
+            {'rotulo': s.rotulo, 'texto': s.texto, 'icone': s.icone?.codePoint},
+        ],
+      },
+  ];
+
+  Future<void> _atualizarJanelaComentarios(String? selecionado) async {
+    final canal = _canalJanelaComentarios;
+    if (canal == null) return;
+    try {
+      await canal.invokeMethod<bool>('atualizar', {
+        'comentarios': _dadosJanelaComentarios(),
+        'selecionado': selecionado,
+      });
+    } catch (_) {
+      // A janela pode ter sido fechada pelo X do sistema. O próximo clique em
+      // "abrir" cria uma nova conexão limpa.
+      _canalJanelaComentarios = null;
+      _janelaComentarios = null;
+    }
+  }
+
+  Future<void> _abrirJanelaComentarios() async {
+    final existente = _janelaComentarios;
+    final canalExistente = _canalJanelaComentarios;
+    if (existente != null && canalExistente != null) {
+      final abertas = await WindowController.getAll();
+      if (abertas.any((w) => w.windowId == existente.windowId)) {
+        await _atualizarJanelaComentarios(_leitor.selecionado);
+        await existente.show();
+        return;
+      }
+      await canalExistente.setMethodCallHandler(null);
+      _canalJanelaComentarios = null;
+      _janelaComentarios = null;
+    }
+    if (_abrindoJanelaComentarios) return;
+    _abrindoJanelaComentarios = true;
+    final nomeCanal = 'gestor_ufu_comentarios_${const Uuid().v4()}';
+    final canal = WindowMethodChannel(
+      nomeCanal,
+      mode: ChannelMode.bidirectional,
+    );
+    try {
+      await canal.setMethodCallHandler((call) async {
+        if (call.method == 'selecionar') {
+          final id = '${call.arguments ?? ''}';
+          if (id.isEmpty) return false;
+          await _leitor.selecionar(id);
+          return true;
+        }
+        if (call.method == 'acoplar') {
+          if (mounted) {
+            setState(() {
+              _canalJanelaComentarios = null;
+              _janelaComentarios = null;
+            });
+          }
+          return true;
+        }
+        if (call.method == 'acaoPainel') {
+          final acao = '${call.arguments ?? ''}';
+          switch (acao) {
+            case 'consultarIa':
+              await _consultarIa();
+            case 'comentar':
+              await _novoComentario();
+            case 'analisar':
+              await _analisarRelato();
+            case 'base':
+              if (mounted) mostrarBaseDocumentos(context, widget.service.base);
+          }
+          return true;
+        }
+        throw MissingPluginException('Método não reconhecido: ${call.method}');
+      });
+      final controlador = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'commentsPanel',
+            'channel': nomeCanal,
+            'comentarios': _dadosJanelaComentarios(),
+            'selecionado': _leitor.selecionado,
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _canalJanelaComentarios = canal;
+      if (mounted) setState(() => _janelaComentarios = controlador);
+      await controlador.show();
+    } catch (_) {
+      await canal.setMethodCallHandler(null);
+      rethrow;
+    } finally {
+      _abrindoJanelaComentarios = false;
+    }
   }
 
   /// Comentários da seção na ordem do texto (os sem trecho no fim).
@@ -544,7 +667,10 @@ class _ParecerEditorState extends State<ParecerEditor>
         'window.parecer.selecionarComentario(${jsonEncode(c.id)}, '
         '${rolar ? 'true' : 'false'})',
       );
-      return r is Map && r['ok'] == true;
+      // WebView2 pode devolver o objeto JavaScript já convertido ou como JSON.
+      // Nos dois casos o resultado precisa confirmar a ida à marcação.
+      final resposta = r is String ? jsonDecode(r) : r;
+      return resposta is Map && resposta['ok'] == true;
     } catch (_) {
       return false;
     }

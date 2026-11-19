@@ -42,7 +42,35 @@
     pincel: '<svg viewBox="0 0 20 20"><path fill="currentColor" d="M15.5 2.5a1 1 0 0 1 1.4 1.4l-6.6 6.6-1.4-1.4zM8.2 9.8l1.4 1.4-1 1c-.4 1.8-2 3.3-4.6 3.3.8-.8 1-1.6 1.1-2.5.1-1.3 1-2.3 2.1-2.4z"/></svg>',
     sei: '<svg viewBox="0 0 20 20"><rect x="0" y="3" width="20" height="14" rx="3" fill="#52b6e0"/><text x="2.5" y="14" font-size="10" font-family="Segoe UI" font-weight="700" fill="#fff">sei!</text></svg>',
     moeda: '<svg viewBox="0 0 20 20"><text x="0" y="15" font-size="12" font-family="Segoe UI" font-weight="700" fill="currentColor">R$</text></svg>',
+    telaCheia: '<svg viewBox="0 0 20 20"><path fill="currentColor" d="M3 8V3h5v2H5v3H3zm9-5h5v5h-2V5h-3V3zM3 12h2v3h3v2H3v-5zm12 0h2v5h-5v-2h3v-3z"/></svg>',
   };
+
+  // ------------------------------------------------------------ tela cheia
+  // Mantém a barra do CKEditor e a folha de texto juntas; é o próprio
+  // documento do WebView que entra em tela cheia, não apenas a área editável.
+  class TelaCheia extends Plugin {
+    init() {
+      const editor = this.editor;
+      editor.ui.componentFactory.add('telaCheia', (locale) => {
+        const b = new ButtonView(locale);
+        b.set({ label: 'Tela cheia do texto', icon: ICONE.telaCheia, tooltip: true });
+        const atualizar = () => { b.isOn = !!document.fullscreenElement; };
+        b.on('execute', async () => {
+          try {
+            if (document.fullscreenElement) await document.exitFullscreen();
+            else await document.documentElement.requestFullscreen();
+          } catch (_) {
+            // Alguns WebView2 bloqueiam a API de fullscreen; ainda oferece
+            // um modo focado dentro da região do editor.
+            document.body.classList.toggle('gestor-tela-cheia');
+          }
+          atualizar();
+        });
+        document.addEventListener('fullscreenchange', atualizar);
+        return b;
+      });
+    }
+  }
 
   // ---------------------------------------------------------- Aa (caixa)
   class AlterarCaixa extends Plugin {
@@ -482,7 +510,7 @@
         C.ImageInsert, C.Base64UploadAdapter,
         C.Table, C.TableToolbar, C.TableProperties, C.TableCellProperties, C.TableColumnResize,
         C.Link, C.Style, C.GeneralHtmlSupport, C.SourceEditing, C.WordCount,
-        AlterarCaixa, PincelFormatacao, ValorPorExtenso, LinkSei,
+        AlterarCaixa, PincelFormatacao, ValorPorExtenso, LinkSei, TelaCheia,
       ];
       try {
         editor = await C.DecoupledEditor.create(document.getElementById('editor'), {
@@ -500,7 +528,7 @@
               'fontColor', 'fontBackgroundColor', 'fontSize', '|', 'showBlocks', 'specialCharacters', '|',
               'numberedList', 'bulletedList', 'outdent', 'indent', 'alignment', '|',
               'horizontalLine', 'pageBreak', '|', 'insertImage', 'insertTable', 'link', '|', 'linkSei',
-              'valorExtenso', '|', 'sourceEditing',
+              'valorExtenso', '|', 'sourceEditing', '|', 'telaCheia',
             ],
           },
           style: { definitions: estilos },
