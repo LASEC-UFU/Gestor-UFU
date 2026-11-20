@@ -25,6 +25,7 @@ const _remoteUploadFields = <String, Set<String>>{
   'equivalencia.importarAnalise': {'path'},
   'progressao.anexarComprovante': {'path'},
   'progressao.lancar': {'comprovante'},
+  'auditaBancas.abrirPdf': {'caminho'},
 };
 const _speechOutput = MethodChannel('br.ufu.gestor.mobile/tts');
 
@@ -123,6 +124,10 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   bool _agendaEventsLoaded = false;
   final _emailSearch = TextEditingController();
   bool _emailUnreadOnly = false;
+  bool _moduleWorkspaceLoading = false;
+  String? _moduleWorkspaceError;
+  Map<String, dynamic>? _moduleWorkspaceData;
+  bool _moduleActionsTab = false;
 
   @override
   void initState() {
@@ -298,6 +303,10 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         });
       if (_selectedModuleId == 'moodle') unawaited(_loadMoodleHome());
       if (_selectedModuleId == 'agenda-email') unawaited(_loadAgendaHome());
+      final selectedModule = _selectedModuleId;
+      if (selectedModule != null && _hasOperationalWorkspace(selectedModule)) {
+        unawaited(_loadModuleWorkspace(selectedModule));
+      }
     } catch (e) {
       final staleSocket = _socket;
       _socket = null;
@@ -562,8 +571,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   }
 
   Future<Map<String, dynamic>?> _parameters(
-    Map<String, dynamic> command,
-  ) async {
+    Map<String, dynamic> command, {
+    Map<String, dynamic> initial = const {},
+  }) async {
     final schema = Map<String, dynamic>.from(
       command['schema'] as Map? ?? const {},
     );
@@ -579,7 +589,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         continue;
       }
       fields[entry.key] = TextEditingController(
-        text: '${spec['default'] ?? ''}',
+        text: '${initial[entry.key] ?? spec['default'] ?? ''}',
       );
     }
     final bools = <String, bool>{
@@ -777,9 +787,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     return result;
   }
 
-  Future<void> _runCommand(Map<String, dynamic> command) async {
+  Future<void> _runCommand(
+    Map<String, dynamic> command, {
+    Map<String, dynamic> initial = const {},
+  }) async {
     if (!_connected) return;
-    final input = await _parameters(command);
+    final input = await _parameters(command, initial: initial);
     if (input == null) return;
     if (command['requiresConfirmation'] == true) {
       final confirmed = await showDialog<bool>(
@@ -867,6 +880,16 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       }
       if (command['mutates'] == true && _selectedModuleId == 'agenda-email') {
         unawaited(_loadAgendaHome());
+      }
+      final selectedModule = _selectedModuleId;
+      if (command['mutates'] == true &&
+          selectedModule != null &&
+          _hasOperationalWorkspace(selectedModule)) {
+        unawaited(_loadModuleWorkspace(selectedModule));
+      }
+      if (command['id'] == 'parecer.processos.abrir' &&
+          _selectedModuleId == 'elabora-relato') {
+        unawaited(_loadModuleWorkspace('elabora-relato'));
       }
     } catch (e) {
       if (mounted) setState(() => _error = _friendlyError(e));
@@ -1067,9 +1090,60 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     setState(() {
       _selectedModuleId = '${module['id']}';
       _selectedTab = 1;
+      _moduleActionsTab = false;
+      _moduleWorkspaceData = null;
+      _moduleWorkspaceError = null;
     });
     if (module['id'] == 'moodle') unawaited(_loadMoodleHome());
     if (module['id'] == 'agenda-email') unawaited(_loadAgendaHome());
+    if (_hasOperationalWorkspace('${module['id']}')) {
+      unawaited(_loadModuleWorkspace('${module['id']}'));
+    }
+  }
+
+  bool _hasOperationalWorkspace(String id) => const {
+    'audita-bancas',
+    'diario',
+    'elabora-relato',
+    'planos-ensino',
+    'planos-trabalho',
+    'ajusta-horarios',
+    'equivalencia-alunos',
+    'progressao',
+  }.contains(id);
+
+  Future<void> _loadModuleWorkspace(String moduleId) async {
+    if (!_connected || _api == null) return;
+    final query = switch (moduleId) {
+      'audita-bancas' => ('auditaBancas.listar', <String, dynamic>{}),
+      'diario' => ('diario.listar', <String, dynamic>{'lancamentos': true}),
+      'elabora-relato' => ('parecer.processos.listar', <String, dynamic>{}),
+      'planos-ensino' => ('planosEnsino.listar', <String, dynamic>{}),
+      'planos-trabalho' => ('planosTrabalho.listar', <String, dynamic>{}),
+      'ajusta-horarios' => ('ajustaHorarios.listar', <String, dynamic>{}),
+      'equivalencia-alunos' => ('equivalencia.listar', <String, dynamic>{}),
+      'progressao' => ('progressao.listar', <String, dynamic>{}),
+      _ => null,
+    };
+    if (query == null) return;
+    setState(() {
+      _moduleWorkspaceLoading = true;
+      _moduleWorkspaceError = null;
+    });
+    try {
+      final result = await _executeRemoteCommand(moduleId, query.$1, query.$2);
+      if (!mounted || _selectedModuleId != moduleId) return;
+      setState(() {
+        _moduleWorkspaceData = result;
+        _moduleWorkspaceLoading = false;
+      });
+    } catch (error) {
+      if (!mounted || _selectedModuleId != moduleId) return;
+      setState(() {
+        _moduleWorkspaceError = '$error'.replaceFirst('HttpException: ', '');
+        _moduleWorkspaceLoading = false;
+      });
+    }
   }
 
   Map<String, dynamic>? _commandById(String moduleId, String commandId) {
@@ -1325,6 +1399,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       if (command['mutates'] == true) {
         if (moduleId == 'moodle') await _loadMoodleHome();
         if (moduleId == 'agenda-email') await _loadAgendaHome();
+        if (_hasOperationalWorkspace(moduleId)) {
+          await _loadModuleWorkspace(moduleId);
+        }
       }
     } catch (error) {
       if (mounted) {
@@ -2339,9 +2416,545 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     );
   }
 
+  Widget _buildOperationalWorkspace(Map<String, dynamic> module) {
+    final moduleId = '${module['id']}';
+    final accent = _moduleAccent(module);
+    final data = _moduleWorkspaceData ?? const <String, dynamic>{};
+    final commands = (module['commands'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    final groups = _groupModuleCommands(moduleId, commands);
+    Map<String, dynamic>? command(String id) {
+      for (final value in commands) {
+        if (value['id'] == id) return value;
+      }
+      return null;
+    }
+
+    final primary = switch (moduleId) {
+      'audita-bancas' => 'auditaBancas.abrirPdf',
+      'diario' => 'diario.importarPlanilha',
+      'elabora-relato' => 'parecer.processos.criar',
+      'planos-ensino' => 'planosEnsino.salvar',
+      'planos-trabalho' => 'planosTrabalho.salvarCadastro',
+      'ajusta-horarios' => 'ajustaHorarios.importarPlanilha',
+      'equivalencia-alunos' => 'equivalencia.importarAnalise',
+      'progressao' => 'progressao.criar',
+      _ => '',
+    };
+    final primaryInput = moduleId == 'planos-ensino'
+        ? const <String, dynamic>{'plano': <String, dynamic>{}}
+        : const <String, dynamic>{};
+    final records = switch (moduleId) {
+      'audita-bancas' =>
+        (data['documentos'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      'diario' =>
+        (data['diarios'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      'elabora-relato' =>
+        (data['processos'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      'planos-ensino' || 'planos-trabalho' =>
+        (data['planos'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      'equivalencia-alunos' =>
+        (data['cases'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      'progressao' =>
+        (data['processos'] as List? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+      _ => <Map<String, dynamic>>[],
+    };
+    final recordTitle = switch (moduleId) {
+      'audita-bancas' => 'Documentos auditados',
+      'diario' => 'Diários salvos',
+      'elabora-relato' => 'Processos de parecer',
+      'planos-ensino' => 'Planos cadastrados',
+      'planos-trabalho' => 'Planos de trabalho',
+      'equivalencia-alunos' => 'Análises de alunos',
+      'progressao' => 'Processos de carreira',
+      _ => 'Período e horários',
+    };
+    final titleFor = (Map<String, dynamic> item) => switch (moduleId) {
+      'audita-bancas' => '${item['nome'] ?? 'Documento'}',
+      'diario' => '${item['nome'] ?? item['periodo'] ?? 'Diário'}',
+      'elabora-relato' => '${item['nome'] ?? 'Processo'}',
+      'planos-ensino' => '${item['nome'] ?? 'Plano de ensino'}',
+      'planos-trabalho' => '${item['nome'] ?? 'Plano de trabalho'}',
+      'equivalencia-alunos' => '${item['student'] ?? 'Análise'}',
+      'progressao' => '${item['docente'] ?? 'Processo'}',
+      _ => '${item['nome'] ?? ''}',
+    };
+    final subtitleFor = (Map<String, dynamic> item) => switch (moduleId) {
+      'audita-bancas' =>
+        '${item['origem'] ?? ''} • ${item['pendentes'] ?? 0} pendentes • ${item['aceitas'] ?? 0} aceitas',
+      'diario' => '${item['lancamentos'] ?? 0} lançamentos',
+      'elabora-relato' =>
+        '${item['numeroSei'] ?? ''} • ${item['assunto'] ?? ''} • ${item['pendentes'] ?? 0} pendentes',
+      'planos-ensino' =>
+        'Código ${item['codigo'] ?? '—'} • Turma ${item['turma'] ?? '—'} • ${((item['faltando'] as List?) ?? const []).length} campos faltantes',
+      'planos-trabalho' =>
+        'Nº ${item['numero'] ?? '—'} • ${item['interessado'] ?? item['nomeArvore'] ?? ''}',
+      'equivalencia-alunos' =>
+        'Matrícula ${item['studentId'] ?? '—'} • ${item['status'] ?? ''} • ${item['blocks'] ?? 0} blocos',
+      'progressao' =>
+        '${item['movimento'] ?? ''} • ${item['pontos'] ?? '—'} pontos • ${item['lancamentos'] ?? 0} lançamentos',
+      _ => '',
+    };
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => _selectedModuleId = null),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Todos os módulos'),
+          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+        ),
+        Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: accent.withAlpha(38),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(_moduleIcon(module), color: accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  Text(
+                    '${module['title']}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Atualizar dados do Windows',
+              onPressed: _moduleWorkspaceLoading
+                  ? null
+                  : () => _loadModuleWorkspace(moduleId),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        SegmentedButton<bool>(
+          segments: const [
+            ButtonSegment(
+              value: false,
+              icon: Icon(Icons.dashboard_outlined),
+              label: Text('Visão geral'),
+            ),
+            ButtonSegment(
+              value: true,
+              icon: Icon(Icons.tune_rounded),
+              label: Text('Ações'),
+            ),
+          ],
+          selected: {_moduleActionsTab},
+          onSelectionChanged: (selection) =>
+              setState(() => _moduleActionsTab = selection.first),
+        ),
+        if (_moduleWorkspaceLoading)
+          const Padding(
+            padding: EdgeInsets.only(top: 10),
+            child: LinearProgressIndicator(),
+          ),
+        if (_moduleWorkspaceError != null)
+          Card(
+            color: const Color(0xff492d36),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(_moduleWorkspaceError!),
+            ),
+          ),
+        if (!_moduleActionsTab) ...[
+          const SizedBox(height: 16),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: command(primary) == null
+                  ? null
+                  : () => _runCommand(command(primary)!, initial: primaryInput),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.add_circle_outline_rounded,
+                      color: accent,
+                      size: 28,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _primaryActionLabel(moduleId),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            _primaryActionHint(moduleId),
+                            style: const TextStyle(
+                              color: Color(0xff9ea2c4),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.chevron_right_rounded, color: accent),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (moduleId == 'diario') ...[
+            const SizedBox(height: 10),
+            _summaryCard(
+              Icons.calendar_month_rounded,
+              '${data['periodo'] ?? '—'}',
+              'Período letivo',
+            ),
+            _summaryCard(
+              Icons.edit_note_rounded,
+              '${data['rascunho'] ?? 0}',
+              'Aulas no rascunho',
+            ),
+          ],
+          if (moduleId == 'ajusta-horarios') ...[
+            const SizedBox(height: 10),
+            _summaryCard(
+              Icons.calendar_month_rounded,
+              '${data['periodoLetivo'] ?? '—'}',
+              'Período letivo',
+            ),
+            _summaryCard(
+              Icons.menu_book_rounded,
+              '${data['disciplinas'] ?? 0}',
+              'Disciplinas na grade',
+            ),
+            _summaryCard(
+              Icons.groups_rounded,
+              '${(data['docentes'] as List? ?? const []).length}',
+              'Docentes',
+            ),
+            _summaryCard(
+              Icons.meeting_room_rounded,
+              '${(data['salas'] as List? ?? const []).length}',
+              'Salas',
+            ),
+            if (data['cursos'] is Map) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Cursos',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+              for (final item in (data['cursos'] as Map).entries)
+                Card(
+                  child: ListTile(
+                    leading: Icon(Icons.school_outlined, color: accent),
+                    title: Text('${item.value}'),
+                    subtitle: Text('Código ${item.key}'),
+                  ),
+                ),
+            ],
+          ],
+          if (moduleId == 'equivalencia-alunos') ...[
+            const SizedBox(height: 10),
+            _summaryCard(
+              Icons.school_outlined,
+              '${(data['curricula'] as List? ?? const []).length}',
+              'Currículos',
+            ),
+            for (final curriculum in data['curricula'] as List? ?? const [])
+              Card(
+                child: ListTile(
+                  leading: Icon(Icons.menu_book_rounded, color: accent),
+                  title: Text('${(curriculum as Map)['course']}'),
+                  subtitle: Text(
+                    '${curriculum['name']} • ${curriculum['subjects']} disciplinas',
+                  ),
+                ),
+              ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  recordTitle,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '${records.length}',
+                style: TextStyle(color: accent, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          if (records.isEmpty &&
+              !_moduleWorkspaceLoading &&
+              moduleId != 'ajusta-horarios')
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.inbox_outlined, color: accent),
+                title: const Text('Nenhum registro salvo ainda'),
+                subtitle: const Text('Use a ação principal para começar.'),
+              ),
+            ),
+          for (final record in records)
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                leading: Icon(_workspaceRecordIcon(moduleId), color: accent),
+                title: Text(
+                  titleFor(record),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: subtitleFor(record).trim().isEmpty
+                    ? null
+                    : Text(
+                        subtitleFor(record),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () =>
+                    _showWorkspaceRecordActions(moduleId, record, commands),
+              ),
+            ),
+          const SizedBox(height: 14),
+          OutlinedButton.icon(
+            onPressed: () => setState(() => _moduleActionsTab = true),
+            icon: const Icon(Icons.view_list_rounded),
+            label: Text('Ver todas as ${commands.length} ações do módulo'),
+          ),
+        ] else ...[
+          const SizedBox(height: 14),
+          Text(
+            '${module['description']}',
+            style: const TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+          ),
+          const SizedBox(height: 14),
+          for (var index = 0; index < groups.length; index++)
+            Card(
+              clipBehavior: Clip.antiAlias,
+              child: ExpansionTile(
+                initiallyExpanded: index == 0,
+                leading: Icon(groups[index].icon, color: accent),
+                title: Text(
+                  groups[index].title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text('${groups[index].commands.length} ações'),
+                children: [
+                  for (final item in groups[index].commands)
+                    ListTile(
+                      leading: Icon(
+                        item['requiresConfirmation'] == true
+                            ? Icons.verified_user_outlined
+                            : Icons.play_arrow_rounded,
+                        color: accent,
+                      ),
+                      title: Text('${item['title']}'),
+                      subtitle: Text(
+                        '${item['description'] ?? ''}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => _runCommand(item),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
+  String _primaryActionLabel(String moduleId) => switch (moduleId) {
+    'audita-bancas' => 'Abrir PDF para revisar',
+    'diario' => 'Importar planilha de aulas',
+    'elabora-relato' => 'Criar processo de parecer',
+    'planos-ensino' => 'Novo plano de ensino',
+    'planos-trabalho' => 'Cadastrar plano de trabalho',
+    'ajusta-horarios' => 'Importar grade de horários',
+    'equivalencia-alunos' => 'Importar análise de aluno',
+    'progressao' => 'Criar processo de progressão',
+    _ => 'Nova operação',
+  };
+
+  String _primaryActionHint(String moduleId) => switch (moduleId) {
+    'audita-bancas' =>
+      'Selecione o arquivo PDF no celular; a análise roda no Windows.',
+    'diario' =>
+      'Escolha a planilha XLSX de aulas para preparar os lançamentos.',
+    'elabora-relato' =>
+      'Abra um novo fluxo de relatório, fundamentação e conclusão.',
+    'planos-ensino' => 'Preencha e organize os dados do plano.',
+    'planos-trabalho' => 'Cadastre os dados e documentos do plano.',
+    'ajusta-horarios' =>
+      'Envie a planilha da grade para o computador processar.',
+    'equivalencia-alunos' => 'Selecione a planilha com os dados do estudante.',
+    'progressao' => 'Comece a reunir atividades, pontos e comprovantes.',
+    _ => '',
+  };
+
+  IconData _workspaceRecordIcon(String moduleId) => switch (moduleId) {
+    'audita-bancas' => Icons.picture_as_pdf_rounded,
+    'diario' => Icons.edit_calendar_rounded,
+    'elabora-relato' => Icons.description_outlined,
+    'planos-ensino' => Icons.menu_book_rounded,
+    'planos-trabalho' => Icons.assignment_outlined,
+    'equivalencia-alunos' => Icons.compare_arrows_rounded,
+    'progressao' => Icons.trending_up_rounded,
+    _ => Icons.folder_outlined,
+  };
+
+  Future<void> _showWorkspaceRecordActions(
+    String moduleId,
+    Map<String, dynamic> record,
+    List<Map<String, dynamic>> commands,
+  ) async {
+    final id = '${record['id'] ?? ''}';
+    final options = <(String, String, Map<String, dynamic>)>[];
+    void add(String commandId, String title, Map<String, dynamic> input) {
+      if (commands.any((item) => item['id'] == commandId)) {
+        options.add((commandId, title, input));
+      }
+    }
+
+    switch (moduleId) {
+      case 'audita-bancas':
+        add('auditaBancas.analisar', 'Analisar com IA', {'documento': id});
+        add('auditaBancas.observacoes', 'Ver observações', {'documento': id});
+        add('auditaBancas.exportarRelatorio', 'Exportar relatório', {
+          'documento': id,
+        });
+        add('auditaBancas.exportarPdf', 'Exportar PDF anotado', {
+          'documento': id,
+        });
+        break;
+      case 'diario':
+        add('diario.listar', 'Ver lançamentos', {
+          'periodo': '${_moduleWorkspaceData?['periodo'] ?? ''}',
+          'lancamentos': true,
+        });
+        add('diario.salvarJson', 'Exportar lançamentos', {
+          'periodo': '${_moduleWorkspaceData?['periodo'] ?? ''}',
+        });
+        break;
+      case 'elabora-relato':
+        add('parecer.processos.abrir', 'Abrir este processo', {'id': id});
+        break;
+      case 'planos-ensino':
+        add('planosEnsino.listar', 'Ver dados do plano', {'id': id});
+        add('planosEnsino.exportarWord', 'Exportar Word', {'id': id});
+        add('planosEnsino.inserirNoSei', 'Inserir no SEI', {'id': id});
+        break;
+      case 'planos-trabalho':
+        add('planosTrabalho.listar', 'Ver dados do plano', {'id': id});
+        add('planosTrabalho.abrirSei', 'Abrir processo no SEI', {'id': id});
+        break;
+      case 'equivalencia-alunos':
+        add('equivalencia.gerarCertidao', 'Gerar certidão PDF', {'caseId': id});
+        break;
+      case 'progressao':
+        add('progressao.listar', 'Ver lançamentos', {'processoId': id});
+        add('progressao.gerarPdf', 'Gerar requerimento e relatório', {
+          'processoId': id,
+        });
+        break;
+    }
+
+    if (options.isEmpty) {
+      await _runCommand(
+        commands.firstWhere(
+          (item) => item['id'].toString().endsWith('.listar'),
+        ),
+      );
+      return;
+    }
+    final selected = await showModalBottomSheet<(String, Map<String, dynamic>)>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 2, 16, 20),
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Text(
+                '${record['nome'] ?? record['student'] ?? record['docente'] ?? record['periodo'] ?? 'Opções'}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            for (final option in options)
+              ListTile(
+                leading: const Icon(Icons.arrow_forward_rounded),
+                title: Text(option.$2),
+                onTap: () =>
+                    Navigator.pop(sheetContext, (option.$1, option.$3)),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null) return;
+    final item = commands.firstWhere((value) => value['id'] == selected.$1);
+    await _runCommand(item, initial: selected.$2);
+  }
+
   Widget _buildModuleDetail(Map<String, dynamic> module) {
     if (module['id'] == 'moodle') return _buildMoodleHome(module);
     if (module['id'] == 'agenda-email') return _buildAgendaHome(module);
+    if (_hasOperationalWorkspace('${module['id']}')) {
+      return _buildOperationalWorkspace(module);
+    }
     final commands = (module['commands'] as List? ?? const [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
