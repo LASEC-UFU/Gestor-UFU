@@ -241,6 +241,11 @@ class RemoteAccessServer {
                 'id': module.id,
                 'title': module.title,
                 'description': module.description,
+                'category': module.category,
+                'iconCodePoint': module.icon.codePoint,
+                'iconFontFamily': module.icon.fontFamily,
+                'iconFontPackage': module.icon.fontPackage,
+                'accentColor': module.accent.toARGB32(),
                 'enabled': module.enabled,
                 'commands': [
                   for (final command in module.commands)

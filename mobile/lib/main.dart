@@ -36,8 +36,46 @@ class GestorRemoteApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'Gestor UFU Remoto',
     theme: ThemeData(
-      colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff2459b3)),
       useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: const Color(0xff0f1123),
+      colorScheme:
+          ColorScheme.fromSeed(
+            seedColor: const Color(0xff6c63ff),
+            brightness: Brightness.dark,
+          ).copyWith(
+            primary: const Color(0xff6c63ff),
+            secondary: const Color(0xff00d4ff),
+            surface: const Color(0xff1e2045),
+          ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xff0f1123),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: false,
+      ),
+      cardTheme: CardThemeData(
+        color: const Color(0xff1e2045),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(18)),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xff171932),
+        indicatorColor: const Color(0xff6c63ff).withAlpha(60),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected)
+                ? Colors.white
+                : const Color(0xff9ea2c4),
+            fontSize: 11,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w600
+                : FontWeight.w400,
+          ),
+        ),
+      ),
     ),
     home: const RemoteHomePage(),
   );
@@ -68,6 +106,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   bool _speechReady = false;
   bool _speechSubmitted = false;
   bool _speakResponses = true;
+  int _selectedTab = 0;
+  String? _selectedModuleId;
+  String _moduleFilter = '';
   String? _error;
   String _assistantDraft = '';
 
@@ -825,10 +866,773 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     super.dispose();
   }
 
+  String get _pageTitle {
+    final modules = _modules.where((item) => item['id'] == _selectedModuleId);
+    if (modules.isNotEmpty) return '${modules.first['title']}';
+    return switch (_selectedTab) {
+      0 => 'Início',
+      1 => 'Módulos',
+      2 => 'Tarefas',
+      _ => 'Agente',
+    };
+  }
+
+  Color _moduleAccent(Map<String, dynamic> module) {
+    final value = module['accentColor'];
+    return value is num ? Color(value.toInt()) : const Color(0xff6c63ff);
+  }
+
+  IconData _moduleIcon(Map<String, dynamic> module) {
+    final value = module['iconCodePoint'];
+    if (value is! num) return Icons.apps_rounded;
+    return IconData(
+      value.toInt(),
+      fontFamily: module['iconFontFamily'] as String? ?? 'MaterialIcons',
+      fontPackage: module['iconFontPackage'] as String?,
+    );
+  }
+
+  void _openModule(Map<String, dynamic> module) {
+    setState(() {
+      _selectedModuleId = '${module['id']}';
+      _selectedTab = 1;
+    });
+  }
+
+  Widget _summaryCard(IconData icon, String value, String label) => Card(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+      child: Row(
+        children: [
+          Icon(icon, color: const Color(0xff00d4ff), size: 23),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: Color(0xff9ea2c4),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _moduleCard(Map<String, dynamic> module) {
+    final enabled = module['enabled'] == true;
+    final accent = _moduleAccent(module);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: enabled ? () => _openModule(module) : null,
+        child: Padding(
+          padding: const EdgeInsets.all(17),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: accent.withAlpha(enabled ? 40 : 22),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      _moduleIcon(module),
+                      color: enabled ? accent : accent.withAlpha(150),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    enabled
+                        ? Icons.arrow_forward_rounded
+                        : Icons.lock_outline_rounded,
+                    color: enabled ? accent : Colors.white38,
+                    size: 19,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
+                style: TextStyle(
+                  color: enabled ? accent : Colors.white54,
+                  fontSize: 10,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${module['title']}',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                '${module['description']}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xff9ea2c4),
+                  fontSize: 12,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 13),
+              Text(
+                enabled ? 'Acessar módulo' : 'Disponível em breve',
+                style: TextStyle(
+                  color: enabled ? accent : Colors.white54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _emptyState(IconData icon, String title, String description) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+        child: Column(
+          children: [
+            Icon(icon, color: const Color(0xff6c63ff), size: 38),
+            const SizedBox(height: 10),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              description,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xff9ea2c4),
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      );
+
+  Widget _buildHome() => ListView(
+    padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+    children: [
+      const Text(
+        'CENTRAL DE UTILIDADES',
+        style: TextStyle(
+          color: Color(0xff9ea2c4),
+          fontSize: 11,
+          letterSpacing: 1.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 7),
+      const Text(
+        'Gestor UFU',
+        style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 5),
+      const Text(
+        'Acesse pelo celular as ferramentas que você já usa no Windows.',
+        style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
+      ),
+      const SizedBox(height: 16),
+      Card(
+        child: ListTile(
+          leading: Icon(
+            _connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            color: _connected
+                ? const Color(0xff00e676)
+                : const Color(0xffffab00),
+          ),
+          title: Text(
+            _connected ? 'Computador conectado' : 'Computador desconectado',
+          ),
+          subtitle: Text(
+            _connected
+                ? 'As operações são executadas neste computador.'
+                : 'Conecte ao Gestor UFU no Windows pela VPN.',
+          ),
+          trailing: IconButton(
+            onPressed: _connecting ? null : _connect,
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Atualizar conexão',
+          ),
+        ),
+      ),
+      const SizedBox(height: 8),
+      Row(
+        children: [
+          Expanded(
+            child: _summaryCard(
+              Icons.apps_rounded,
+              '${_modules.length}',
+              'Módulos',
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _summaryCard(
+              Icons.sync_rounded,
+              '${_activeTasks.length}',
+              'Em andamento',
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          const Expanded(
+            child: Text(
+              'Módulos',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+          ),
+          TextButton(
+            onPressed: () => setState(() {
+              _selectedTab = 1;
+              _selectedModuleId = null;
+            }),
+            child: const Text('Ver todos'),
+          ),
+        ],
+      ),
+      if (_modules.isEmpty)
+        _emptyState(
+          Icons.apps_outlined,
+          _connected ? 'Nenhum módulo disponível' : 'Aguardando conexão',
+          'Os módulos disponíveis no computador aparecerão aqui.',
+        )
+      else
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth >= 640 ? 2 : 1;
+            final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final module in _modules)
+                  SizedBox(width: width, child: _moduleCard(module)),
+              ],
+            );
+          },
+        ),
+    ],
+  );
+
+  Widget _buildModules() {
+    final selection = _modules.where((item) => item['id'] == _selectedModuleId);
+    if (selection.isNotEmpty) return _buildModuleDetail(selection.first);
+    final query = _moduleFilter.trim().toLowerCase();
+    final filtered = _modules
+        .where(
+          (item) =>
+              query.isEmpty ||
+              '${item['title']} ${item['category']} ${item['description']}'
+                  .toLowerCase()
+                  .contains(query),
+        )
+        .toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+      children: [
+        const Text(
+          'MÓDULOS DO GESTOR UFU',
+          style: TextStyle(
+            color: Color(0xff9ea2c4),
+            fontSize: 11,
+            letterSpacing: 1.3,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          onChanged: (value) => setState(() => _moduleFilter = value),
+          decoration: const InputDecoration(
+            hintText: 'Buscar módulo',
+            prefixIcon: Icon(Icons.search_rounded),
+            filled: true,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(14)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (filtered.isEmpty)
+          _emptyState(
+            Icons.search_off_rounded,
+            'Nenhum módulo encontrado',
+            'Tente buscar pelo nome ou pela categoria.',
+          )
+        else
+          for (final module in filtered) _moduleCard(module),
+      ],
+    );
+  }
+
+  Widget _buildModuleDetail(Map<String, dynamic> module) {
+    final commands = (module['commands'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    final accent = _moduleAccent(module);
+    final enabled = module['enabled'] == true;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => _selectedModuleId = null),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Todos os módulos'),
+          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                color: accent.withAlpha(40),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(_moduleIcon(module), color: accent, size: 28),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10,
+                      letterSpacing: 1,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${module['title']}',
+                    style: const TextStyle(
+                      fontSize: 21,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '${module['description']}',
+          style: const TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+        ),
+        const SizedBox(height: 22),
+        const Text(
+          'AÇÕES',
+          style: TextStyle(
+            color: Color(0xff9ea2c4),
+            fontSize: 11,
+            letterSpacing: 1.3,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (!enabled)
+          _emptyState(
+            Icons.lock_outline_rounded,
+            'Disponível em breve',
+            'Este módulo ainda não está habilitado neste computador.',
+          )
+        else if (commands.isEmpty)
+          _emptyState(
+            Icons.info_outline_rounded,
+            'Sem ações remotas',
+            'As ações deste módulo ainda não estão disponíveis pelo celular.',
+          )
+        else
+          for (final command in commands)
+            Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 5,
+                ),
+                leading: Icon(Icons.play_circle_outline_rounded, color: accent),
+                title: Text(
+                  '${command['title']}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle:
+                    command['description'] == null ||
+                        '${command['description']}'.isEmpty
+                    ? null
+                    : Text(
+                        '${command['description']}',
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _runCommand(command),
+              ),
+            ),
+      ],
+    );
+  }
+
+  Widget _taskCard(Map<String, dynamic> task) {
+    final progress = (task['progress'] as num?)?.toDouble();
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.sync_rounded, color: Color(0xff00d4ff)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${task['title']}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              '${task['stage'] ?? task['status'] ?? 'Em andamento'}',
+              style: const TextStyle(color: Color(0xff9ea2c4), fontSize: 12),
+            ),
+            const SizedBox(height: 11),
+            LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              borderRadius: BorderRadius.circular(5),
+            ),
+            if (progress != null) ...[
+              const SizedBox(height: 5),
+              Text(
+                '${(progress * 100).round()}%',
+                style: const TextStyle(color: Color(0xff9ea2c4), fontSize: 11),
+              ),
+            ],
+            if (task['cancelSupported'] == true && task['status'] == 'running')
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    try {
+                      await _api!.cancelTask('${task['id']}');
+                    } catch (error) {
+                      if (mounted) setState(() => _error = '$error');
+                    }
+                  },
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('Cancelar operação'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTasks() => ListView(
+    padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
+    children: [
+      const Text(
+        'OPERAÇÕES NO COMPUTADOR',
+        style: TextStyle(
+          color: Color(0xff9ea2c4),
+          fontSize: 11,
+          letterSpacing: 1.3,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'Tarefas',
+        style: TextStyle(fontSize: 25, fontWeight: FontWeight.w700),
+      ),
+      const SizedBox(height: 18),
+      if (_approvals.isNotEmpty) ...[
+        const Text(
+          'PRECISAM DA SUA CONFIRMAÇÃO',
+          style: TextStyle(
+            color: Color(0xffffab00),
+            fontSize: 11,
+            letterSpacing: 1,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final item in _approvals)
+          Card(
+            color: const Color(0xff382c18),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${item['tool']}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('${item['input']}'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _answerApproval(item, false),
+                        child: const Text('Recusar'),
+                      ),
+                      FilledButton(
+                        onPressed: () => _answerApproval(item, true),
+                        child: const Text('Autorizar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 14),
+      ],
+      if (_activeTasks.isEmpty)
+        _emptyState(
+          Icons.task_alt_rounded,
+          'Nenhuma tarefa em andamento',
+          'Quando você iniciar uma operação, o progresso aparecerá aqui.',
+        )
+      else ...[
+        Text(
+          'EM ANDAMENTO · ${_activeTasks.length}',
+          style: const TextStyle(
+            color: Color(0xff00d4ff),
+            fontSize: 11,
+            letterSpacing: 1,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final task in _activeTasks.values) _taskCard(task),
+      ],
+    ],
+  );
+
+  Widget _buildAgent() => ListView(
+    padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+    children: [
+      if (_messages.isEmpty)
+        const Padding(
+          padding: EdgeInsets.only(top: 12, bottom: 18),
+          child: Text(
+            'Converse com o Agente por texto ou voz. A transcrição é feita no celular quando há reconhecimento offline em português.',
+            style: TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+          ),
+        ),
+      for (final message in _messages)
+        Align(
+          alignment: message.role == 'user'
+              ? Alignment.centerRight
+              : Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            padding: const EdgeInsets.all(13),
+            constraints: const BoxConstraints(maxWidth: 560),
+            decoration: BoxDecoration(
+              color: message.role == 'user'
+                  ? const Color(0xff3b3978)
+                  : const Color(0xff1e2045),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(message.text),
+                for (final artifact in message.artifacts)
+                  TextButton.icon(
+                    onPressed: () => _downloadArtifact(artifact),
+                    icon: const Icon(Icons.download_rounded),
+                    label: Text('Baixar ${artifact['name']}'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      if (_assistantDraft.isNotEmpty)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: const Color(0xff1e2045),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(_assistantDraft),
+          ),
+        ),
+    ],
+  );
+
+  Widget _agentComposer() => SafeArea(
+    top: false,
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+      decoration: const BoxDecoration(
+        color: Color(0xff171932),
+        border: Border(top: BorderSide(color: Color(0xff2a2d52))),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _input,
+            minLines: 1,
+            maxLines: 3,
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _send(),
+            decoration: InputDecoration(
+              hintText: _listening
+                  ? 'Ouvindo… fale sua solicitação'
+                  : 'Peça algo ao Agente…',
+              filled: true,
+              fillColor: const Color(0xff151730),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+              suffixIcon: IconButton(
+                onPressed: _sending ? _cancelAgentMessage : () => _send(),
+                tooltip: _sending ? 'Interromper o agente' : 'Enviar',
+                icon: Icon(
+                  _sending ? Icons.stop_circle_outlined : Icons.send_rounded,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 7),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (_listening)
+                const Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: Text(
+                    'Ouvindo…',
+                    style: TextStyle(
+                      color: Color(0xffff5252),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              SizedBox(
+                width: 62,
+                height: 62,
+                child: FloatingActionButton(
+                  onPressed: _connected && !_sending ? _toggleMic : null,
+                  backgroundColor: _listening ? const Color(0xffff5252) : null,
+                  tooltip: _listening
+                      ? 'Parar e enviar transcrição'
+                      : 'Falar com o Agente',
+                  child: Icon(
+                    _listening ? Icons.stop_rounded : Icons.mic_rounded,
+                    size: 29,
+                  ),
+                ),
+              ),
+              if (_sending)
+                const Padding(
+                  padding: EdgeInsets.only(left: 12),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Gestor UFU'),
+      leading: _selectedModuleId == null
+          ? Padding(
+              padding: const EdgeInsets.all(11),
+              child: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xff6c63ff), Color(0xff3d5afe)],
+                  ),
+                  borderRadius: BorderRadius.all(Radius.circular(12)),
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            )
+          : IconButton(
+              onPressed: () => setState(() => _selectedModuleId = null),
+              icon: const Icon(Icons.arrow_back_rounded),
+            ),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _pageTitle,
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+          ),
+          if (_selectedModuleId == null)
+            const Text(
+              'CENTRAL DE UTILIDADES',
+              style: TextStyle(
+                fontSize: 9,
+                letterSpacing: 1.2,
+                color: Color(0xff9ea2c4),
+              ),
+            ),
+        ],
+      ),
       actions: [
         IconButton(
           onPressed: () async {
@@ -850,268 +1654,113 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 : Icons.volume_off_rounded,
           ),
         ),
-        Icon(
-          _connected ? Icons.cloud_done : Icons.cloud_off,
-          color: _connected ? Colors.green : Colors.red,
+        IconButton(
+          onPressed: _connecting ? null : _connect,
+          tooltip: _connected ? 'Computador conectado' : 'Tentar conectar',
+          icon: Icon(
+            _connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+            color: _connected
+                ? const Color(0xff00e676)
+                : const Color(0xffffab00),
+          ),
         ),
         IconButton(
           onPressed: _configure,
           tooltip: 'Conexão',
           icon: const Icon(Icons.settings_rounded),
         ),
+        const SizedBox(width: 4),
       ],
     ),
     body: Column(
       children: [
-        if (_connecting) const LinearProgressIndicator(),
-        if (!_connected)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              _error ?? 'Conecte ao computador Windows pelo FortiClient.',
-              style: const TextStyle(color: Colors.red),
-            ),
-          ),
-        if (_approvals.isNotEmpty) ...[
-          for (final item in _approvals)
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Confirmação necessária: ${item['tool']}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+        if (_connecting) const LinearProgressIndicator(minHeight: 2),
+        if (!_connected || _error != null)
+          Material(
+            color: const Color(0xff382c18),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    color: Color(0xffffab00),
+                    size: 19,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      _error ??
+                          'Conecte ao computador Windows pelo FortiClient.',
+                      style: const TextStyle(fontSize: 12),
                     ),
-                    Text('${item['input']}'),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => _answerApproval(item, false),
-                          child: const Text('Recusar'),
-                        ),
-                        FilledButton(
-                          onPressed: () => _answerApproval(item, true),
-                          child: const Text('Autorizar'),
-                        ),
-                      ],
+                  ),
+                  if (!_connected)
+                    IconButton(
+                      onPressed: _connecting ? null : _connect,
+                      icon: const Icon(Icons.refresh_rounded),
+                      tooltip: 'Tentar novamente',
                     ),
-                  ],
-                ),
+                ],
               ),
             ),
-        ],
+          ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-            children: [
-              for (final task in _activeTasks.values)
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${task['title']} • ${task['status']}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        if (task['stage'] != null) Text('${task['stage']}'),
-                        LinearProgressIndicator(
-                          value: (task['progress'] as num?)?.toDouble(),
-                        ),
-                        if (task['cancelSupported'] == true &&
-                            task['status'] == 'running')
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () async {
-                                try {
-                                  await _api!.cancelTask('${task['id']}');
-                                } catch (error) {
-                                  if (mounted)
-                                    setState(() => _error = '$error');
-                                }
-                              },
-                              icon: const Icon(Icons.stop_circle_outlined),
-                              label: const Text('Cancelar'),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_messages.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 18),
-                  child: Text(
-                    'Fale com o Agente ou abra um módulo. O Android transcreve no aparelho quando há reconhecimento offline em português; o áudio não é enviado ao Gestor nem consome tokens de IA nesta etapa.',
-                  ),
-                ),
-              for (final message in _messages)
-                Align(
-                  alignment: message.role == 'user'
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
-                    constraints: const BoxConstraints(maxWidth: 560),
-                    decoration: BoxDecoration(
-                      color: message.role == 'user'
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : Theme.of(
-                              context,
-                            ).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SelectableText(message.text),
-                        for (final artifact in message.artifacts)
-                          TextButton.icon(
-                            onPressed: () => _downloadArtifact(artifact),
-                            icon: const Icon(Icons.download),
-                            label: Text('Baixar ${artifact['name']}'),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_assistantDraft.isNotEmpty)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.all(4),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(_assistantDraft),
-                  ),
-                ),
-              if (_modules.isNotEmpty) ...[
-                const Padding(
-                  padding: EdgeInsets.only(top: 20, bottom: 4),
-                  child: Text(
-                    'MÓDULOS E AÇÕES',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                ),
-                for (final module in _modules)
-                  if (module['enabled'] == true)
-                    ExpansionTile(
-                      title: Text('${module['title']}'),
-                      subtitle: Text('${module['description']}'),
-                      children: [
-                        for (final raw
-                            in module['commands'] as List? ?? const [])
-                          ListTile(
-                            title: Text('${(raw as Map)['title']}'),
-                            subtitle: Text(
-                              '${raw['description']}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            trailing: const Icon(Icons.play_arrow),
-                            onTap: () =>
-                                _runCommand(Map<String, dynamic>.from(raw)),
-                          ),
-                      ],
-                    ),
-              ],
-            ],
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xff0f1123), Color(0xff1a0a33)],
+              ),
+            ),
+            child: switch (_selectedTab) {
+              0 => _buildHome(),
+              1 => _buildModules(),
+              2 => _buildTasks(),
+              _ => _buildAgent(),
+            },
           ),
         ),
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
-          ),
+        if (_selectedTab == 3) _agentComposer(),
       ],
     ),
-    bottomNavigationBar: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _input,
-              minLines: 1,
-              maxLines: 4,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _send(),
-              decoration: InputDecoration(
-                hintText: _listening
-                    ? 'Ouvindo em português… envia após uma pausa ou ao parar'
-                    : 'Peça algo ao Agente…',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  onPressed: _sending ? _cancelAgentMessage : () => _send(),
-                  tooltip: _sending ? 'Interromper o agente' : 'Enviar',
-                  icon: Icon(
-                    _sending ? Icons.stop_circle_outlined : Icons.send_rounded,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_listening)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 14),
-                    child: Text(
-                      'Ouvindo…',
-                      style: TextStyle(
-                        color: Colors.red,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                SizedBox(
-                  width: 78,
-                  height: 78,
-                  child: FloatingActionButton.large(
-                    onPressed: _connected && !_sending ? _toggleMic : null,
-                    backgroundColor: _listening ? Colors.red : null,
-                    tooltip: _listening
-                        ? 'Parar e enviar transcrição'
-                        : 'Falar com o Agente',
-                    child: Icon(
-                      _listening ? Icons.stop_rounded : Icons.mic_rounded,
-                      size: 34,
-                    ),
-                  ),
-                ),
-                if (_sending)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 14),
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-              ],
-            ),
-          ],
+    bottomNavigationBar: NavigationBar(
+      selectedIndex: _selectedTab,
+      onDestinationSelected: (index) => setState(() {
+        _selectedTab = index;
+        _selectedModuleId = null;
+      }),
+      destinations: [
+        const NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Início',
         ),
-      ),
+        const NavigationDestination(
+          icon: Icon(Icons.apps_outlined),
+          selectedIcon: Icon(Icons.apps_rounded),
+          label: 'Módulos',
+        ),
+        NavigationDestination(
+          icon: Badge(
+            isLabelVisible: _activeTasks.isNotEmpty,
+            label: Text('${_activeTasks.length}'),
+            child: const Icon(Icons.sync_outlined),
+          ),
+          selectedIcon: Badge(
+            isLabelVisible: _activeTasks.isNotEmpty,
+            label: Text('${_activeTasks.length}'),
+            child: const Icon(Icons.sync_rounded),
+          ),
+          label: 'Tarefas',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.auto_awesome_outlined),
+          selectedIcon: Icon(Icons.auto_awesome_rounded),
+          label: 'Agente',
+        ),
+      ],
     ),
   );
 }
