@@ -221,7 +221,7 @@ jobs:
 
       - name: Build installable Android APK
         working-directory: mobile
-        run: flutter build apk --release
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Name APK by release version
         shell: bash
