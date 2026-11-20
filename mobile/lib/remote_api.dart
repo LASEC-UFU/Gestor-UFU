@@ -87,8 +87,25 @@ class RemoteApi {
       '/health',
       timeout: const Duration(seconds: 8),
     );
-    if (health.statusCode != 200)
-      throw HttpException('Computador respondeu ${health.statusCode}.');
+    if (health.statusCode != 200) {
+      final decoded = jsonDecode(utf8.decode(health.bodyBytes));
+      final body = decoded is Map<String, dynamic>
+          ? decoded
+          : const <String, dynamic>{};
+      final message = body['error']?.toString();
+      final sourceAddress = body['sourceAddress']?.toString();
+      if (health.statusCode == 403 && sourceAddress != null) {
+        throw HttpException(
+          'O Windows recebeu a conexÃ£o do IP $sourceAddress, mas ele nÃ£o estÃ¡ autorizado. '
+          'No CIDR do Gestor UFU, permita somente esse IP usando /32 (por exemplo, $sourceAddress/32).',
+        );
+      }
+      throw HttpException(
+        message == null || message.isEmpty
+            ? 'Computador respondeu ${health.statusCode}.'
+            : 'Computador respondeu ${health.statusCode}: $message',
+      );
+    }
     final response = await _request(
       'GET',
       '/api/v1/modules',

@@ -211,8 +211,10 @@ class RemoteAccessServer {
       return;
     }
     if (!await _sourceAllowed(request)) {
+      final sourceAddress = request.connectionInfo?.remoteAddress.address;
       await _json(request.response, HttpStatus.forbidden, {
         'error': 'Origem fora da faixa de rede autorizada.',
+        if (sourceAddress != null) 'sourceAddress': sourceAddress,
       });
       return;
     }
