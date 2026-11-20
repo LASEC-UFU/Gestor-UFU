@@ -34,6 +34,7 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
   final _messages = <Map<String, dynamic>>[];
   final _classification = <String, String>{};
   bool _unread = false, _busy = false;
+  late DateTime _weekStart;
   int _mailPage = 0;
   bool _hasMoreMail = false;
   String? _error;
@@ -41,6 +42,12 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
   @override
   void initState() {
     super.initState();
+    final today = DateTime.now();
+    _weekStart = DateTime(
+      today.year,
+      today.month,
+      today.day - today.weekday + 1,
+    );
     unawaited(_load());
   }
 
@@ -108,6 +115,158 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
     await _loadCalendars();
     await _loadMessages();
   });
+
+  Future<void> _abrirConfiguracoesConexao() async {
+    final atual = await _api.configuracaoOauth();
+    if (!mounted) return;
+    final google = TextEditingController(text: atual['google']);
+    final microsoft = TextEditingController(text: atual['microsoft']);
+    final googleSecret = TextEditingController();
+    final segredoGoogleSalvo = atual['googleSecretConfigured'] == 'true';
+    final salvar = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          icon: const Icon(Icons.settings_outlined),
+          title: const Text('Configurações de conexão'),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Informe os IDs das aplicações OAuth do Gestor. Senhas e '
+                    'tokens da sua conta nunca são solicitados aqui.',
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: google,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Google OAuth Client ID',
+                      hintText: '…apps.googleusercontent.com',
+                      helperText:
+                          'Google Cloud Console → cliente OAuth de aplicativo para computador.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: googleSecret,
+                    autocorrect: false,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: 'Google OAuth Client Secret (se fornecido)',
+                      helperText: segredoGoogleSalvo
+                          ? 'Um segredo já está salvo com proteção do Windows. Deixe vazio para mantê-lo.'
+                          : 'Necessário quando o Google informar “client_secret is missing”.',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: microsoft,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Microsoft OAuth Application (client) ID',
+                      hintText: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                      helperText:
+                          'Microsoft Entra ID → Registro de aplicativo → Application (client) ID.',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Para contas institucionais, o CTIC pode precisar conceder '
+                    'consentimento para Calendars.ReadWrite e Mail.ReadWrite.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const Divider(height: 32),
+                  Text(
+                    'Contas conectadas',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 4),
+                  _contaConfiguracao(
+                    'google_calendar',
+                    'Google Calendar',
+                    'Eventos e calendários de origem',
+                    setLocal,
+                  ),
+                  _contaConfiguracao(
+                    'google_mail',
+                    'Gmail',
+                    'Leitura e estado lido/não lido',
+                    setLocal,
+                  ),
+                  _contaConfiguracao(
+                    'microsoft_calendar',
+                    'Microsoft Calendar',
+                    'Calendars.ReadWrite; pode exigir consentimento CTIC',
+                    setLocal,
+                  ),
+                  _contaConfiguracao(
+                    'microsoft_mail',
+                    'Microsoft Outlook',
+                    'Mail.ReadWrite; pode exigir consentimento CTIC',
+                    setLocal,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Salvar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (salvar == true) {
+      await _run(() async {
+        await _api.salvarConfiguracaoOauth(
+          google: google.text,
+          microsoft: microsoft.text,
+          googleClientSecret: googleSecret.text,
+        );
+      });
+    }
+    google.dispose();
+    microsoft.dispose();
+    googleSecret.dispose();
+  }
+
+  Widget _contaConfiguracao(
+    String id,
+    String titulo,
+    String detalhe,
+    void Function(VoidCallback fn) atualizarDialog,
+  ) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    leading: Icon(_connected[id] == true ? Icons.link : Icons.link_off),
+    title: Text(titulo),
+    subtitle: Text(detalhe),
+    trailing: TextButton(
+      onPressed: _busy
+          ? null
+          : () async {
+              if (_connected[id] == true) {
+                await _disconnect(id);
+              } else {
+                await _connect(id);
+              }
+              atualizarDialog(() {});
+            },
+      child: Text(_connected[id] == true ? 'Desconectar' : 'Conectar'),
+    ),
+  );
+
   Future<void> _loadCalendars() async {
     if (!_connected.values.any((v) => v)) {
       if (mounted) {
@@ -141,10 +300,9 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
       if (mounted) setState(_events.clear);
       return;
     }
-    final now = DateTime.now();
     final list = await _api.events(
-      DateTime(now.year, now.month, now.day),
-      DateTime(now.year, now.month, now.day + 14),
+      _weekStart,
+      _weekStart.add(const Duration(days: 7)),
       selected,
     );
     if (mounted) {
@@ -541,27 +699,16 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
     );
   }
 
-  Widget _providerCard(String id, String title, String detail) => Card(
-    child: ListTile(
-      leading: Icon(_connected[id] == true ? Icons.link : Icons.link_off),
-      title: Text(title),
-      subtitle: Text(detail),
-      trailing: _connected[id] == true
-          ? TextButton(
-              onPressed: _busy ? null : () => _disconnect(id),
-              child: const Text('Desconectar'),
-            )
-          : TextButton(
-              onPressed: _busy ? null : () => _connect(id),
-              child: const Text('Conectar'),
-            ),
-    ),
-  );
   @override
   Widget build(BuildContext context) => ModuleScaffold(
     moduleId: 'agenda-email',
     subtitle: 'Agendas e e-mails das contas Google e Microsoft',
     actions: [
+      IconButton(
+        tooltip: 'Configurações de conexão OAuth',
+        onPressed: _busy ? null : _abrirConfiguracoesConexao,
+        icon: const Icon(Icons.settings_outlined),
+      ),
       IconButton(
         tooltip: 'Atualizar',
         onPressed: _busy ? null : () => _run(_refreshConnections),
@@ -573,52 +720,22 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
 
   Widget _corpo() => Column(
     children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'As mensagens e eventos permanecem nos provedores de origem. Senhas não são solicitadas. Permissões delegadas são exibidas pelo provedor durante OAuth.',
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                _providerCard(
-                  'google_calendar',
-                  'Google Calendar',
-                  'calendar.events + calendarlist.readonly',
+      if (_error != null || _busy)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 8),
+          child: Column(
+            children: [
+              if (_error != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(8),
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Text(_error!),
                 ),
-                _providerCard(
-                  'google_mail',
-                  'Gmail',
-                  'gmail.modify: leitura e estado lido',
-                ),
-                _providerCard(
-                  'microsoft_calendar',
-                  'Microsoft Calendar',
-                  'Calendars.ReadWrite; pode exigir consentimento CTIC',
-                ),
-                _providerCard(
-                  'microsoft_mail',
-                  'Microsoft Outlook',
-                  'Mail.ReadWrite; pode exigir consentimento CTIC',
-                ),
-              ],
-            ),
-            if (_error != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(8),
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: Text(_error!),
-              ),
-            if (_busy) const LinearProgressIndicator(),
-          ],
+              if (_busy) const LinearProgressIndicator(),
+            ],
+          ),
         ),
-      ),
       TabBar(
         controller: _tabs,
         tabs: const [
@@ -637,118 +754,383 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
       ),
     ],
   );
-  Widget _calendarView() => ListView(
-    padding: const EdgeInsets.all(16),
+  Widget _calendarView() => Column(
     children: [
-      if (_calendars.isNotEmpty) ...[
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => _createEvent('Pessoal'),
-              icon: const Icon(Icons.add),
-              label: const Text('Nova atividade pessoal'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => _createEvent('Profissional'),
-              icon: const Icon(Icons.add),
-              label: const Text('Nova atividade profissional'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Calendários disponíveis',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        for (final c in _calendars)
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.calendar_today),
-              title: Text('${c['name']}'),
-              subtitle: Text('${c['account']} • ${c['provider']}'),
-              trailing: DropdownButton<String>(
-                value: _classification[_key(c)] ?? 'Pessoal',
-                items: const [
-                  DropdownMenuItem(value: 'Pessoal', child: Text('Pessoal')),
-                  DropdownMenuItem(
-                    value: 'Profissional',
-                    child: Text('Profissional'),
-                  ),
-                  DropdownMenuItem(value: 'hidden', child: Text('Oculto')),
-                ],
-                onChanged: (v) {
-                  if (v == null) return;
-                  setState(() => _classification[_key(c)] = v);
-                  unawaited(_saveCalendarPrefs());
-                },
-              ),
-            ),
-          ),
-        _defaultPicker('Atividades pessoais', _defaultPersonal, (v) {
-          _defaultPersonal = v;
-          unawaited(_saveCalendarPrefs());
-        }),
-        _defaultPicker('Atividades profissionais', _defaultProfessional, (v) {
-          _defaultProfessional = v;
-          unawaited(_saveCalendarPrefs());
-        }),
-        const Divider(),
-        Text(
-          'Próximos 14 dias',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        for (final e in _events)
-          Card(
-            child: ListTile(
-              title: Text(_title(e)),
-              subtitle: Text(
-                '${_startText(e)}\n${e['account']} • ${e['provider']} • ${e['calendar']}',
-              ),
-              isThreeLine: true,
-              onTap: () => _editEvent(e),
-              trailing: PopupMenuButton<String>(
-                onSelected: (v) =>
-                    v == 'edit' ? _editEvent(e) : _deleteEvent(e),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'edit', child: Text('Editar')),
-                  PopupMenuItem(value: 'delete', child: Text('Excluir')),
+      _calendarToolbar(),
+      Expanded(
+        child: _calendars.isEmpty
+            ? Center(
+                child: TextButton.icon(
+                  onPressed: _abrirConfiguracoesConexao,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Conecte uma agenda em Configurações'),
+                ),
+              )
+            : Row(
+                children: [
+                  SizedBox(width: 272, child: _calendarSidebar()),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: _weekGrid()),
                 ],
               ),
-            ),
-          ),
-      ] else
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Conecte uma conta de agenda para carregar calendários de origem.',
-          ),
-        ),
+      ),
     ],
   );
+
+  Widget _calendarToolbar() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+    child: Row(
+      children: [
+        FilledButton.icon(
+          onPressed: _calendars.isEmpty
+              ? null
+              : () => _createEvent('Profissional'),
+          icon: const Icon(Icons.add),
+          label: const Text('Criar'),
+        ),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: 'Semana anterior',
+          onPressed: () {
+            setState(
+              () => _weekStart = _weekStart.subtract(const Duration(days: 7)),
+            );
+            unawaited(_loadEvents());
+          },
+          icon: const Icon(Icons.chevron_left),
+        ),
+        IconButton(
+          tooltip: 'Próxima semana',
+          onPressed: () {
+            setState(
+              () => _weekStart = _weekStart.add(const Duration(days: 7)),
+            );
+            unawaited(_loadEvents());
+          },
+          icon: const Icon(Icons.chevron_right),
+        ),
+        TextButton(
+          onPressed: () {
+            final today = DateTime.now();
+            setState(
+              () => _weekStart = DateTime(
+                today.year,
+                today.month,
+                today.day - today.weekday + 1,
+              ),
+            );
+            unawaited(_loadEvents());
+          },
+          child: const Text('Hoje'),
+        ),
+        const SizedBox(width: 12),
+        Text(_weekTitle(), style: Theme.of(context).textTheme.titleMedium),
+        const Spacer(),
+        const Chip(
+          avatar: Icon(Icons.calendar_view_week_outlined, size: 18),
+          label: Text('Semana'),
+        ),
+      ],
+    ),
+  );
+
+  String _weekTitle() {
+    final end = _weekStart.add(const Duration(days: 6));
+    return '${MaterialLocalizations.of(context).formatMediumDate(_weekStart)} — ${MaterialLocalizations.of(context).formatMediumDate(end)}';
+  }
+
+  Widget _calendarSidebar() => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      Text('Meus calendários', style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      for (final c in _calendars)
+        CheckboxListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.trailing,
+          secondary: CircleAvatar(
+            radius: 6,
+            backgroundColor: _calendarColor(c),
+          ),
+          value: _classification[_key(c)] != 'hidden',
+          title: Text('${c['name']}', overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${c['provider']}',
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          onChanged: (show) {
+            setState(
+              () => _classification[_key(c)] = show == true
+                  ? (_classification[_key(c)] == 'hidden'
+                        ? 'Pessoal'
+                        : _classification[_key(c)] ?? 'Pessoal')
+                  : 'hidden',
+            );
+            unawaited(_saveCalendarPrefs());
+          },
+        ),
+      const Divider(height: 28),
+      Text('Calendários padrão', style: Theme.of(context).textTheme.titleSmall),
+      const SizedBox(height: 8),
+      _defaultPicker('Pessoal', _defaultPersonal, (v) {
+        _defaultPersonal = v;
+        unawaited(_saveCalendarPrefs());
+      }),
+      const SizedBox(height: 10),
+      _defaultPicker('Profissional', _defaultProfessional, (v) {
+        _defaultProfessional = v;
+        unawaited(_saveCalendarPrefs());
+      }),
+      const SizedBox(height: 12),
+      TextButton.icon(
+        onPressed: _abrirConfiguracoesConexao,
+        icon: const Icon(Icons.settings_outlined),
+        label: const Text('Gerenciar conexões'),
+      ),
+    ],
+  );
+
+  Widget _weekGrid() => LayoutBuilder(
+    builder: (context, constraints) => Column(
+      children: [
+        Row(
+          children: [
+            for (var index = 0; index < 7; index++)
+              Expanded(
+                child: _dayHeader(_weekStart.add(Duration(days: index))),
+              ),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: Row(
+            children: [
+              for (var index = 0; index < 7; index++)
+                Expanded(
+                  child: _dayColumn(
+                    _weekStart.add(Duration(days: index)),
+                    index < 6,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _dayHeader(DateTime day) {
+    final today = DateUtils.isSameDay(day, DateTime.now());
+    const weekdays = ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB', 'DOM'];
+    return Container(
+      height: 58,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            weekdays[day.weekday - 1],
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+          const SizedBox(height: 3),
+          CircleAvatar(
+            radius: 15,
+            backgroundColor: today
+                ? Theme.of(context).colorScheme.primary
+                : Colors.transparent,
+            foregroundColor: today
+                ? Theme.of(context).colorScheme.onPrimary
+                : null,
+            child: Text('${day.day}'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayColumn(DateTime day, bool divider) {
+    final dayEvents = _events
+        .where(
+          (event) => DateUtils.isSameDay(_eventStart(event).toLocal(), day),
+        )
+        .toList();
+    return Container(
+      decoration: BoxDecoration(
+        border: divider
+            ? Border(right: BorderSide(color: Theme.of(context).dividerColor))
+            : null,
+      ),
+      child: ListView(
+        padding: const EdgeInsets.all(5),
+        children: [
+          for (final event in dayEvents) _eventBlock(event),
+          if (dayEvents.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 18),
+              child: Icon(
+                Icons.more_horiz,
+                size: 16,
+                color: Theme.of(context).disabledColor,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _eventBlock(Map<String, dynamic> event) => InkWell(
+    onTap: () => _editEvent(event),
+    onLongPress: () => _deleteEvent(event),
+    borderRadius: BorderRadius.circular(5),
+    child: Container(
+      margin: const EdgeInsets.only(bottom: 5),
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: _eventColor(event).withValues(alpha: 0.18),
+        border: Border(left: BorderSide(color: _eventColor(event), width: 3)),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        '${_eventTime(event)} ${_title(event)}',
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.labelMedium,
+      ),
+    ),
+  );
+
+  String _eventTime(Map event) => (event['start'] as Map?)?['date'] != null
+      ? 'Todo dia'
+      : MaterialLocalizations.of(
+          context,
+        ).formatTimeOfDay(TimeOfDay.fromDateTime(_eventStart(event).toLocal()));
+
+  Color _eventColor(Map event) {
+    final calendar = _calendars
+        .where(
+          (item) =>
+              '${item['id']}' == '${event['calendar_id']}' &&
+              '${item['provider_id']}' == '${event['provider_id']}',
+        )
+        .firstOrNull;
+    return _calendarColor(calendar ?? event);
+  }
+
+  Color _calendarColor(Map calendar) {
+    final raw = '${calendar['backgroundColor'] ?? ''}'.trim();
+    final hex = raw.startsWith('#') ? raw.substring(1) : raw;
+    if (RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(hex)) {
+      return Color(0xFF000000 | int.parse(hex, radix: 16));
+    }
+    const palette = [
+      Color(0xFF1A73E8), // azul
+      Color(0xFF0B8043), // verde
+      Color(0xFFE37400), // laranja
+      Color(0xFF9334E6), // roxo
+      Color(0xFFC5221F), // vermelho
+      Color(0xFF00838F), // turquesa
+      Color(0xFF5F6368), // cinza
+    ];
+    final id =
+        '${calendar['provider_id']}:${calendar['id'] ?? calendar['calendar_id']}';
+    return palette[id.hashCode.abs() % palette.length];
+  }
+
   Widget _defaultPicker(
     String label,
     String current,
     ValueChanged<String> onChanged,
-  ) => DropdownButtonFormField<String>(
-    initialValue: _calendars.any((c) => _key(c) == current) ? current : null,
-    decoration: InputDecoration(labelText: label),
-    items: [
-      for (final c in _calendars)
-        DropdownMenuItem(
-          value: _key(c),
-          child: Text(
-            '${c['provider']} • ${c['name']}',
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
+  ) {
+    final selected = _calendars
+        .where((calendar) => _key(calendar) == current)
+        .firstOrNull;
+    return ListTile(
+      dense: true,
+      minVerticalPadding: 2,
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: Theme.of(context).textTheme.labelMedium),
+      subtitle: Text(
+        selected == null
+            ? 'Não definido'
+            : '${selected['provider']} • ${selected['name']}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: PopupMenuButton<String>(
+        tooltip: 'Escolher calendário padrão $label',
+        icon: const Icon(Icons.arrow_drop_down),
+        onSelected: onChanged,
+        itemBuilder: (_) => [
+          for (final calendar in _calendars)
+            PopupMenuItem(
+              value: _key(calendar),
+              child: SizedBox(
+                width: 260,
+                child: Text(
+                  '${calendar['provider']} • ${calendar['name']}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mailView() => Row(
+    children: [
+      SizedBox(width: 220, child: _mailSidebar()),
+      const VerticalDivider(width: 1),
+      Expanded(child: _mailContent()),
     ],
-    onChanged: (v) {
-      if (v != null) onChanged(v);
-    },
   );
-  Widget _mailView() => Column(
+
+  Widget _mailSidebar() => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 14, 10, 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: null,
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('Escrever'),
+        ),
+        const SizedBox(height: 14),
+        _mailNav('Caixa de entrada', Icons.inbox_outlined, !_unread),
+        _mailNav('Não lidos', Icons.mark_email_unread_outlined, _unread),
+        _mailNav('Com estrela', Icons.star_border, false),
+        const Spacer(),
+        TextButton.icon(
+          onPressed: _abrirConfiguracoesConexao,
+          icon: const Icon(Icons.settings_outlined),
+          label: const Text('Gerenciar contas'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _mailNav(String label, IconData icon, bool selected) => ListTile(
+    dense: true,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    selected: selected,
+    selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+    leading: Icon(icon),
+    title: Text(label),
+    onTap: label == 'Não lidos'
+        ? () {
+            setState(() => _unread = true);
+            unawaited(_loadMessages());
+          }
+        : label == 'Caixa de entrada'
+        ? () {
+            setState(() => _unread = false);
+            unawaited(_loadMessages());
+          }
+        : null,
+  );
+
+  Widget _mailContent() => Column(
     children: [
       Padding(
         padding: const EdgeInsets.all(12),
@@ -778,14 +1160,83 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
       ),
       Expanded(
         child: _messages.isEmpty
-            ? const Center(
-                child: Text('Conecte Gmail ou Outlook, ou ajuste a busca.'),
+            ? Center(
+                child: TextButton.icon(
+                  onPressed: _abrirConfiguracoesConexao,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text(
+                    'Conecte Gmail ou Outlook em Configurações',
+                  ),
+                ),
               )
-            : ListView.builder(
-                itemCount: _messages.length + (_hasMoreMail ? 1 : 0),
-                itemBuilder: (ctx, i) {
-                  if (i == _messages.length) {
-                    return Center(
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  Card(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        headingRowColor: WidgetStatePropertyAll(
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
+                        ),
+                        columns: const [
+                          DataColumn(label: Text('')),
+                          DataColumn(label: Text('ASSUNTO')),
+                          DataColumn(label: Text('REMETENTE')),
+                          DataColumn(label: Text('CONTA / ORIGEM')),
+                          DataColumn(label: Text('RECEBIDO')),
+                        ],
+                        rows: [
+                          for (final m in _messages)
+                            DataRow(
+                              onSelectChanged: (_) => _openMessage(m),
+                              cells: [
+                                DataCell(
+                                  Icon(
+                                    m['isRead'] == true
+                                        ? Icons.drafts_outlined
+                                        : Icons.mark_email_unread_outlined,
+                                    color: m['isRead'] == true
+                                        ? null
+                                        : Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 300,
+                                    child: Text(
+                                      '${m['subject'] ?? '(Sem assunto)'}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 220,
+                                    child: Text(
+                                      '${m['from']}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 190,
+                                    child: Text(
+                                      '${m['account']} • ${m['provider']}',
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(Text('${m['receivedDateTime']}')),
+                              ],
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_hasMoreMail)
+                    Center(
                       child: TextButton.icon(
                         onPressed: _busy
                             ? null
@@ -793,28 +1244,8 @@ class _AgendaEmailPageState extends State<AgendaEmailPage>
                         icon: const Icon(Icons.expand_more),
                         label: const Text('Carregar mais mensagens'),
                       ),
-                    );
-                  }
-                  final m = _messages[i];
-                  return ListTile(
-                    leading: Icon(
-                      m['isRead'] == true
-                          ? Icons.drafts_outlined
-                          : Icons.mark_email_unread_outlined,
                     ),
-                    title: Text(
-                      '${m['subject'] ?? '(Sem assunto)'}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      '${m['from']} • ${m['account']}\n${m['receivedDateTime']}',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: () => _openMessage(m),
-                  );
-                },
+                ],
               ),
       ),
     ],

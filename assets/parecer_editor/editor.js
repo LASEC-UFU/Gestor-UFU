@@ -45,33 +45,6 @@
     telaCheia: '<svg viewBox="0 0 20 20"><path fill="currentColor" d="M3 8V3h5v2H5v3H3zm9-5h5v5h-2V5h-3V3zM3 12h2v3h3v2H3v-5zm12 0h2v5h-5v-2h3v-3z"/></svg>',
   };
 
-  // ------------------------------------------------------------ tela cheia
-  // Mantém a barra do CKEditor e a folha de texto juntas; é o próprio
-  // documento do WebView que entra em tela cheia, não apenas a área editável.
-  class TelaCheia extends Plugin {
-    init() {
-      const editor = this.editor;
-      editor.ui.componentFactory.add('telaCheia', (locale) => {
-        const b = new ButtonView(locale);
-        b.set({ label: 'Tela cheia do texto', icon: ICONE.telaCheia, tooltip: true });
-        const atualizar = () => { b.isOn = !!document.fullscreenElement; };
-        b.on('execute', async () => {
-          try {
-            if (document.fullscreenElement) await document.exitFullscreen();
-            else await document.documentElement.requestFullscreen();
-          } catch (_) {
-            // Alguns WebView2 bloqueiam a API de fullscreen; ainda oferece
-            // um modo focado dentro da região do editor.
-            document.body.classList.toggle('gestor-tela-cheia');
-          }
-          atualizar();
-        });
-        document.addEventListener('fullscreenchange', atualizar);
-        return b;
-      });
-    }
-  }
-
   // ---------------------------------------------------------- Aa (caixa)
   class AlterarCaixa extends Plugin {
     init() {
@@ -489,6 +462,20 @@
 
   const toModel = (html) => editor.data.toModel(editor.data.processor.toView(html));
 
+  // Executada diretamente pelo clique do usuário no botão ⛶. A Fullscreen
+  // API exige esse gesto; chamar a partir do Flutter/WebView depois da
+  // mensagem perde a autorização e acaba deixando a janela inteira igual.
+  async function alternarTelaCheiaDoEditor() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (_) {
+      // Fallback para WebView2 sem Fullscreen API: amplia só o conteúdo HTML
+      // dentro da região do editor, sem alterar a janela do Gestor.
+      document.body.classList.toggle('gestor-tela-cheia');
+    }
+  }
+
   window.parecer = {
     async iniciar(opcoes) {
       const o = opcoes || {};
@@ -510,7 +497,7 @@
         C.ImageInsert, C.Base64UploadAdapter,
         C.Table, C.TableToolbar, C.TableProperties, C.TableCellProperties, C.TableColumnResize,
         C.Link, C.Style, C.GeneralHtmlSupport, C.SourceEditing, C.WordCount,
-        AlterarCaixa, PincelFormatacao, ValorPorExtenso, LinkSei, TelaCheia,
+        AlterarCaixa, PincelFormatacao, ValorPorExtenso, LinkSei,
       ];
       try {
         editor = await C.DecoupledEditor.create(document.getElementById('editor'), {
@@ -525,10 +512,10 @@
             items: [
               'undo', 'redo', '|', 'style', '|', 'findAndReplace', 'pincel', 'removeFormat', '|',
               'bold', 'italic', 'underline', 'strikethrough', 'subscript', 'superscript', 'alterarCaixa', '|',
-              'fontColor', 'fontBackgroundColor', 'fontSize', '|', 'showBlocks', 'specialCharacters', '|',
+              'fontColor', 'fontBackgroundColor', 'fontSize', 'fontFamily', '|', 'showBlocks', 'specialCharacters', '|',
               'numberedList', 'bulletedList', 'outdent', 'indent', 'alignment', '|',
               'horizontalLine', 'pageBreak', '|', 'insertImage', 'insertTable', 'link', '|', 'linkSei',
-              'valorExtenso', '|', 'sourceEditing', '|', 'telaCheia',
+              'valorExtenso', '|', 'sourceEditing',
             ],
           },
           style: { definitions: estilos },
@@ -551,6 +538,7 @@
         return;
       }
       document.getElementById('barra').appendChild(editor.ui.view.toolbar.element);
+      document.getElementById('gestor-tela-cheia').addEventListener('click', alternarTelaCheiaDoEditor);
       const contagem = document.getElementById('contagem');
       const wc = editor.plugins.get('WordCount');
       const atualizarContagem = () => { contagem.textContent = `${wc.words} palavras · ${wc.characters} caracteres`; };
@@ -572,6 +560,16 @@
       const editable = editor.ui.getEditableElement();
       editable.addEventListener('mouseup', () => setTimeout(reportarSelecao, 0));
       editable.addEventListener('keyup', reportarSelecao);
+      // O WebView2 pode entregar a roda ao contêiner nativo sem acionar a
+      // rolagem padrão do CKEditor. Rolamos explicitamente a área da folha,
+      // preservando a edição e a seleção de texto.
+      document.addEventListener('wheel', (e) => {
+        if (!e.target.closest || !e.target.closest('#area')) return;
+        const area = document.getElementById('area');
+        if (!area || !e.deltaY) return;
+        area.scrollTop += e.deltaY;
+        e.preventDefault();
+      }, { passive: false, capture: true });
       editable.addEventListener('contextmenu', (e) => {
         if (e.shiftKey) return; // Shift + botão direito: menu padrão do navegador.
         e.preventDefault();
@@ -616,6 +614,16 @@
     definirLinks(mapa) { linksSei = mapa || {}; },
 
     definirComentarios(lista) { comentarios = Array.isArray(lista) ? lista : []; repintar(); return true; },
+
+    /// Recebe a roda encaminhada pelo Flutter quando o cursor está sobre a
+    /// textura do WebView. O WebView2 não a entrega de modo consistente ao
+    /// elemento scrollável interno em builds Windows.
+    rolar(deltaY) {
+      const area = document.getElementById('area');
+      if (!area) return false;
+      area.scrollTop += Number(deltaY) || 0;
+      return true;
+    },
 
     /// Seleciona o comentário [id]: destaca o trecho e, com [rolar], leva a
     /// folha até ele. Devolve {ok:false} se o trecho não existe mais.

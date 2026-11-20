@@ -166,19 +166,13 @@ class _LeitorComentadoState extends State<LeitorComentado> {
             ctx.findAncestorWidgetOfExactType<EditableText>() != null);
     if (emTexto) return KeyEventResult.ignored;
 
-    final paisagem = MediaQuery.orientationOf(context) == Orientation.landscape;
-    final setaHorizontal =
-        e.logicalKey == LogicalKeyboardKey.arrowLeft ||
-        e.logicalKey == LogicalKeyboardKey.arrowRight;
+    // No painel, ↑/↓ percorrem os comentários. ←/→ ficam livres para os
+    // controles que tiverem foco (inclusive a edição do texto).
     final setaVertical =
         e.logicalKey == LogicalKeyboardKey.arrowUp ||
         e.logicalKey == LogicalKeyboardKey.arrowDown;
-    final anterior = paisagem
-        ? e.logicalKey == LogicalKeyboardKey.arrowLeft
-        : e.logicalKey == LogicalKeyboardKey.arrowUp;
-    final proximo = paisagem
-        ? e.logicalKey == LogicalKeyboardKey.arrowRight
-        : e.logicalKey == LogicalKeyboardKey.arrowDown;
+    final anterior = e.logicalKey == LogicalKeyboardKey.arrowUp;
+    final proximo = e.logicalKey == LogicalKeyboardKey.arrowDown;
     if (anterior || proximo) {
       if (anterior) {
         if (c.temAnterior) c.anterior();
@@ -187,9 +181,7 @@ class _LeitorComentadoState extends State<LeitorComentado> {
       }
       return KeyEventResult.handled;
     }
-    // Mesmo a direção não usada no layout não pode escapar para o TabBar,
-    // que a usaria para alternar Relatório/Fundamentação/Conclusão.
-    if (setaHorizontal || setaVertical) return KeyEventResult.handled;
+    if (setaVertical) return KeyEventResult.handled;
     if (e.logicalKey == LogicalKeyboardKey.escape && c.selecionado != null) {
       c.limparSelecao();
       return KeyEventResult.handled;

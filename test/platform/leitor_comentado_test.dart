@@ -229,11 +229,11 @@ void main() {
       expect(find.text('Como melhorar'), findsNothing);
       expect(c.selecionado, isNull);
 
-      // Próximo pelo botão e pela seta horizontal em paisagem.
+      // Próximo pelo botão e pela seta para baixo no painel.
       await tester.tap(find.byTooltip('Próximo comentário (↓)'));
       await tester.pumpAndSettle();
       expect(c.selecionado, 'a');
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       expect(c.selecionado, 'b');
       expect(idas, ['a', 'a', 'b']);
@@ -501,14 +501,14 @@ void main() {
     ) async {
       await montar(tester);
       // Sem seleção, as setas não navegam.
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       expect(c.selecionado, isNull);
 
       await tester.tap(find.text(lista[2].titulo));
       await tester.pumpAndSettle();
       expect(c.selecionado, 'c2');
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
       expect(c.selecionado, 'c3');
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -517,13 +517,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pumpAndSettle();
-      expect(c.selecionado, 'c3');
-      expect(idas, ['c2', 'c3', 'c4', 'c3']);
-      expect(visivel(tester, 'c3'), isTrue);
+      expect(c.selecionado, 'c4');
+      expect(idas, ['c2', 'c3', 'c4']);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
-      expect(c.selecionado, 'c3');
+      expect(c.selecionado, 'c4');
 
       // Na busca, as setas são do campo de texto.
       await tester.tap(find.byType(TextField));
@@ -531,15 +530,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
-      expect(c.selecionado, 'c3');
+      expect(c.selecionado, 'c4');
 
-      // Esc desfaz a seleção.
-      await tester.tap(find.text(lista[3].titulo));
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(c.selecionado, isNull);
-      expect(c.expandido('c3'), isFalse);
     });
 
     testWidgets(
@@ -591,7 +583,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(focoAbas.hasFocus, isFalse);
 
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
         await tester.pumpAndSettle();
         expect(c.selecionado, 'b');
         expect(trocasDeAba, 0);

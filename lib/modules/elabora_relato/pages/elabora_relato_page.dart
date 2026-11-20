@@ -34,15 +34,11 @@ class ElaboraRelatoPage extends StatefulWidget {
   State<ElaboraRelatoPage> createState() => _ElaboraRelatoPageState();
 }
 
-class _ElaboraRelatoPageState extends State<ElaboraRelatoPage>
-    with SingleTickerProviderStateMixin {
+class _ElaboraRelatoPageState extends State<ElaboraRelatoPage> {
   bool _carregando = true;
   bool _abrindo = false;
   String _filtro = '';
-  late final TabController _abas;
   int _abaAtual = 0;
-  int? _abaPermitida;
-  bool _repondoAba = false;
 
   ProcessosParecerService get processos => widget.processos;
   ParecerService get parecer => processos.parecer;
@@ -50,36 +46,13 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage>
   @override
   void initState() {
     super.initState();
-    _abas = TabController(length: 4, vsync: this)..addListener(_vigiarAbas);
     _carregar();
   }
-
-  void _vigiarAbas() {
-    if (_repondoAba) return;
-    final destino = _abas.index;
-    // Só um clique direto numa aba recebe autorização explícita. Assim, um
-    // atalho que escape de um painel (ou um evento nativo do WebView) nunca
-    // muda a seção do parecer.
-    if (_abaPermitida == destino) {
-      _abaAtual = destino;
-      _abaPermitida = null;
-      return;
-    }
-    if (destino == _abaAtual) return;
-    _repondoAba = true;
-    _abas.index = _abaAtual;
-    _repondoAba = false;
-  }
-
-  void _clicouAba(int indice) => _abaPermitida = indice;
 
   @override
   void dispose() {
     // Grava o rascunho do processo aberto ao sair do módulo.
     parecer.salvarAgora();
-    _abas
-      ..removeListener(_vigiarAbas)
-      ..dispose();
     super.dispose();
   }
 
@@ -479,41 +452,25 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage>
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(28, 0, 28, 0),
-            // As abas continuam clicáveis, mas não podem reter foco de
-            // teclado. Em desktop, o TabBar usa ←/→ para mudar de aba;
-            // isso competia com a navegação dos comentários dentro do
-            // editor e fazia uma tecla residual avançar Relatório →
-            // Fundamentação → Conclusão.
-            child: ExcludeFocus(
-              child: TabBar(
-                controller: _abas,
-                onTap: _clicouAba,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                labelColor: AppTheme.textPrimary,
-                unselectedLabelColor: AppTheme.textSecondary,
-                dividerColor: AppTheme.divider,
-                tabs: [
-                  for (final item in itens)
-                    Tab(
-                      height: 44,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(item.icone, size: 18),
-                          const SizedBox(width: 8),
-                          Text(item.titulo),
-                        ],
-                      ),
+            // Esta barra não usa TabBar: aquele componente traz navegação
+            // própria por setas e gestos, incompatível com comentários.
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < itens.length; i++)
+                    _BotaoSecao(
+                      item: itens[i],
+                      selecionado: i == _abaAtual,
+                      aoSelecionar: () => setState(() => _abaAtual = i),
                     ),
                 ],
               ),
             ),
           ),
           Expanded(
-            child: TabBarView(
-              controller: _abas,
-              physics: const NeverScrollableScrollPhysics(),
+            child: IndexedStack(
+              index: _abaAtual,
               children: [
                 for (final item in itens) Builder(builder: item.builder),
               ],
@@ -523,4 +480,59 @@ class _ElaboraRelatoPageState extends State<ElaboraRelatoPage>
       ),
     );
   }
+}
+
+/// Navegação de seções sem os atalhos implícitos do Material [TabBar].
+class _BotaoSecao extends StatelessWidget {
+  const _BotaoSecao({
+    required this.item,
+    required this.selecionado,
+    required this.aoSelecionar,
+  });
+
+  final _Funcionalidade item;
+  final bool selecionado;
+  final VoidCallback aoSelecionar;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: aoSelecionar,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: selecionado ? AppTheme.primary : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              item.icone,
+              size: 18,
+              color: selecionado
+                  ? AppTheme.textPrimary
+                  : AppTheme.textSecondary,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              item.titulo,
+              style: TextStyle(
+                color: selecionado
+                    ? AppTheme.textPrimary
+                    : AppTheme.textSecondary,
+                fontWeight: selecionado ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }

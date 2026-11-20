@@ -26,6 +26,10 @@ class IntegrationService {
   static const microsoftClientId = String.fromEnvironment(
     'MICROSOFT_OAUTH_CLIENT_ID',
   );
+  static const _googleClientIdKey = 'integrations.oauth.google.client_id';
+  static const _googleClientSecretKey =
+      'integrations.oauth.google.client_secret';
+  static const _microsoftClientIdKey = 'integrations.oauth.microsoft.client_id';
   static const providers = [
     'google_calendar',
     'google_mail',
@@ -35,27 +39,77 @@ class IntegrationService {
 
   Future<bool> connected(String provider) async =>
       (await _readToken(provider)) != null;
+
+  /// IDs públicos das aplicações OAuth. O segredo do cliente Google, quando
+  /// fornecido pelo tipo de credencial, não é devolvido à interface.
+  Future<Map<String, String>> configuracaoOauth() async => {
+    'google': await _clientId(google: true),
+    'microsoft': await _clientId(google: false),
+    'googleSecretConfigured':
+        (await _secure.read(key: _googleClientSecretKey)) == null
+        ? 'false'
+        : 'true',
+  };
+
+  Future<void> salvarConfiguracaoOauth({
+    required String google,
+    required String microsoft,
+    String googleClientSecret = '',
+  }) async {
+    await _saveClientId(_googleClientIdKey, google, googleClientId);
+    await _saveClientId(_microsoftClientIdKey, microsoft, microsoftClientId);
+    if (googleClientSecret.trim().isNotEmpty) {
+      await _secure.write(
+        key: _googleClientSecretKey,
+        value: googleClientSecret.trim(),
+      );
+    }
+  }
+
+  Future<void> _saveClientId(String key, String value, String bundled) async {
+    final id = value.trim();
+    // Um --dart-define é a configuração corporativa/pacote. Campo vazio
+    // volta a usá-lo, em vez de deixar uma configuração antiga escondida.
+    if (id.isEmpty || id == bundled) {
+      await _secure.delete(key: key);
+    } else {
+      await _secure.write(key: key, value: id);
+    }
+  }
+
+  Future<String> _clientId({required bool google}) async {
+    final bundled = google ? googleClientId : microsoftClientId;
+    if (bundled.isNotEmpty) return bundled;
+    return (await _secure.read(
+          key: google ? _googleClientIdKey : _microsoftClientIdKey,
+        ))?.trim() ??
+        '';
+  }
+
+  Future<String> _googleClientSecret() async =>
+      (await _secure.read(key: _googleClientSecretKey))?.trim() ?? '';
+
   Future<void> disconnect(String provider) async {
     await _secure.delete(key: 'integrations.$provider');
   }
 
-  Future<void> connectGoogle({required bool mail}) => _authorize(
+  Future<void> connectGoogle({required bool mail}) async => _authorize(
     mail ? 'google_mail' : 'google_calendar',
-    googleClientId,
+    await _clientId(google: true),
     google: true,
     scopes: mail
         ? 'https://www.googleapis.com/auth/gmail.modify'
         : 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   );
-  Future<void> connectMicrosoftCalendar() => _authorize(
+  Future<void> connectMicrosoftCalendar() async => _authorize(
     'microsoft_calendar',
-    microsoftClientId,
+    await _clientId(google: false),
     google: false,
     scopes: 'offline_access User.Read Calendars.ReadWrite',
   );
-  Future<void> connectMicrosoftMail() => _authorize(
+  Future<void> connectMicrosoftMail() async => _authorize(
     'microsoft_mail',
-    microsoftClientId,
+    await _clientId(google: false),
     google: false,
     scopes: 'offline_access User.Read Mail.ReadWrite',
   );
@@ -157,6 +211,7 @@ class IntegrationService {
       final tokenUri = google
           ? Uri.https('oauth2.googleapis.com', '/token')
           : Uri.https('login.microsoftonline.com', '/common/oauth2/v2.0/token');
+      final googleClientSecret = google ? await _googleClientSecret() : '';
       final response = await _http.post(
         tokenUri,
         headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -166,6 +221,8 @@ class IntegrationService {
           'code': code,
           'redirect_uri': redirect,
           'code_verifier': verifier,
+          if (google && googleClientSecret.isNotEmpty)
+            'client_secret': googleClientSecret,
           if (!google) 'scope': scopes,
         },
       );
@@ -206,7 +263,11 @@ class IntegrationService {
     final endpoint = google
         ? Uri.https('oauth2.googleapis.com', '/token')
         : Uri.https('login.microsoftonline.com', '/common/oauth2/v2.0/token');
-    final clientId = google ? googleClientId : microsoftClientId;
+    final clientId = await _clientId(google: google);
+    if (clientId.isEmpty) {
+      throw StateError('OAuth client ID is no longer configured.');
+    }
+    final googleClientSecret = google ? await _googleClientSecret() : '';
     final response = await _http.post(
       endpoint,
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -214,6 +275,8 @@ class IntegrationService {
         'client_id': clientId,
         'grant_type': 'refresh_token',
         'refresh_token': '$refresh',
+        if (google && googleClientSecret.isNotEmpty)
+          'client_secret': googleClientSecret,
       },
     );
     if (response.statusCode != 200) {
@@ -251,13 +314,18 @@ class IntegrationService {
     final streamed = await _http.send(request);
     final response = await http.Response.fromStream(streamed);
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(_apiError(response));
+      throw StateError(_apiError(response, provider));
     }
     return response;
   }
 
   Future<List<Map<String, dynamic>>> calendars() async {
     final out = <Map<String, dynamic>>[];
+    String texto(dynamic value, String fallback) {
+      final text = '${value ?? ''}'.trim();
+      return text.isEmpty || text == 'null' ? fallback : text;
+    }
+
     if (await connected('google_calendar')) {
       final r =
           jsonDecode(
@@ -286,8 +354,14 @@ class IntegrationService {
             : gmailProfile ?? (item['primary'] == true ? item['id'] : 'Google');
         out.add({
           ...item,
+          // CalendarList da Google chama o título visível de `summary`,
+          // enquanto o Microsoft Graph o chama de `name`.
+          'name': texto(
+            item['summaryOverride'] ?? item['summary'] ?? item['id'],
+            'Calendário Google',
+          ),
           'provider': 'Google',
-          'account': '$account',
+          'account': texto(account, 'Google'),
           'provider_id': 'google_calendar',
         });
       }
@@ -315,10 +389,12 @@ class IntegrationService {
               )
               as Map;
       for (final x in (r['value'] as List? ?? [])) {
+        final item = Map<String, dynamic>.from(x as Map);
         out.add({
-          ...Map<String, dynamic>.from(x as Map),
+          ...item,
+          'name': texto(item['name'] ?? item['id'], 'Calendário Microsoft'),
           'provider': 'Microsoft 365',
-          'account': '$account',
+          'account': texto(account, 'Microsoft 365'),
           'provider_id': 'microsoft_calendar',
         });
       }
@@ -349,7 +425,7 @@ class IntegrationService {
             ...Map<String, dynamic>.from(raw as Map),
             'provider': c['provider'],
             'account': c['account'],
-            'calendar': c['name'],
+            'calendar': c['name'] ?? 'Calendário sem nome',
             'provider_id': provider,
             'calendar_id': c['id'],
           });
@@ -688,15 +764,39 @@ class IntegrationService {
           e.contains('consent')
       ? 'A instituição precisa liberar o consentimento administrativo do aplicativo (CTIC/administrador UFU). Detalhe do provedor: $description'
       : 'Autorização recusada pelo provedor: $description';
-  static String _tokenError(http.Response r) =>
-      'Falha na autorização OAuth (${r.statusCode}): ${_safeError(r.body)}';
-  static String _apiError(http.Response r) => r.statusCode == 401
-      ? 'Sessão expirada ou sem consentimento. Desconecte e conecte a conta novamente.'
-      : r.statusCode == 403
-      ? 'Permissão insuficiente ou consentimento administrativo pendente. Na UFU, solicite ao CTIC a aprovação dos escopos delegados configurados para este aplicativo.'
-      : r.statusCode == 429
-      ? 'Limite de requisições do provedor atingido. Aguarde e tente novamente.'
-      : 'Falha do provedor (${r.statusCode}): ${_safeError(r.body)}';
+  static String _tokenError(http.Response r) {
+    if (r.body.contains('client_secret is missing')) {
+      return 'O Google aceitou o login, mas exige o Client Secret desta aplicação para concluir a conexão. Abra Configurações de conexão e informe o Google OAuth Client Secret.';
+    }
+    return 'Falha na autorização OAuth (${r.statusCode}): ${_safeError(r.body)}';
+  }
+
+  static String _apiError(http.Response r, String provider) {
+    if (r.statusCode == 401) {
+      return 'Sessão expirada ou sem consentimento. Desconecte e conecte a conta novamente.';
+    }
+    if (r.statusCode == 403 && provider.startsWith('google')) {
+      final raw = r.body.toLowerCase();
+      if (raw.contains('accessnotconfigured') ||
+          raw.contains('service_disabled') ||
+          raw.contains('has not been used')) {
+        return 'A Google Calendar API não está ativada neste projeto. No Google Cloud Console, abra APIs e serviços → Biblioteca, ative “Google Calendar API”, aguarde alguns minutos e clique em Atualizar.';
+      }
+      if (raw.contains('insufficientpermissions') ||
+          raw.contains('insufficient permission')) {
+        return 'O Google não concedeu os escopos necessários ao calendário. Desconecte o Google Calendar e conecte novamente, aceitando todas as permissões solicitadas.';
+      }
+      return 'O Google recusou a leitura dos calendários: ${_safeError(r.body)}';
+    }
+    if (r.statusCode == 403) {
+      return 'Permissão insuficiente ou consentimento administrativo pendente. Na UFU, solicite ao CTIC a aprovação dos escopos delegados configurados para este aplicativo.';
+    }
+    if (r.statusCode == 429) {
+      return 'Limite de requisições do provedor atingido. Aguarde e tente novamente.';
+    }
+    return 'Falha do provedor (${r.statusCode}): ${_safeError(r.body)}';
+  }
+
   static String _safeError(String body) {
     try {
       final j = jsonDecode(body) as Map;

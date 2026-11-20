@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/gestures.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import 'package:webview_windows/webview_windows.dart';
@@ -91,6 +92,14 @@ class _ParecerEditorState extends State<ParecerEditor>
   WindowController? _janelaComentarios;
   WindowMethodChannel? _canalJanelaComentarios;
   bool _abrindoJanelaComentarios = false;
+  bool _textoEmTelaCheia = false;
+  OverlayEntry? _sobreposicaoTexto;
+
+  // Ao mover o WebView2 para a sobreposição de tela cheia, o Windows passa a
+  // compô-lo na escala física da janela. Sem esta compensação ele fica cerca
+  // de 25% maior e com a rasterização visivelmente pior. O zoom escolhido no
+  // rodapé continua sendo a referência e é restaurado ao fechar.
+  static const _compensacaoTelaCheia = 0.8;
 
   @override
   bool get wantKeepAlive => true;
@@ -136,6 +145,9 @@ class _ParecerEditorState extends State<ParecerEditor>
       _controladorCriado = true;
       _subs.add(_web.webMessage.listen(_mensagem));
       _subs.add(
+        _web.containsFullScreenElementChanged.listen(_mudarTelaCheiaTexto),
+      );
+      _subs.add(
         widget.service.insercoes
             .where((i) => i.secao == widget.secao)
             .listen(
@@ -175,6 +187,47 @@ class _ParecerEditorState extends State<ParecerEditor>
     }
   }
 
+  void _mudarTelaCheiaTexto(bool ativa) {
+    if (!mounted || ativa == _textoEmTelaCheia) return;
+    if (!ativa) {
+      _sobreposicaoTexto?.remove();
+      _sobreposicaoTexto = null;
+      setState(() => _textoEmTelaCheia = false);
+      unawaited(_web.setZoomFactor(_zoom));
+      return;
+    }
+    unawaited(_web.setZoomFactor(_zoom * _compensacaoTelaCheia));
+    setState(() => _textoEmTelaCheia = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_textoEmTelaCheia || _sobreposicaoTexto != null) return;
+      final overlay = Overlay.of(context, rootOverlay: true);
+      _sobreposicaoTexto = OverlayEntry(
+        builder: (_) => Material(
+          color: const Color(0xFFE9EAEE),
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _webviewComRoda()),
+                Positioned(
+                  top: 10,
+                  right: 12,
+                  child: Tooltip(
+                    message: 'Sair da tela cheia do texto (Esc)',
+                    child: IconButton.filledTonal(
+                      onPressed: () => _js('document.exitFullscreen()'),
+                      icon: const Icon(Icons.fullscreen_exit_rounded),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      overlay.insert(_sobreposicaoTexto!);
+    });
+  }
+
   void _mensagem(dynamic msg) {
     if (msg is! Map) return;
     switch (msg['tipo']) {
@@ -208,6 +261,12 @@ class _ParecerEditorState extends State<ParecerEditor>
         unawaited(_novoComentario());
       case 'comentarioClic':
         unawaited(_leitor.selecionar('${msg['id']}', rolar: false));
+      case 'navegarComentario':
+        if (msg['direcao'] == 'anterior') {
+          unawaited(_leitor.anterior());
+        } else if (msg['direcao'] == 'proximo') {
+          unawaited(_leitor.proximo());
+        }
       case 'statusComentario':
         final c = msg['comentario'];
         if (c is Map) {
@@ -229,9 +288,25 @@ class _ParecerEditorState extends State<ParecerEditor>
     } catch (_) {}
   }
 
+  /// O [Webview] recebe a roda como sinal de ponteiro no Flutter. Repassamos
+  /// também ao contêiner HTML da folha, que é quem realmente deve rolar.
+  Widget _webviewComRoda() => Listener(
+    behavior: HitTestBehavior.opaque,
+    onPointerSignal: (sinal) {
+      if (sinal is PointerScrollEvent && sinal.scrollDelta.dy != 0) {
+        unawaited(
+          _js(
+            'window.parecer.rolar(${sinal.scrollDelta.dy.toStringAsFixed(2)})',
+          ),
+        );
+      }
+    },
+    child: Webview(_web),
+  );
+
   Future<void> _definirZoom(double z) async {
     setState(() => _zoom = z);
-    await _web.setZoomFactor(z);
+    await _web.setZoomFactor(_textoEmTelaCheia ? z * _compensacaoTelaCheia : z);
   }
 
   /// Recarrega o editor (ex.: depois de capturar os estilos do SEI).
@@ -248,6 +323,7 @@ class _ParecerEditorState extends State<ParecerEditor>
     }
     // Garante que o último trecho digitado (antes do debounce) seja salvo.
     unawaited(widget.service.salvarAgora());
+    _sobreposicaoTexto?.remove();
     if (_controladorCriado) _web.dispose();
     unawaited(_canalJanelaComentarios?.setMethodCallHandler(null));
     _leitor.dispose();
@@ -301,7 +377,8 @@ class _ParecerEditorState extends State<ParecerEditor>
               borderRadius: BorderRadius.circular(12),
               child: Stack(
                 children: [
-                  if (_iniciado) Positioned.fill(child: Webview(_web)),
+                  if (_iniciado && !_textoEmTelaCheia)
+                    Positioned.fill(child: _webviewComRoda()),
                   if (!_pronto)
                     const Positioned.fill(
                       child: ColoredBox(
