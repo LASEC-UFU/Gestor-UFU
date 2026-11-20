@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -318,7 +319,14 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Acesso remoto pelo Android')),
+    appBar: AppBar(
+      leading: IconButton(
+        onPressed: () => context.go('/'),
+        tooltip: 'Voltar para a tela principal',
+        icon: const Icon(Icons.arrow_back_rounded),
+      ),
+      title: const Text('Acesso remoto pelo Android'),
+    ),
     body: Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
