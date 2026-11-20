@@ -1207,6 +1207,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         .toList();
     final accent = _moduleAccent(module);
     final enabled = module['enabled'] == true;
+    final sections = _groupModuleCommands('${module['id']}', commands);
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
       children: [
@@ -1283,34 +1284,149 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             'Sem ações remotas',
             'As ações deste módulo ainda não estão disponíveis pelo celular.',
           )
-        else
-          for (final command in commands)
+        else ...[
+          const SizedBox(height: 8),
+          const Text(
+            'As funções estão agrupadas pelas etapas que você já conhece no computador.',
+            style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          for (var index = 0; index < sections.length; index++)
             Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 5,
+              clipBehavior: Clip.antiAlias,
+              child: ExpansionTile(
+                initiallyExpanded: index == 0,
+                leading: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withAlpha(35),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(sections[index].icon, color: accent, size: 20),
                 ),
-                leading: Icon(Icons.play_circle_outline_rounded, color: accent),
                 title: Text(
-                  '${command['title']}',
+                  sections[index].title,
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-                subtitle:
-                    command['description'] == null ||
-                        '${command['description']}'.isEmpty
-                    ? null
-                    : Text(
-                        '${command['description']}',
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
+                subtitle: Text(
+                  '${sections[index].commands.length} ${sections[index].commands.length == 1 ? 'função' : 'funções'}',
+                  style: const TextStyle(color: Color(0xff9ea2c4)),
+                ),
+                children: [
+                  for (final command in sections[index].commands)
+                    ListTile(
+                      contentPadding: const EdgeInsets.fromLTRB(20, 0, 14, 4),
+                      title: Text(
+                        '${command['title']}',
+                        style: const TextStyle(fontWeight: FontWeight.w500),
                       ),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _runCommand(command),
+                      subtitle:
+                          command['description'] == null ||
+                              '${command['description']}'.isEmpty
+                          ? null
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                '${command['description']}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                      trailing: Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        color: accent,
+                        size: 16,
+                      ),
+                      onTap: () => _runCommand(command),
+                    ),
+                ],
               ),
             ),
+        ],
       ],
     );
+  }
+
+  List<_ModuleActionSection> _groupModuleCommands(
+    String moduleId,
+    List<Map<String, dynamic>> commands,
+  ) {
+    final groups = <String, _ModuleActionSection>{};
+    for (final command in commands) {
+      final id = '${command['id']}';
+      final (title, icon) = switch (moduleId) {
+        'moodle' =>
+          id.contains('Periodo')
+              ? ('Período letivo', Icons.calendar_month_rounded)
+              : id.contains('Planilha') || id.contains('exportar')
+              ? ('Importar e exportar', Icons.import_export_rounded)
+              : id.contains('sincron')
+              ? ('Sincronização com Moodle', Icons.sync_rounded)
+              : ('Configurações de disciplinas', Icons.menu_book_rounded),
+        'progressao' =>
+          id.contains('Lancamento') ||
+                  id.contains('lancar') ||
+                  id.contains('Anexo1')
+              ? ('Atividades e pontuação', Icons.checklist_rounded)
+              : id.toLowerCase().contains('sei')
+              ? ('Processo no SEI', Icons.account_tree_rounded)
+              : id.contains('Pdf') || id.contains('Comprovante')
+              ? ('Requerimento e comprovantes', Icons.picture_as_pdf_rounded)
+              : ('Processos de progressão', Icons.trending_up_rounded),
+        'diario' =>
+          id.contains('Portal')
+              ? ('Preencher no Portal do Docente', Icons.public_rounded)
+              : id.contains('importar') || id.contains('Json')
+              ? ('Importar e exportar aulas', Icons.import_export_rounded)
+              : ('Períodos e lançamentos', Icons.edit_calendar_rounded),
+        'planos-ensino' =>
+          id.toLowerCase().contains('sei')
+              ? ('Enviar ao SEI', Icons.account_tree_rounded)
+              : id.contains('Cronograma')
+              ? ('Cronograma', Icons.event_note_rounded)
+              : id.contains('importar') || id.contains('exportar')
+              ? ('Importar e exportar', Icons.import_export_rounded)
+              : ('Planos de ensino', Icons.menu_book_rounded),
+        'elabora-relato' =>
+          id.startsWith('parecer.processos')
+              ? ('Processos de parecer', Icons.folder_open_rounded)
+              : id.contains('comentarios')
+              ? ('Comentários e anotações', Icons.comment_rounded)
+              : id.contains('anexos')
+              ? ('Documentos anexados', Icons.attach_file_rounded)
+              : id.contains('.base.')
+              ? ('Base de documentos', Icons.library_books_rounded)
+              : id.contains('Sei') || id.contains('verificar')
+              ? ('Revisar e inserir no SEI', Icons.account_tree_rounded)
+              : id.startsWith('relato.')
+              ? ('Árvore e documentos do processo', Icons.account_tree_rounded)
+              : ('Rascunho do parecer', Icons.edit_document_rounded),
+        _ => _fallbackActionSection(id, '${command['title']}'),
+      };
+      final section = groups.putIfAbsent(
+        title,
+        () => _ModuleActionSection(title: title, icon: icon, commands: []),
+      );
+      section.commands.add(command);
+    }
+    return groups.values.toList();
+  }
+
+  (String, IconData) _fallbackActionSection(String id, String title) {
+    final lower = '$id $title'.toLowerCase();
+    if (lower.contains('import') || lower.contains('export')) {
+      return ('Importar e exportar', Icons.import_export_rounded);
+    }
+    if (lower.contains('sei') ||
+        lower.contains('portal') ||
+        lower.contains('moodle')) {
+      return ('Integrações', Icons.hub_rounded);
+    }
+    if (lower.contains('excluir') || lower.contains('remover')) {
+      return ('Gerenciar dados', Icons.settings_rounded);
+    }
+    return ('Funções do módulo', Icons.grid_view_rounded);
   }
 
   Widget _taskCard(Map<String, dynamic> task) {
@@ -1865,4 +1981,16 @@ class _ChatMessage {
   final String role;
   final String text;
   final List<Map<String, dynamic>> artifacts;
+}
+
+class _ModuleActionSection {
+  _ModuleActionSection({
+    required this.title,
+    required this.icon,
+    required this.commands,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Map<String, dynamic>> commands;
 }
