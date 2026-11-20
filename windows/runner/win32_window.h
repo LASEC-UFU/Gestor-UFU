@@ -91,12 +91,18 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+  bool tray_icon_added_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;
 
   // window handle for hosted content.
   HWND child_content_ = nullptr;
+
+  bool AddTrayIcon(HWND window);
+  void RemoveTrayIcon();
+  void ShowFromTray();
+  void ShowTrayMenu(HWND window);
 };
 
 #endif  // RUNNER_WIN32_WINDOW_H_
