@@ -664,6 +664,7 @@ class RemoteAccessServer {
   }) async {
     try {
       task.status = 'running';
+      task.stage = 'Preparando execução no Windows';
       task.updatedAt = DateTime.now().toUtc();
       await _persistTasks();
       await _broadcast({'type': 'task', 'task': task.toJson()});
@@ -700,10 +701,14 @@ class RemoteAccessServer {
         },
       );
       context.checkCancellation();
+      task.stage = 'Executando no computador';
+      task.updatedAt = DateTime.now().toUtc();
+      await _broadcast({'type': 'task', 'task': task.toJson()});
       final result = command.runRemote == null
           ? await command.run(preparedInput, origin)
           : await command.runRemote!(preparedInput, origin, context);
       task.status = result.ok ? 'succeeded' : 'failed';
+      task.stage = result.ok ? 'Concluída' : 'Falhou';
       task.result = await _sanitizeResult(result.toJson());
       if (command.mutates && result.ok) {
         if (origin == CommandOrigin.agent) {
@@ -714,9 +719,11 @@ class RemoteAccessServer {
       }
     } on CommandException catch (error) {
       task.status = error.code == 'cancelled' ? 'cancelled' : 'failed';
+      task.stage = task.status == 'cancelled' ? 'Cancelada' : 'Falhou';
       task.result = {'ok': false, 'code': error.code, 'message': error.message};
     } catch (error) {
       task.status = 'failed';
+      task.stage = 'Falhou no computador';
       task.result = {'ok': false, 'message': '$error'};
     } finally {
       task.updatedAt = DateTime.now().toUtc();

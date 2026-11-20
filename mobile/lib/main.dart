@@ -111,6 +111,18 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   String _moduleFilter = '';
   String? _error;
   String _assistantDraft = '';
+  bool _moodleHomeLoading = false;
+  String? _moodleHomeError;
+  Map<String, dynamic>? _moodleHomeData;
+  bool _agendaHomeLoading = false;
+  String? _agendaHomeError;
+  int _agendaTabIndex = 0;
+  List<Map<String, dynamic>> _agendaCalendars = [];
+  List<Map<String, dynamic>> _agendaEvents = [];
+  List<Map<String, dynamic>> _emailMessages = [];
+  bool _agendaEventsLoaded = false;
+  final _emailSearch = TextEditingController();
+  bool _emailUnreadOnly = false;
 
   @override
   void initState() {
@@ -284,6 +296,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           _connected = true;
           _connecting = false;
         });
+      if (_selectedModuleId == 'moodle') unawaited(_loadMoodleHome());
+      if (_selectedModuleId == 'agenda-email') unawaited(_loadAgendaHome());
     } catch (e) {
       final staleSocket = _socket;
       _socket = null;
@@ -767,27 +781,68 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     if (!_connected) return;
     final input = await _parameters(command);
     if (input == null) return;
+    if (command['requiresConfirmation'] == true) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${command['title']}?'),
+          content: Text(
+            '${command['description']}\n\nConfirma esta operação no computador?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Voltar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     try {
       var task = await _api!.runCommand(
         '${command['id']}',
         input,
         confirmed: true,
       );
-      if (mounted)
-        setState(
-          () => _messages.add(
-            _ChatMessage('system', 'Tarefa iniciada: ${task['title']}'),
-          ),
-        );
-      while (mounted &&
-          !{
-            'succeeded',
-            'failed',
-            'cancelled',
-            'interrupted',
-          }.contains(task['status'])) {
-        await Future<void>.delayed(const Duration(seconds: 2));
+      if (mounted) {
+        setState(() {
+          _recordTask(Map<String, dynamic>.from(task));
+          _messages.add(
+            _ChatMessage(
+              'system',
+              task['status'] == 'queued'
+                  ? 'O Windows recebeu “${task['title']}” e colocou na fila.'
+                  : 'O Windows iniciou “${task['title']}”.',
+            ),
+          );
+        });
+      }
+      final started = DateTime.now();
+      const terminal = {'succeeded', 'failed', 'cancelled', 'interrupted'};
+      while (mounted && !terminal.contains(task['status'])) {
+        if (DateTime.now().difference(started) > const Duration(minutes: 10)) {
+          if (mounted) {
+            setState(() {
+              _recordTask(Map<String, dynamic>.from(task));
+              _messages.add(
+                _ChatMessage(
+                  'error',
+                  'A tarefa ainda está ${task['status']}. Ela continua disponível na tela Tarefas; confira o estado no Windows antes de repetir.',
+                ),
+              );
+            });
+          }
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 900));
         task = await _api!.task('${task['id']}');
+        if (mounted)
+          setState(() => _recordTask(Map<String, dynamic>.from(task)));
       }
       if (!mounted) return;
       final result = Map<String, dynamic>.from(
@@ -799,9 +854,20 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       setState(() {
         _recordTask(Map<String, dynamic>.from(task));
         _messages.add(
-          _ChatMessage('system', _taskSummary(task), artifacts: artifacts),
+          _ChatMessage(
+            result['ok'] == false ? 'error' : 'system',
+            _taskSummary(task),
+            artifacts: artifacts,
+          ),
         );
       });
+      await _showTaskResult(task);
+      if (command['mutates'] == true && _selectedModuleId == 'moodle') {
+        unawaited(_loadMoodleHome());
+      }
+      if (command['mutates'] == true && _selectedModuleId == 'agenda-email') {
+        unawaited(_loadAgendaHome());
+      }
     } catch (e) {
       if (mounted) setState(() => _error = _friendlyError(e));
     }
@@ -822,6 +888,106 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         ? ''
         : '\n${const JsonEncoder.withIndent('  ').convert(result)}';
     return '${task['title']}: ${task['status']}${message == null ? '' : ' — $message'}$details';
+  }
+
+  Future<void> _showTaskResult(Map<String, dynamic> task) async {
+    if (!mounted) return;
+    final result = Map<String, dynamic>.from(
+      task['result'] as Map? ?? const {},
+    );
+    final artifacts = (result['artifacts'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    final message = result['message']?.toString();
+    final details = Map<String, dynamic>.from(result)
+      ..remove('ok')
+      ..remove('message')
+      ..remove('artifacts');
+    final succeeded = task['status'] == 'succeeded' && result['ok'] != false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.58,
+          maxChildSize: 0.92,
+          builder: (context, controller) => ListView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(20, 2, 20, 26),
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    succeeded
+                        ? Icons.task_alt_rounded
+                        : Icons.error_outline_rounded,
+                    color: succeeded
+                        ? const Color(0xff55d6a6)
+                        : const Color(0xffff8a80),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '${task['title']}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                succeeded ? 'Concluída no computador' : 'Não foi concluída',
+                style: TextStyle(
+                  color: succeeded
+                      ? const Color(0xff55d6a6)
+                      : const Color(0xffff8a80),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (message != null && message.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(message, style: const TextStyle(height: 1.45)),
+              ],
+              if (details.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                const Text(
+                  'Resultado',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 6),
+                SelectableText(
+                  const JsonEncoder.withIndent('  ').convert(details),
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+              for (final artifact in artifacts)
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.download_rounded),
+                    title: Text('${artifact['name']}'),
+                    subtitle: const Text('Salvar arquivo recebido do Windows'),
+                    onTap: () => _downloadArtifact(artifact),
+                  ),
+                ),
+              if (message == null && details.isEmpty && artifacts.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(top: 14),
+                  child: Text('A tarefa terminou sem retornar detalhes.'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   bool _isPathField(String key) {
@@ -867,6 +1033,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     _socket?.close();
     _speech.stop();
     _input.dispose();
+    _emailSearch.dispose();
     super.dispose();
   }
 
@@ -901,6 +1068,276 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       _selectedModuleId = '${module['id']}';
       _selectedTab = 1;
     });
+    if (module['id'] == 'moodle') unawaited(_loadMoodleHome());
+    if (module['id'] == 'agenda-email') unawaited(_loadAgendaHome());
+  }
+
+  Map<String, dynamic>? _commandById(String moduleId, String commandId) {
+    for (final module in _modules.where((item) => item['id'] == moduleId)) {
+      for (final value in module['commands'] as List? ?? const []) {
+        final command = Map<String, dynamic>.from(value as Map);
+        if (command['id'] == commandId) return command;
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> _executeRemoteCommand(
+    String moduleId,
+    String commandId,
+    Map<String, dynamic> input, {
+    bool confirmed = false,
+  }) async {
+    final command = _commandById(moduleId, commandId);
+    if (command == null) throw HttpException('Ação não disponível no Windows.');
+    if (command['requiresConfirmation'] == true && !confirmed) {
+      throw HttpException('Esta ação exige confirmação antes de executar.');
+    }
+    final task = await _api!.runCommand(commandId, input, confirmed: true);
+    var current = Map<String, dynamic>.from(task);
+    if (mounted) setState(() => _recordTask(current));
+    final started = DateTime.now();
+    const terminal = {'succeeded', 'failed', 'cancelled', 'interrupted'};
+    while (!terminal.contains(current['status'])) {
+      if (DateTime.now().difference(started) > const Duration(minutes: 10)) {
+        throw HttpException(
+          'A tarefa continua ${current['status']}. Ela permanece na tela Tarefas para acompanhamento.',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 900));
+      current = await _api!.task('${current['id']}');
+      if (mounted) setState(() => _recordTask(current));
+    }
+    final result = Map<String, dynamic>.from(
+      current['result'] as Map? ?? const {},
+    );
+    if (current['status'] != 'succeeded' || result['ok'] == false) {
+      throw HttpException(
+        '${result['message'] ?? 'A operação terminou com status ${current['status']}.'}',
+      );
+    }
+    return result;
+  }
+
+  Future<void> _loadMoodleHome() async {
+    if (!_connected || _api == null) return;
+    setState(() {
+      _moodleHomeLoading = true;
+      _moodleHomeError = null;
+    });
+    try {
+      final periods = await _executeRemoteCommand(
+        'moodle',
+        'moodle.listarPeriodos',
+        const {},
+      );
+      final configurations = await _executeRemoteCommand(
+        'moodle',
+        'moodle.listar',
+        const {},
+      );
+      if (!mounted) return;
+      setState(() {
+        _moodleHomeData = {
+          'activeTerm': periods['periodoAtivo'],
+          'terms': periods['periodos'] as List? ?? const [],
+          'configurations':
+              configurations['configuracoes'] as List? ?? const [],
+        };
+        _moodleHomeLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _moodleHomeError = '$error'.replaceFirst('HttpException: ', '');
+        _moodleHomeLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadAgendaHome() async {
+    if (!_connected || _api == null) return;
+    setState(() {
+      _agendaHomeLoading = true;
+      _agendaHomeError = null;
+    });
+    try {
+      final calendars = await _executeRemoteCommand(
+        'agenda-email',
+        'agenda.listarCalendarios',
+        const {},
+      );
+      final messages = await _executeRemoteCommand(
+        'agenda-email',
+        'email.listar',
+        {
+          'busca': _emailSearch.text.trim(),
+          'nao_lidos': _emailUnreadOnly,
+          'pagina': 0,
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _agendaCalendars = (calendars['calendarios'] as List? ?? const [])
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList();
+        _emailMessages = (messages['mensagens'] as List? ?? const [])
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList();
+        _agendaHomeLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _agendaHomeError = '$error'.replaceFirst('HttpException: ', '');
+        _agendaHomeLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadAgendaEvents() async {
+    final now = DateTime.now();
+    final start = DateTime(now.year, now.month, now.day);
+    final end = start.add(const Duration(days: 7));
+    setState(() => _agendaHomeLoading = true);
+    try {
+      final result = await _executeRemoteCommand(
+        'agenda-email',
+        'agenda.listarEventos',
+        {'inicio': start.toIso8601String(), 'fim': end.toIso8601String()},
+      );
+      if (!mounted) return;
+      setState(() {
+        _agendaEvents = (result['eventos'] as List? ?? const [])
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList();
+        _agendaEventsLoaded = true;
+        _agendaHomeLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _agendaHomeError = '$error'.replaceFirst('HttpException: ', '');
+        _agendaHomeLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadAgendaMessages() async {
+    setState(() {
+      _agendaHomeLoading = true;
+      _agendaHomeError = null;
+    });
+    try {
+      final result = await _executeRemoteCommand(
+        'agenda-email',
+        'email.listar',
+        {
+          'busca': _emailSearch.text.trim(),
+          'nao_lidos': _emailUnreadOnly,
+          'pagina': 0,
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _emailMessages = (result['mensagens'] as List? ?? const [])
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList();
+        _agendaHomeLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _agendaHomeError = '$error'.replaceFirst('HttpException: ', '');
+        _agendaHomeLoading = false;
+      });
+    }
+  }
+
+  Future<void> _runPresetCommand(
+    String commandId,
+    Map<String, dynamic> input,
+  ) => _runPresetModuleCommand('moodle', commandId, input);
+
+  Future<void> _runPresetModuleCommand(
+    String moduleId,
+    String commandId,
+    Map<String, dynamic> input,
+  ) async {
+    final command = _commandById(moduleId, commandId);
+    if (command == null || !_connected) return;
+    if (command['requiresConfirmation'] == true) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('${command['title']}?'),
+          content: Text(
+            '${command['description']}\n\nConfirma esta ação no computador?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Voltar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirmar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    try {
+      final result = await _executeRemoteCommand(
+        moduleId,
+        commandId,
+        input,
+        confirmed: true,
+      );
+      if (mounted) {
+        final message = '${result['message'] ?? 'Operação concluída.'}';
+        final artifacts = (result['artifacts'] as List? ?? const [])
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            action: artifacts.isEmpty
+                ? null
+                : SnackBarAction(
+                    label: artifacts.length == 1
+                        ? 'Baixar arquivo'
+                        : 'Baixar primeiro',
+                    onPressed: () =>
+                        unawaited(_downloadArtifact(artifacts.first)),
+                  ),
+          ),
+        );
+      }
+      if (moduleId == 'agenda-email' && commandId == 'email.ler') {
+        await _showTaskResult({
+          'title': command['title'],
+          'status': 'succeeded',
+          'result': {'ok': true, ...result},
+        });
+      }
+      if (command['mutates'] == true) {
+        if (moduleId == 'moodle') await _loadMoodleHome();
+        if (moduleId == 'agenda-email') await _loadAgendaHome();
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          final message = '$error'.replaceFirst('HttpException: ', '');
+          if (moduleId == 'agenda-email') {
+            _agendaHomeError = message;
+          } else {
+            _moodleHomeError = message;
+          }
+        });
+      }
+    }
   }
 
   Widget _summaryCard(IconData icon, String value, String label) => Card(
@@ -1201,7 +1638,710 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     );
   }
 
+  Widget _buildMoodleHome(Map<String, dynamic> module) {
+    final accent = _moduleAccent(module);
+    final data = _moodleHomeData;
+    final terms = (data?['terms'] as List? ?? const [])
+        .map((value) => '$value')
+        .toList();
+    final activeTerm = '${data?['activeTerm'] ?? ''}';
+    final configs = (data?['configurations'] as List? ?? const [])
+        .map((value) => Map<String, dynamic>.from(value as Map))
+        .toList();
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => _selectedModuleId = null),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Todos os módulos'),
+          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: accent.withAlpha(38),
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: Icon(_moduleIcon(module), color: accent, size: 25),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${module['category']}'.toUpperCase(),
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10,
+                      letterSpacing: 1,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    '${module['title']}',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Atualizar dados do Windows',
+              onPressed: _moodleHomeLoading ? null : _loadMoodleHome,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 18),
+        if (_moodleHomeLoading && data == null)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 42),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_moodleHomeError != null && data == null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Não foi possível carregar o Config Moodle',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _moodleHomeError!,
+                    style: const TextStyle(color: Color(0xffff8a80)),
+                  ),
+                  const SizedBox(height: 8),
+                  FilledButton.icon(
+                    onPressed: _loadMoodleHome,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Tentar novamente'),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else ...[
+          if (_moodleHomeError != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                _moodleHomeError!,
+                style: const TextStyle(color: Color(0xffff8a80)),
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: terms.contains(activeTerm) ? activeTerm : null,
+                  decoration: const InputDecoration(
+                    labelText: 'Período letivo',
+                    prefixIcon: Icon(Icons.calendar_month_rounded),
+                  ),
+                  items: [
+                    for (final term in terms)
+                      DropdownMenuItem(value: term, child: Text(term)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null && value != activeTerm) {
+                      unawaited(
+                        _runPresetCommand('moodle.selecionarPeriodo', {
+                          'periodo': value,
+                        }),
+                      );
+                    }
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              FilledButton.icon(
+                onPressed: _connected ? () => _showMoodleAddMenu(module) : null,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Novo'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Configurações de $activeTerm',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '${configs.length}',
+                style: TextStyle(color: accent, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_moodleHomeLoading)
+            const LinearProgressIndicator(minHeight: 2)
+          else if (configs.isEmpty)
+            _emptyState(
+              Icons.menu_book_outlined,
+              'Nenhuma configuração neste período',
+              'Crie uma configuração vazia ou importe a planilha da disciplina.',
+            )
+          else
+            for (final config in configs) _moodleConfigCard(config, accent),
+        ],
+      ],
+    );
+  }
+
+  Widget _moodleConfigCard(Map<String, dynamic> config, Color accent) {
+    final name = '${config['nome'] ?? 'Disciplina'}';
+    final course = '${config['moodleCourseName'] ?? ''}';
+    final courseId = config['moodleCourseId'];
+    final start = DateTime.tryParse('${config['inicioSemestre'] ?? ''}');
+    final sections = config['secoes'] ?? 0;
+    final activities = config['atividades'] ?? 0;
+    final id = '${config['id']}';
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _showMoodleConfigActions(config, accent),
+        child: Padding(
+          padding: const EdgeInsets.all(15),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: accent.withAlpha(35),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.menu_book_rounded, color: accent),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Icon(Icons.more_vert_rounded, color: accent),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (course.isNotEmpty)
+                Text(course, style: const TextStyle(color: Color(0xffc3c5db))),
+              Text(
+                'Início: ${start == null ? 'não informado' : '${start.day.toString().padLeft(2, '0')}/${start.month.toString().padLeft(2, '0')}/${start.year}'}',
+                style: const TextStyle(color: Color(0xff9ea2c4), fontSize: 12),
+              ),
+              const SizedBox(height: 11),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _moodlePill(Icons.view_list_rounded, '$sections seções'),
+                  _moodlePill(
+                    Icons.checklist_rounded,
+                    '$activities atividades',
+                  ),
+                  if (courseId != null)
+                    _moodlePill(Icons.cloud_done_rounded, 'Moodle $courseId'),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: () => _runPresetCommand(
+                      'moodle.exportarPlanilha',
+                      {'configId': id},
+                    ),
+                    icon: const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Exportar'),
+                  ),
+                  const Spacer(),
+                  FilledButton.tonalIcon(
+                    onPressed: courseId == null
+                        ? null
+                        : () => _runPresetCommand('moodle.sincronizarAgora', {
+                            'configId': id,
+                          }),
+                    icon: const Icon(Icons.sync_rounded, size: 18),
+                    label: const Text('Sincronizar'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _moodlePill(IconData icon, String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+    decoration: BoxDecoration(
+      color: const Color(0xff101329),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: const Color(0xff9ea2c4)),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(fontSize: 11)),
+      ],
+    ),
+  );
+
+  Future<void> _showMoodleAddMenu(Map<String, dynamic> module) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.add_box_outlined),
+              title: const Text('Nova configuração vazia'),
+              subtitle: const Text('Começar uma disciplina do zero'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                final command = _commandById(
+                  'moodle',
+                  'moodle.criarConfiguracao',
+                );
+                if (command != null) unawaited(_runCommand(command));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.upload_file_rounded),
+              title: const Text('Importar planilha'),
+              subtitle: const Text('Usar um arquivo .xlsx do telefone'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                final command = _commandById(
+                  'moodle',
+                  'moodle.importarPlanilha',
+                );
+                if (command != null) unawaited(_runCommand(command));
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showMoodleConfigActions(
+    Map<String, dynamic> config,
+    Color accent,
+  ) async {
+    final id = '${config['id']}';
+    final result = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+              child: Text(
+                '${config['nome']}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.menu_book_rounded, color: accent),
+              title: const Text('Ver seções e atividades'),
+              subtitle: const Text('Consultar a estrutura desta disciplina'),
+              onTap: () => Navigator.pop(sheetContext, 'details'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.download_rounded),
+              title: const Text('Exportar planilha'),
+              onTap: () => Navigator.pop(sheetContext, 'export'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Excluir configuração'),
+              onTap: () => Navigator.pop(sheetContext, 'delete'),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (result == 'export') {
+      await _runPresetCommand('moodle.exportarPlanilha', {'configId': id});
+    } else if (result == 'delete') {
+      await _runPresetCommand('moodle.excluir', {'configId': id});
+    } else if (result == 'details') {
+      await _showMoodleConfigDetails(id, accent);
+    }
+  }
+
+  Future<void> _showMoodleConfigDetails(String id, Color accent) async {
+    try {
+      final result = await _executeRemoteCommand(
+        'moodle',
+        'moodle.obterConfiguracao',
+        {'configId': id},
+      );
+      final config = Map<String, dynamic>.from(result['configuracao'] as Map);
+      final sections = (config['sections'] as List? ?? const [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: DraggableScrollableSheet(
+            expand: false,
+            initialChildSize: 0.72,
+            maxChildSize: 0.94,
+            builder: (context, scrollController) => ListView(
+              controller: scrollController,
+              padding: const EdgeInsets.fromLTRB(18, 4, 18, 24),
+              children: [
+                Text(
+                  '${config['name']}',
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text('${sections.length} seções nesta configuração'),
+                const SizedBox(height: 12),
+                for (final section in sections)
+                  Card(
+                    child: ExpansionTile(
+                      leading: Icon(Icons.view_list_rounded, color: accent),
+                      title: Text('${section['name']}'),
+                      subtitle: Text(
+                        '${(section['activities'] as List? ?? const []).length} atividades',
+                      ),
+                      children: [
+                        for (final activity
+                            in section['activities'] as List? ?? const [])
+                          ListTile(
+                            dense: true,
+                            leading: const Icon(
+                              Icons.check_circle_outline_rounded,
+                            ),
+                            title: Text('${(activity as Map)['name']}'),
+                            subtitle: Text('${activity['activityType'] ?? ''}'),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _moodleHomeError = '$error'.replaceFirst('HttpException: ', ''),
+        );
+      }
+    }
+  }
+
+  Widget _buildAgendaHome(Map<String, dynamic> module) {
+    final accent = _moduleAccent(module);
+    final isEmail = _agendaTabIndex == 1;
+    final commands = (module['commands'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    Map<String, dynamic>? findCommand(String id) {
+      for (final command in commands) {
+        if (command['id'] == id) return command;
+      }
+      return null;
+    }
+
+    String label(Map row, List<String> keys, [String fallback = '']) {
+      for (final key in keys) {
+        final value = row[key];
+        if (value != null && '$value'.trim().isNotEmpty) return '$value';
+      }
+      return fallback;
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
+      children: [
+        TextButton.icon(
+          onPressed: () => setState(() => _selectedModuleId = null),
+          icon: const Icon(Icons.arrow_back_rounded),
+          label: const Text('Todos os módulos'),
+          style: TextButton.styleFrom(alignment: Alignment.centerLeft),
+        ),
+        Row(
+          children: [
+            Icon(Icons.event_note_rounded, color: accent, size: 27),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Agendas e E-mails',
+                style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Atualizar',
+              onPressed: _agendaHomeLoading
+                  ? null
+                  : () => isEmail ? _loadAgendaMessages() : _loadAgendaHome(),
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<int>(
+          segments: const [
+            ButtonSegment(
+              value: 0,
+              icon: Icon(Icons.calendar_month_rounded),
+              label: Text('Agenda'),
+            ),
+            ButtonSegment(
+              value: 1,
+              icon: Icon(Icons.mail_outline_rounded),
+              label: Text('E-mails'),
+            ),
+          ],
+          selected: {_agendaTabIndex},
+          onSelectionChanged: (selection) {
+            setState(() => _agendaTabIndex = selection.first);
+            if (selection.first == 0 && !_agendaEventsLoaded)
+              unawaited(_loadAgendaEvents());
+            if (selection.first == 1) unawaited(_loadAgendaMessages());
+          },
+        ),
+        if (_agendaHomeLoading) const LinearProgressIndicator(),
+        if (_agendaHomeError != null) ...[
+          const SizedBox(height: 10),
+          Card(
+            color: const Color(0xff492d36),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(_agendaHomeError!),
+            ),
+          ),
+        ],
+        if (!isEmail) ...[
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Calendários conectados',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _loadAgendaEvents(),
+                icon: const Icon(Icons.event_available_rounded),
+                label: const Text('Próximos 7 dias'),
+              ),
+            ],
+          ),
+          if (_agendaCalendars.isEmpty && !_agendaHomeLoading)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.info_outline_rounded),
+                title: Text('Nenhum calendário conectado'),
+              ),
+            ),
+          for (final calendar in _agendaCalendars)
+            Card(
+              child: ListTile(
+                leading: Icon(Icons.calendar_today_rounded, color: accent),
+                title: Text(
+                  label(calendar, ['name', 'nome', 'summary'], 'Calendário'),
+                ),
+                subtitle: Text(
+                  [
+                    label(calendar, ['account', 'conta']),
+                    label(calendar, ['provider', 'provedor']),
+                    if (calendar['padrao_pessoal'] == true) 'Pessoal',
+                    if (calendar['padrao_profissional'] == true) 'Profissional',
+                  ].where((e) => e.isNotEmpty).join(' • '),
+                ),
+              ),
+            ),
+          if (_agendaEventsLoaded) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Eventos',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+            ),
+            if (_agendaEvents.isEmpty)
+              const Card(
+                child: ListTile(
+                  title: Text('Nenhum evento encontrado neste período'),
+                ),
+              ),
+            for (final event in _agendaEvents)
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.event_rounded),
+                  title: Text(
+                    label(event, ['titulo', 'summary', 'subject'], 'Evento'),
+                  ),
+                  subtitle: Text(
+                    '${label(event, ['inicio'], 'Horário não informado')}\n${[
+                      label(event, ['conta', 'account']),
+                      label(event, ['calendario', 'calendar']),
+                    ].where((e) => e.isNotEmpty).join(' • ')}',
+                  ),
+                  isThreeLine: true,
+                ),
+              ),
+          ],
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: findCommand('agenda.criarEvento') == null
+                ? null
+                : () => _runCommand(findCommand('agenda.criarEvento')!),
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Criar evento'),
+          ),
+        ] else ...[
+          const SizedBox(height: 12),
+          TextField(
+            controller: _emailSearch,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => _loadAgendaMessages(),
+            decoration: InputDecoration(
+              hintText: 'Buscar e-mails',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: IconButton(
+                icon: const Icon(Icons.arrow_forward_rounded),
+                onPressed: _loadAgendaMessages,
+              ),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 8),
+          FilterChip(
+            label: const Text('Somente não lidos'),
+            selected: _emailUnreadOnly,
+            onSelected: (value) {
+              setState(() => _emailUnreadOnly = value);
+              unawaited(_loadAgendaMessages());
+            },
+          ),
+          if (_emailMessages.isEmpty && !_agendaHomeLoading)
+            const Card(
+              child: ListTile(
+                leading: Icon(Icons.mark_email_read_outlined),
+                title: Text('Nenhuma mensagem encontrada'),
+              ),
+            ),
+          for (final email in _emailMessages)
+            Card(
+              child: ListTile(
+                leading: Icon(
+                  email['lida'] == true
+                      ? Icons.drafts_outlined
+                      : Icons.mark_email_unread_rounded,
+                  color: accent,
+                ),
+                title: Text(
+                  label(email, ['assunto', 'subject'], '(Sem assunto)'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '${label(email, ['remetente', 'from'])}\n${label(email, ['data', 'receivedDateTime'])}  •  ${label(email, ['conta', 'account'])}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                isThreeLine: true,
+                onTap: () =>
+                    _runPresetModuleCommand('agenda-email', 'email.ler', {
+                      'id': '${email['id']}',
+                      'provider_id': '${email['provider_id']}',
+                      'assunto': label(email, ['assunto', 'subject']),
+                      'remetente': label(email, ['remetente', 'from']),
+                      'conta': label(email, ['conta', 'account']),
+                    }),
+                trailing: PopupMenuButton<String>(
+                  onSelected: (value) => _runPresetModuleCommand(
+                    'agenda-email',
+                    'email.alterarLido',
+                    {
+                      'id': '${email['id']}',
+                      'provider_id': '${email['provider_id']}',
+                      'assunto': label(email, ['assunto', 'subject']),
+                      'remetente': label(email, ['remetente', 'from']),
+                      'conta': label(email, ['conta', 'account']),
+                      'lida': value == 'read',
+                    },
+                  ),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: email['lida'] == true ? 'unread' : 'read',
+                      child: Text(
+                        email['lida'] == true
+                            ? 'Marcar como não lido'
+                            : 'Marcar como lido',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (findCommand('email.ler') == null)
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text(
+                'Este computador não disponibiliza leitura remota de e-mails.',
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildModuleDetail(Map<String, dynamic> module) {
+    if (module['id'] == 'moodle') return _buildMoodleHome(module);
+    if (module['id'] == 'agenda-email') return _buildAgendaHome(module);
     final commands = (module['commands'] as List? ?? const [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
