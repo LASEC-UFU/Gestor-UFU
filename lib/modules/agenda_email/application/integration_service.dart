@@ -306,13 +306,33 @@ class IntegrationService {
     final uri = Uri.parse(url);
     final request = http.Request(method, uri)
       ..headers['Authorization'] = 'Bearer ${token['access_token']}'
-      ..headers['Accept'] = 'application/json';
+      ..headers['Accept'] = 'application/json'
+      // OAuth APIs are sometimes reached through university inspection
+      // proxies. Avoid pooled sockets and compressed responses, which can
+      // surface as a malformed chunk-extension error in dart:io.
+      ..headers['Connection'] = 'close'
+      ..headers['Accept-Encoding'] = 'identity';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
       request.body = jsonEncode(body);
     }
-    final streamed = await _http.send(request);
-    final response = await http.Response.fromStream(streamed);
+    late final http.Response response;
+    try {
+      final streamed = await _http.send(request);
+      response = await http.Response.fromStream(streamed);
+    } on HttpException catch (error) {
+      final isCreate = method.toUpperCase() == 'POST';
+      throw StateError(
+        'A resposta do provedor ${provider.startsWith('google') ? 'Google' : 'Microsoft'} veio incompleta ou inválida (${error.message}). '
+        '${isCreate ? 'Confira a agenda antes de tentar novamente, pois o evento pode ter sido gravado.' : 'Tente novamente em instantes.'}',
+      );
+    } on http.ClientException catch (error) {
+      final isCreate = method.toUpperCase() == 'POST';
+      throw StateError(
+        'A comunicação com o provedor ${provider.startsWith('google') ? 'Google' : 'Microsoft'} falhou (${error.message}). '
+        '${isCreate ? 'Confira a agenda antes de tentar novamente, pois o evento pode ter sido gravado.' : 'Tente novamente em instantes.'}',
+      );
+    }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(_apiError(response, provider));
     }

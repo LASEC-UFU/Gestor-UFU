@@ -1,4 +1,5 @@
 name: Build Android APK
+run-name: Gestor UFU Android APK (${{ github.ref_name }})
 
 on:
   push:
@@ -44,4 +45,12 @@ jobs:
           name: gestor-ufu-android-debug-${{ github.sha }}
           path: mobile/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 90
+
+      - name: Show APK download location
+        if: success()
+        shell: bash
+        run: |
+          echo "## APK pronto para baixar" >> "$GITHUB_STEP_SUMMARY"
+          echo "Baixe o artefato **gestor-ufu-android-debug-${GITHUB_SHA}** na seção **Artifacts** desta execução." >> "$GITHUB_STEP_SUMMARY"
+          echo "[Abrir esta execução no GitHub](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})" >> "$GITHUB_STEP_SUMMARY"

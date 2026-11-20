@@ -31,45 +31,78 @@ const _speechOutput = MethodChannel('br.ufu.gestor.mobile/tts');
 
 void main() => runApp(const GestorRemoteApp());
 
-class GestorRemoteApp extends StatelessWidget {
+class GestorRemoteApp extends StatefulWidget {
   const GestorRemoteApp({super.key});
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Gestor UFU Remoto',
-    theme: ThemeData(
+  State<GestorRemoteApp> createState() => _GestorRemoteAppState();
+}
+
+class _GestorRemoteAppState extends State<GestorRemoteApp> {
+  ThemeMode _themeMode = ThemeMode.dark;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreTheme());
+  }
+
+  Future<void> _restoreTheme() async {
+    const vault = FlutterSecureStorage();
+    final saved = await vault.read(key: 'remote.themeMode');
+    if (!mounted || saved == null) return;
+    setState(
+      () => _themeMode = saved == 'light' ? ThemeMode.light : ThemeMode.dark,
+    );
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    const vault = FlutterSecureStorage();
+    await vault.write(
+      key: 'remote.themeMode',
+      value: mode == ThemeMode.light ? 'light' : 'dark',
+    );
+  }
+
+  ThemeData _theme(Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final colors =
+        ColorScheme.fromSeed(
+          seedColor: const Color(0xff6c63ff),
+          brightness: brightness,
+        ).copyWith(
+          primary: isDark ? const Color(0xff8b83ff) : const Color(0xff5147c5),
+          secondary: isDark ? const Color(0xff00d4ff) : const Color(0xff007e94),
+          surface: isDark ? const Color(0xff1e2045) : Colors.white,
+        );
+    return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: const Color(0xff0f1123),
-      colorScheme:
-          ColorScheme.fromSeed(
-            seedColor: const Color(0xff6c63ff),
-            brightness: Brightness.dark,
-          ).copyWith(
-            primary: const Color(0xff6c63ff),
-            secondary: const Color(0xff00d4ff),
-            surface: const Color(0xff1e2045),
-          ),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xff0f1123),
-        foregroundColor: Colors.white,
+      brightness: brightness,
+      colorScheme: colors,
+      scaffoldBackgroundColor: isDark
+          ? const Color(0xff0f1123)
+          : const Color(0xfff3f4f9),
+      appBarTheme: AppBarTheme(
+        backgroundColor: isDark ? const Color(0xff0f1123) : Colors.white,
+        foregroundColor: colors.onSurface,
         elevation: 0,
         centerTitle: false,
       ),
       cardTheme: CardThemeData(
-        color: const Color(0xff1e2045),
-        elevation: 0,
-        shape: RoundedRectangleBorder(
+        color: colors.surface,
+        elevation: isDark ? 0 : 1,
+        shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(18)),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: const Color(0xff171932),
-        indicatorColor: const Color(0xff6c63ff).withAlpha(60),
+        backgroundColor: isDark ? const Color(0xff171932) : Colors.white,
+        indicatorColor: colors.primary.withAlpha(isDark ? 60 : 28),
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
             color: states.contains(WidgetState.selected)
-                ? Colors.white
-                : const Color(0xff9ea2c4),
+                ? colors.onSurface
+                : colors.onSurfaceVariant,
             fontSize: 11,
             fontWeight: states.contains(WidgetState.selected)
                 ? FontWeight.w600
@@ -77,13 +110,43 @@ class GestorRemoteApp extends StatelessWidget {
           ),
         ),
       ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: isDark ? const Color(0xff151730) : const Color(0xfff8f8fc),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colors.outlineVariant),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colors.outlineVariant),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'Gestor UFU Remoto',
+    theme: _theme(Brightness.light),
+    darkTheme: _theme(Brightness.dark),
+    themeMode: _themeMode,
+    home: RemoteHomePage(
+      themeMode: _themeMode,
+      onThemeModeChanged: _setThemeMode,
     ),
-    home: const RemoteHomePage(),
   );
 }
 
 class RemoteHomePage extends StatefulWidget {
-  const RemoteHomePage({super.key});
+  const RemoteHomePage({
+    super.key,
+    required this.themeMode,
+    required this.onThemeModeChanged,
+  });
+
+  final ThemeMode themeMode;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
   @override
   State<RemoteHomePage> createState() => _RemoteHomePageState();
 }
@@ -264,6 +327,46 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       fingerprint: fingerprint.text.trim(),
     );
     await _connect();
+  }
+
+  Future<void> _chooseTheme() async {
+    final selected = await showModalBottomSheet<ThemeMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Aparência',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.light,
+              groupValue: widget.themeMode,
+              secondary: const Icon(Icons.light_mode_rounded),
+              title: const Text('Tema claro'),
+              onChanged: (value) => Navigator.pop(sheetContext, value),
+            ),
+            RadioListTile<ThemeMode>(
+              value: ThemeMode.dark,
+              groupValue: widget.themeMode,
+              secondary: const Icon(Icons.dark_mode_rounded),
+              title: const Text('Tema escuro'),
+              onChanged: (value) => Navigator.pop(sheetContext, value),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (selected != null) widget.onThemeModeChanged(selected);
   }
 
   Future<void> _connect() async {
@@ -1437,8 +1540,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 ),
                 Text(
                   label,
-                  style: const TextStyle(
-                    color: Color(0xff9ea2c4),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 11,
                   ),
                 ),
@@ -1481,7 +1584,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                     enabled
                         ? Icons.arrow_forward_rounded
                         : Icons.lock_outline_rounded,
-                    color: enabled ? accent : Colors.white38,
+                    color: enabled
+                        ? accent
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
                     size: 19,
                   ),
                 ],
@@ -1490,7 +1595,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               Text(
                 '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
                 style: TextStyle(
-                  color: enabled ? accent : Colors.white54,
+                  color: enabled
+                      ? accent
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 10,
                   letterSpacing: 1,
                   fontWeight: FontWeight.w700,
@@ -1509,8 +1616,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 '${module['description']}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xff9ea2c4),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 12,
                   height: 1.4,
                 ),
@@ -1519,7 +1626,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               Text(
                 enabled ? 'Acessar módulo' : 'Disponível em breve',
                 style: TextStyle(
-                  color: enabled ? accent : Colors.white54,
+                  color: enabled
+                      ? accent
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1547,8 +1656,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             Text(
               description,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Color(0xff9ea2c4),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
                 height: 1.4,
               ),
@@ -1560,24 +1669,27 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   Widget _buildHome() => ListView(
     padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
     children: [
-      const Text(
+      Text(
         'CENTRAL DE UTILIDADES',
         style: TextStyle(
-          color: Color(0xff9ea2c4),
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
           fontSize: 11,
           letterSpacing: 1.5,
           fontWeight: FontWeight.w700,
         ),
       ),
       const SizedBox(height: 7),
-      const Text(
+      Text(
         'Gestor UFU',
         style: TextStyle(fontSize: 27, fontWeight: FontWeight.w700),
       ),
       const SizedBox(height: 5),
-      const Text(
+      Text(
         'Acesse pelo celular as ferramentas que você já usa no Windows.',
-        style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          height: 1.4,
+        ),
       ),
       const SizedBox(height: 16),
       Card(
@@ -1927,10 +2039,18 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               ),
               const SizedBox(height: 10),
               if (course.isNotEmpty)
-                Text(course, style: const TextStyle(color: Color(0xffc3c5db))),
+                Text(
+                  course,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               Text(
                 'Início: ${start == null ? 'não informado' : '${start.day.toString().padLeft(2, '0')}/${start.month.toString().padLeft(2, '0')}/${start.year}'}',
-                style: const TextStyle(color: Color(0xff9ea2c4), fontSize: 12),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
               const SizedBox(height: 11),
               Wrap(
@@ -1979,13 +2099,17 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   Widget _moodlePill(IconData icon, String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
     decoration: BoxDecoration(
-      color: const Color(0xff101329),
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(20),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: const Color(0xff9ea2c4)),
+        Icon(
+          icon,
+          size: 15,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
         const SizedBox(width: 5),
         Text(label, style: const TextStyle(fontSize: 11)),
       ],
@@ -2630,8 +2754,10 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                           ),
                           Text(
                             _primaryActionHint(moduleId),
-                            style: const TextStyle(
-                              color: Color(0xff9ea2c4),
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                               fontSize: 12,
                             ),
                           ),
@@ -2773,7 +2899,10 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           const SizedBox(height: 14),
           Text(
             '${module['description']}',
-            style: const TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.45,
+            ),
           ),
           const SizedBox(height: 14),
           for (var index = 0; index < groups.length; index++)
@@ -3012,13 +3141,16 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         const SizedBox(height: 12),
         Text(
           '${module['description']}',
-          style: const TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            height: 1.45,
+          ),
         ),
         const SizedBox(height: 22),
-        const Text(
+        Text(
           'AÇÕES',
           style: TextStyle(
-            color: Color(0xff9ea2c4),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 11,
             letterSpacing: 1.3,
             fontWeight: FontWeight.w700,
@@ -3039,9 +3171,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           )
         else ...[
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'As funções estão agrupadas pelas etapas que você já conhece no computador.',
-            style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 10),
           for (var index = 0; index < sections.length; index++)
@@ -3064,7 +3199,9 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 ),
                 subtitle: Text(
                   '${sections[index].commands.length} ${sections[index].commands.length == 1 ? 'função' : 'funções'}',
-                  style: const TextStyle(color: Color(0xff9ea2c4)),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 children: [
                   for (final command in sections[index].commands)
@@ -3420,11 +3557,14 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
     children: [
       if (_messages.isEmpty)
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(top: 12, bottom: 18),
           child: Text(
             'Converse com o Agente por texto ou voz. A transcrição é feita no celular quando há reconhecimento offline em português.',
-            style: TextStyle(color: Color(0xff9ea2c4), height: 1.45),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.45,
+            ),
           ),
         ),
       for (final message in _messages)
@@ -3438,15 +3578,22 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             constraints: const BoxConstraints(maxWidth: 560),
             decoration: BoxDecoration(
               color: message.role == 'user'
-                  ? const Color(0xff3b3978)
-                  : const Color(0xff1e2045),
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : Theme.of(context).colorScheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                SelectableText(message.text),
+                SelectableText(
+                  message.text,
+                  style: TextStyle(
+                    color: message.role == 'user'
+                        ? Theme.of(context).colorScheme.onPrimaryContainer
+                        : Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
                 for (final artifact in message.artifacts)
                   TextButton.icon(
                     onPressed: () => _downloadArtifact(artifact),
@@ -3464,7 +3611,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             margin: const EdgeInsets.symmetric(vertical: 5),
             padding: const EdgeInsets.all(13),
             decoration: BoxDecoration(
-              color: const Color(0xff1e2045),
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
               borderRadius: BorderRadius.circular(16),
             ),
             child: Text(_assistantDraft),
@@ -3477,9 +3624,11 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     top: false,
     child: Container(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-      decoration: const BoxDecoration(
-        color: Color(0xff171932),
-        border: Border(top: BorderSide(color: Color(0xff2a2d52))),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3495,7 +3644,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                   ? 'Ouvindo… fale sua solicitação'
                   : 'Peça algo ao Agente…',
               filled: true,
-              fillColor: const Color(0xff151730),
+              fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,
@@ -3599,6 +3748,16 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       ),
       actions: [
         IconButton(
+          onPressed: _chooseTheme,
+          tooltip:
+              'Aparência: tema ${widget.themeMode == ThemeMode.dark ? 'escuro' : 'claro'}',
+          icon: Icon(
+            widget.themeMode == ThemeMode.dark
+                ? Icons.dark_mode_rounded
+                : Icons.light_mode_rounded,
+          ),
+        ),
+        IconButton(
           onPressed: () async {
             final enabled = !_speakResponses;
             setState(() => _speakResponses = enabled);
@@ -3671,12 +3830,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           ),
         Expanded(
           child: DecoratedBox(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xff0f1123), Color(0xff1a0a33)],
-              ),
+            decoration: BoxDecoration(
+              color: Theme.of(context).scaffoldBackgroundColor,
             ),
             child: switch (_selectedTab) {
               0 => _buildHome(),
