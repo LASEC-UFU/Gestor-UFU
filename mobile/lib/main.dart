@@ -95,7 +95,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   List<Map<String, dynamic>> _modules = [];
   List<Map<String, dynamic>> _approvals = [];
   final _activeTasks = <String, Map<String, dynamic>>{};
-  final _shownTaskSummaries = <String>{};
+  final _taskHistory = <Map<String, dynamic>>[];
   RemoteApi? _api;
   WebSocket? _socket;
   Timer? _reconnect;
@@ -263,6 +263,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     try {
       await api.check();
       _modules = await api.modules();
+      _loadTasks(await api.tasks());
       final history = await api.history();
       _messages
         ..clear()
@@ -332,6 +333,37 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     });
   }
 
+  bool _isTaskActive(Map<String, dynamic> task) =>
+      {'queued', 'running', 'cancel_requested'}.contains(task['status']);
+
+  void _loadTasks(Iterable<Map<String, dynamic>> tasks) {
+    _activeTasks.clear();
+    _taskHistory.clear();
+    for (final task in tasks) {
+      _recordTask(task);
+    }
+  }
+
+  void _recordTask(Map<String, dynamic> task) {
+    final id = '${task['id']}';
+    if (_isTaskActive(task)) {
+      _taskHistory.removeWhere((item) => '${item['id']}' == id);
+      _activeTasks[id] = task;
+      return;
+    }
+    _activeTasks.remove(id);
+    _taskHistory.removeWhere((item) => '${item['id']}' == id);
+    _taskHistory.add(task);
+    _taskHistory.sort((a, b) {
+      final aTime = DateTime.tryParse('${a['updatedAt']}') ?? DateTime(1970);
+      final bTime = DateTime.tryParse('${b['updatedAt']}') ?? DateTime(1970);
+      return bTime.compareTo(aTime);
+    });
+    if (_taskHistory.length > 100) {
+      _taskHistory.removeRange(100, _taskHistory.length);
+    }
+  }
+
   void _onEvent(Map<String, dynamic> event) {
     if (!mounted) return;
     switch (event['type']) {
@@ -389,38 +421,10 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         );
       case 'task':
         final task = Map<String, dynamic>.from(event['task'] as Map);
-        if ({
-          'queued',
-          'running',
-          'cancel_requested',
-        }.contains(task['status'])) {
-          _activeTasks['${task['id']}'] = task;
-        } else {
-          _activeTasks.remove('${task['id']}');
-        }
+        _recordTask(task);
       case 'snapshot':
         final tasks = event['tasks'] as List? ?? const [];
-        _activeTasks.clear();
-        for (final rawTask in tasks) {
-          final task = Map<String, dynamic>.from(rawTask as Map);
-          if ({
-            'running',
-            'queued',
-            'cancel_requested',
-          }.contains(task['status'])) {
-            _activeTasks['${task['id']}'] = task;
-          } else if (_shownTaskSummaries.add('${task['id']}')) {
-            final result = Map<String, dynamic>.from(
-              task['result'] as Map? ?? const {},
-            );
-            final artifacts = (result['artifacts'] as List? ?? const [])
-                .map((x) => Map<String, dynamic>.from(x as Map))
-                .toList();
-            _messages.add(
-              _ChatMessage('system', _taskSummary(task), artifacts: artifacts),
-            );
-          }
-        }
+        _loadTasks(tasks.map((task) => Map<String, dynamic>.from(task as Map)));
     }
     setState(() {});
   }
@@ -792,12 +796,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       final artifacts = (result['artifacts'] as List? ?? const [])
           .map((x) => Map<String, dynamic>.from(x as Map))
           .toList();
-      _shownTaskSummaries.add('${task['id']}');
-      setState(
-        () => _messages.add(
+      setState(() {
+        _recordTask(Map<String, dynamic>.from(task));
+        _messages.add(
           _ChatMessage('system', _taskSummary(task), artifacts: artifacts),
-        ),
-      );
+        );
+      });
     } catch (e) {
       if (mounted) setState(() => _error = _friendlyError(e));
     }
@@ -1368,6 +1372,83 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     );
   }
 
+  String _taskStatusLabel(String status) => switch (status) {
+    'succeeded' => 'Concluída',
+    'failed' => 'Falhou',
+    'cancelled' => 'Cancelada',
+    'interrupted' => 'Interrompida',
+    _ => status,
+  };
+
+  Color _taskStatusColor(String status) => switch (status) {
+    'succeeded' => const Color(0xff00e676),
+    'failed' => const Color(0xffff5252),
+    'cancelled' || 'interrupted' => const Color(0xffffab00),
+    _ => const Color(0xff9ea2c4),
+  };
+
+  String _taskDate(Map<String, dynamic> task) {
+    final date = DateTime.tryParse('${task['updatedAt']}')?.toLocal();
+    if (date == null) return '';
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${twoDigits(date.day)}/${twoDigits(date.month)}/${date.year} ${twoDigits(date.hour)}:${twoDigits(date.minute)}';
+  }
+
+  Widget _taskHistoryCard(Map<String, dynamic> task) {
+    final status = '${task['status']}';
+    final result = Map<String, dynamic>.from(
+      task['result'] as Map? ?? const {},
+    );
+    final message = '${result['message'] ?? ''}'.trim();
+    final details = Map<String, dynamic>.from(result)
+      ..remove('ok')
+      ..remove('message')
+      ..remove('artifacts');
+    final artifacts = (result['artifacts'] as List? ?? const [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    final color = _taskStatusColor(status);
+    final date = _taskDate(task);
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        leading: Icon(
+          status == 'succeeded'
+              ? Icons.check_circle_outline_rounded
+              : status == 'failed'
+              ? Icons.error_outline_rounded
+              : Icons.info_outline_rounded,
+          color: color,
+        ),
+        title: Text('${task['title']}'),
+        subtitle: Text(
+          '${_taskStatusLabel(status)}${date.isEmpty ? '' : ' · $date'}',
+          style: TextStyle(color: color, fontSize: 12),
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        expandedCrossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (message.isNotEmpty) ...[const Divider(height: 12), Text(message)],
+          if (details.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SelectableText(const JsonEncoder.withIndent('  ').convert(details)),
+          ],
+          for (final artifact in artifacts)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _downloadArtifact(artifact),
+                icon: const Icon(Icons.download_rounded),
+                label: Text('Baixar ${artifact['name']}'),
+              ),
+            ),
+          if (message.isEmpty && details.isEmpty && artifacts.isEmpty)
+            const Text('Esta operação não retornou detalhes adicionais.'),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTasks() => ListView(
     padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
     children: [
@@ -1448,6 +1529,20 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         ),
         const SizedBox(height: 8),
         for (final task in _activeTasks.values) _taskCard(task),
+      ],
+      if (_taskHistory.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        Text(
+          'HISTÓRICO RECENTE · ${_taskHistory.length}',
+          style: const TextStyle(
+            color: Color(0xff9ea2c4),
+            fontSize: 11,
+            letterSpacing: 1,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final task in _taskHistory) _taskHistoryCard(task),
       ],
     ],
   );

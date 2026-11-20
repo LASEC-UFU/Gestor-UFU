@@ -331,6 +331,14 @@ class RemoteAccessServer {
         });
         return;
       }
+      if (request.method == 'GET' && path == '/api/v1/tasks') {
+        final tasks = _tasks.values.toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        await _json(request.response, HttpStatus.ok, {
+          'tasks': tasks.take(100).map((task) => task.toJson()).toList(),
+        });
+        return;
+      }
       final approvalMatch = RegExp(
         r'^/api/v1/agent/approvals/([0-9]+)$',
       ).firstMatch(path);

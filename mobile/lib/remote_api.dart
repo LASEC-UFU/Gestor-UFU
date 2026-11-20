@@ -187,6 +187,21 @@ class RemoteApi {
     return data;
   }
 
+  Future<List<Map<String, dynamic>>> tasks() async {
+    final response = await _request(
+      'GET',
+      '/api/v1/tasks',
+      headers: _headers,
+      timeout: const Duration(seconds: 10),
+    );
+    final data = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    if (response.statusCode != 200)
+      throw HttpException('${data['error'] ?? response.statusCode}');
+    return (data['tasks'] as List? ?? const [])
+        .map((task) => Map<String, dynamic>.from(task as Map))
+        .toList();
+  }
+
   Future<void> cancelTask(String id) async {
     final response = await _request(
       'DELETE',
