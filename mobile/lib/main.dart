@@ -604,6 +604,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         pauseFor: const Duration(seconds: 4),
       ),
       onResult: (result) {
+        if (!_listening || _speechSubmitted) return;
         _input.text = result.recognizedWords;
         if (mounted) setState(() {});
       },
@@ -623,13 +624,13 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   Future<void> _send([String? value]) async {
     final text = (value ?? _input.text).trim();
     if (text.isEmpty || _api == null || !_connected || _sending) return;
-    await _stopSpeaking();
     setState(() {
       _sending = true;
       _input.clear();
       _messages.add(_ChatMessage('user', text));
       _error = null;
     });
+    await _stopSpeaking();
     try {
       await _api!.sendAgentMessage(text);
     } catch (e) {
