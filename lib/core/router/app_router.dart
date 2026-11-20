@@ -5,6 +5,7 @@ import 'package:gestor_ufu/core/utils/debug_options.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/platform/services/navigation_service.dart';
 import 'package:gestor_ufu/presentation/pages/dashboard_page.dart';
+import 'package:gestor_ufu/presentation/pages/remote_access_page.dart';
 
 /// Rotas do app: o painel ('/') mais as rotas declaradas por cada módulo
 /// instalado (`app/installed_modules.dart`). Os módulos precisam estar
@@ -21,6 +22,10 @@ class AppRouter {
           : '/',
       routes: [
         GoRoute(path: '/', builder: (context, state) => const DashboardPage()),
+        GoRoute(
+          path: '/remote-access',
+          builder: (context, state) => const RemoteAccessPage(),
+        ),
         for (final module in ModuleRegistry.instance.modules) ...module.routes,
       ],
     );

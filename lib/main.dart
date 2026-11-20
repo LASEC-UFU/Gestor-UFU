@@ -26,6 +26,7 @@ import 'package:gestor_ufu/platform/ui/leitor_comentado/janela_comentarios.dart'
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_text_service.dart';
 import 'package:gestor_ufu/platform/contracts/ai_text.dart';
+import 'package:gestor_ufu/platform/remote/remote_access_server.dart';
 import 'package:window_manager/window_manager.dart';
 
 String _appVersion = 'desconhecida';
@@ -166,6 +167,18 @@ Future<void> main(List<String> args) async {
   // Arquivos gerados (relatórios, PDFs, planilhas) na pasta compartilhada.
   final filesMirror = SharedFilesMirror(sharedDatabase);
   filesMirror.start();
+
+  final remoteAccess = RemoteAccessServer.instance
+    ..onDataChanged = () async {
+      await services.terms.load();
+      for (final module in ModuleRegistry.instance.modules) {
+        await module.onExternalDataChanged();
+      }
+    };
+  if (Platform.isWindows) {
+    final remoteError = await remoteAccess.startIfConfigured();
+    if (remoteError != null) debugPrint('[Acesso remoto] $remoteError');
+  }
 
   if (kDebugMode && diaryAutomationDebugEnabled) {
     unawaited(() async {
