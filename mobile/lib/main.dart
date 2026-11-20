@@ -179,7 +179,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 TextField(
                   controller: host,
                   decoration: const InputDecoration(
-                    labelText: 'EndereÃ§o interno ou IP do computador',
+                    labelText: 'Endereço interno ou IP do computador',
                   ),
                 ),
                 TextField(
@@ -203,7 +203,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Use o endereÃ§o acessÃ­vel com FortiClient conectado. O fingerprint fixa a identidade do computador e impede aceitar outro certificado.',
+                  'Use o endereço acessível com FortiClient conectado. O fingerprint fixa a identidade do computador e impede aceitar outro certificado.',
                   style: TextStyle(fontSize: 12),
                 ),
               ],
@@ -230,7 +230,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         fingerprint.text.trim().isEmpty) {
       setState(
         () => _error =
-            'Preencha endereÃ§o, porta, token e fingerprint do certificado.',
+            'Preencha endereço, porta, token e fingerprint do certificado.',
       );
       return;
     }
@@ -370,9 +370,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       case 'agent_status':
         if (event['status'] == 'processing') {
           _assistantDraft = '';
-          _messages.add(
-            _ChatMessage('assistant', 'Estou trabalhando nissoâ€¦'),
-          );
+          _messages.add(_ChatMessage('assistant', 'Estou trabalhando nisso…'));
         }
         if (event['status'] == 'complete') {
           if (_assistantDraft.isNotEmpty)
@@ -394,7 +392,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           _messages.add(
             const _ChatMessage(
               'system',
-              'GeraÃ§Ã£o do agente interrompida. Uma operaÃ§Ã£o do mÃ³dulo que jÃ¡ comeÃ§ou pode continuar; verifique as tarefas ativas.',
+              'Geração do agente interrompida. Uma operação do módulo que já começou pode continuar; verifique as tarefas ativas.',
             ),
           );
           _sending = false;
@@ -418,7 +416,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         _messages.add(
           _ChatMessage(
             'system',
-            'Aguardando sua confirmaÃ§Ã£o: ${event['tool']}',
+            'Aguardando sua confirmação: ${event['tool']}',
           ),
         );
       case 'task':
@@ -446,7 +444,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         () => _messages.add(
           _ChatMessage(
             'system',
-            approved ? 'AÃ§Ã£o autorizada.' : 'AÃ§Ã£o recusada.',
+            approved ? 'Ação autorizada.' : 'Ação recusada.',
           ),
         ),
       );
@@ -456,7 +454,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     if (!_speechReady) {
       setState(
         () => _error =
-            'Este Android nÃ£o disponibilizou serviÃ§o de reconhecimento de fala.',
+            'Este Android não disponibilizou serviço de reconhecimento de fala.',
       );
       return;
     }
@@ -535,7 +533,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       // Text responses remain available if the Android speech service is absent.
     } on PlatformException catch (error) {
       if (mounted)
-        setState(() => _error = 'Ãudio da resposta: ${error.message}');
+        setState(() => _error = 'Áudio da resposta: ${error.message}');
     }
   }
 
@@ -686,12 +684,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                           setDialog(() => bools[entry.key] = value ?? false),
                     ),
                   if (props.isEmpty)
-                    const Text('Esta aÃ§Ã£o nÃ£o exige parÃ¢metros.'),
+                    const Text('Esta ação não exige parâmetros.'),
                   if (command['requiresConfirmation'] == true)
                     const Padding(
                       padding: EdgeInsets.only(top: 12),
                       child: Text(
-                        'Esta aÃ§Ã£o altera dados ou envia informaÃ§Ãµes. Confirme antes de executar.',
+                        'Esta ação altera dados ou envia informações. Confirme antes de executar.',
                         style: TextStyle(color: Colors.deepOrange),
                       ),
                     ),
@@ -720,9 +718,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                     };
                     if ((type == 'integer' || type == 'number') &&
                         parsed == null) {
-                      throw FormatException(
-                        '$value nÃ£o Ã© um nÃºmero vÃ¡lido.',
-                      );
+                      throw FormatException('$value não é um número válido.');
                     }
                     if (type == 'object' && parsed is! Map) {
                       throw const FormatException(
@@ -745,7 +741,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                   }).toList();
                   if (missing.isNotEmpty) {
                     throw FormatException(
-                      'Preencha os campos obrigatÃ³rios: ${missing.join(', ')}.',
+                      'Preencha os campos obrigatórios: ${missing.join(', ')}.',
                     );
                   }
                   Navigator.pop(context, input);
@@ -825,7 +821,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     final details = result.isEmpty
         ? ''
         : '\n${const JsonEncoder.withIndent('  ').convert(result)}';
-    return '${task['title']}: ${task['status']}${message == null ? '' : ' â€” $message'}$details';
+    return '${task['title']}: ${task['status']}${message == null ? '' : ' — $message'}$details';
   }
 
   bool _isPathField(String key) {
@@ -854,11 +850,11 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     final text = '$error';
     if (text.contains('HandshakeException') ||
         text.contains('CERTIFICATE_VERIFY_FAILED'))
-      return 'Certificado nÃ£o confere. Compare o fingerprint SHA-256 com o mostrado no Windows.';
+      return 'Certificado não confere. Compare o fingerprint SHA-256 com o mostrado no Windows.';
     if (text.contains('SocketException') ||
         text.contains('Connection refused') ||
         text.contains('timed out'))
-      return 'Computador indisponÃ­vel. Confira se estÃ¡ ligado, com Gestor UFU ativo e FortiClient conectado.';
+      return 'Computador indisponível. Confira se está ligado, com Gestor UFU ativo e FortiClient conectado.';
     return text
         .replaceFirst('Exception: ', '')
         .replaceFirst('HttpException: ', '');
@@ -878,8 +874,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     final modules = _modules.where((item) => item['id'] == _selectedModuleId);
     if (modules.isNotEmpty) return '${modules.first['title']}';
     return switch (_selectedTab) {
-      0 => 'InÃ­cio',
-      1 => 'MÃ³dulos',
+      0 => 'Início',
+      1 => 'Módulos',
       2 => 'Tarefas',
       _ => 'Agente',
     };
@@ -978,7 +974,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               ),
               const SizedBox(height: 14),
               Text(
-                '${module['category'] ?? 'MÃ“DULO'}'.toUpperCase(),
+                '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
                 style: TextStyle(
                   color: enabled ? accent : Colors.white54,
                   fontSize: 10,
@@ -1007,7 +1003,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               ),
               const SizedBox(height: 13),
               Text(
-                enabled ? 'Acessar mÃ³dulo' : 'DisponÃ­vel em breve',
+                enabled ? 'Acessar módulo' : 'Disponível em breve',
                 style: TextStyle(
                   color: enabled ? accent : Colors.white54,
                   fontSize: 12,
@@ -1066,7 +1062,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       ),
       const SizedBox(height: 5),
       const Text(
-        'Acesse pelo celular as ferramentas que vocÃª jÃ¡ usa no Windows.',
+        'Acesse pelo celular as ferramentas que você já usa no Windows.',
         style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
       ),
       const SizedBox(height: 16),
@@ -1083,13 +1079,13 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           ),
           subtitle: Text(
             _connected
-                ? 'As operaÃ§Ãµes sÃ£o executadas neste computador.'
+                ? 'As operações são executadas neste computador.'
                 : 'Conecte ao Gestor UFU no Windows pela VPN.',
           ),
           trailing: IconButton(
             onPressed: _connecting ? null : _connect,
             icon: const Icon(Icons.refresh_rounded),
-            tooltip: 'Atualizar conexÃ£o',
+            tooltip: 'Atualizar conexão',
           ),
         ),
       ),
@@ -1100,7 +1096,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             child: _summaryCard(
               Icons.apps_rounded,
               '${_modules.length}',
-              'MÃ³dulos',
+              'Módulos',
             ),
           ),
           const SizedBox(width: 10),
@@ -1118,7 +1114,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         children: [
           const Expanded(
             child: Text(
-              'MÃ³dulos',
+              'Módulos',
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1134,8 +1130,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       if (_modules.isEmpty)
         _emptyState(
           Icons.apps_outlined,
-          _connected ? 'Nenhum mÃ³dulo disponÃ­vel' : 'Aguardando conexÃ£o',
-          'Os mÃ³dulos disponÃ­veis no computador aparecerÃ£o aqui.',
+          _connected ? 'Nenhum módulo disponível' : 'Aguardando conexão',
+          'Os módulos disponíveis no computador aparecerão aqui.',
         )
       else
         LayoutBuilder(
@@ -1172,7 +1168,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
       children: [
         const Text(
-          'MÃ“DULOS DO GESTOR UFU',
+          'MÓDULOS DO GESTOR UFU',
           style: TextStyle(
             color: Color(0xff9ea2c4),
             fontSize: 11,
@@ -1184,7 +1180,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         TextField(
           onChanged: (value) => setState(() => _moduleFilter = value),
           decoration: const InputDecoration(
-            hintText: 'Buscar mÃ³dulo',
+            hintText: 'Buscar módulo',
             prefixIcon: Icon(Icons.search_rounded),
             filled: true,
             border: OutlineInputBorder(
@@ -1196,7 +1192,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         if (filtered.isEmpty)
           _emptyState(
             Icons.search_off_rounded,
-            'Nenhum mÃ³dulo encontrado',
+            'Nenhum módulo encontrado',
             'Tente buscar pelo nome ou pela categoria.',
           )
         else
@@ -1218,7 +1214,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         TextButton.icon(
           onPressed: () => setState(() => _selectedModuleId = null),
           icon: const Icon(Icons.arrow_back_rounded),
-          label: const Text('Todos os mÃ³dulos'),
+          label: const Text('Todos os módulos'),
           style: TextButton.styleFrom(alignment: Alignment.centerLeft),
         ),
         const SizedBox(height: 10),
@@ -1239,7 +1235,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${module['category'] ?? 'MÃ“DULO'}'.toUpperCase(),
+                    '${module['category'] ?? 'MÓDULO'}'.toUpperCase(),
                     style: TextStyle(
                       color: accent,
                       fontSize: 10,
@@ -1267,7 +1263,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         ),
         const SizedBox(height: 22),
         const Text(
-          'AÃ‡Ã•ES',
+          'AÇÕES',
           style: TextStyle(
             color: Color(0xff9ea2c4),
             fontSize: 11,
@@ -1279,19 +1275,19 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         if (!enabled)
           _emptyState(
             Icons.lock_outline_rounded,
-            'DisponÃ­vel em breve',
-            'Este mÃ³dulo ainda nÃ£o estÃ¡ habilitado neste computador.',
+            'Disponível em breve',
+            'Este módulo ainda não está habilitado neste computador.',
           )
         else if (commands.isEmpty)
           _emptyState(
             Icons.info_outline_rounded,
-            'Sem aÃ§Ãµes remotas',
-            'As aÃ§Ãµes deste mÃ³dulo ainda nÃ£o estÃ£o disponÃ­veis pelo celular.',
+            'Sem ações remotas',
+            'As ações deste módulo ainda não estão disponíveis pelo celular.',
           )
         else ...[
           const SizedBox(height: 8),
           const Text(
-            'As funÃ§Ãµes estÃ£o agrupadas pelas etapas que vocÃª jÃ¡ conhece no computador.',
+            'As funções estão agrupadas pelas etapas que você já conhece no computador.',
             style: TextStyle(color: Color(0xff9ea2c4), height: 1.4),
           ),
           const SizedBox(height: 10),
@@ -1314,7 +1310,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
-                  '${sections[index].commands.length} ${sections[index].commands.length == 1 ? 'funÃ§Ã£o' : 'funÃ§Ãµes'}',
+                  '${sections[index].commands.length} ${sections[index].commands.length == 1 ? 'função' : 'funções'}',
                   style: const TextStyle(color: Color(0xff9ea2c4)),
                 ),
                 children: [
@@ -1362,28 +1358,28 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       final (title, icon) = switch (moduleId) {
         'moodle' =>
           id.contains('Periodo')
-              ? ('PerÃ­odo letivo', Icons.calendar_month_rounded)
+              ? ('Período letivo', Icons.calendar_month_rounded)
               : id.contains('Planilha') || id.contains('exportar')
               ? ('Importar e exportar', Icons.import_export_rounded)
               : id.contains('sincron')
-              ? ('SincronizaÃ§Ã£o com Moodle', Icons.sync_rounded)
-              : ('ConfiguraÃ§Ãµes de disciplinas', Icons.menu_book_rounded),
+              ? ('Sincronização com Moodle', Icons.sync_rounded)
+              : ('Configurações de disciplinas', Icons.menu_book_rounded),
         'progressao' =>
           id.contains('Lancamento') ||
                   id.contains('lancar') ||
                   id.contains('Anexo1')
-              ? ('Atividades e pontuaÃ§Ã£o', Icons.checklist_rounded)
+              ? ('Atividades e pontuação', Icons.checklist_rounded)
               : id.toLowerCase().contains('sei')
               ? ('Processo no SEI', Icons.account_tree_rounded)
               : id.contains('Pdf') || id.contains('Comprovante')
               ? ('Requerimento e comprovantes', Icons.picture_as_pdf_rounded)
-              : ('Processos de progressÃ£o', Icons.trending_up_rounded),
+              : ('Processos de progressão', Icons.trending_up_rounded),
         'diario' =>
           id.contains('Portal')
               ? ('Preencher no Portal do Docente', Icons.public_rounded)
               : id.contains('importar') || id.contains('Json')
               ? ('Importar e exportar aulas', Icons.import_export_rounded)
-              : ('PerÃ­odos e lanÃ§amentos', Icons.edit_calendar_rounded),
+              : ('Períodos e lançamentos', Icons.edit_calendar_rounded),
         'planos-ensino' =>
           id.toLowerCase().contains('sei')
               ? ('Enviar ao SEI', Icons.account_tree_rounded)
@@ -1396,7 +1392,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           id.startsWith('parecer.processos')
               ? ('Processos de parecer', Icons.folder_open_rounded)
               : id.contains('comentarios')
-              ? ('ComentÃ¡rios e anotaÃ§Ãµes', Icons.comment_rounded)
+              ? ('Comentários e anotações', Icons.comment_rounded)
               : id.contains('anexos')
               ? ('Documentos anexados', Icons.attach_file_rounded)
               : id.contains('.base.')
@@ -1404,7 +1400,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               : id.contains('Sei') || id.contains('verificar')
               ? ('Revisar e inserir no SEI', Icons.account_tree_rounded)
               : id.startsWith('relato.')
-              ? ('Ãrvore e documentos do processo', Icons.account_tree_rounded)
+              ? ('Árvore e documentos do processo', Icons.account_tree_rounded)
               : ('Rascunho do parecer', Icons.edit_note_rounded),
         _ => _fallbackActionSection(id, '${command['title']}'),
       };
@@ -1425,12 +1421,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     if (lower.contains('sei') ||
         lower.contains('portal') ||
         lower.contains('moodle')) {
-      return ('IntegraÃ§Ãµes', Icons.hub_rounded);
+      return ('Integrações', Icons.hub_rounded);
     }
     if (lower.contains('excluir') || lower.contains('remover')) {
       return ('Gerenciar dados', Icons.settings_rounded);
     }
-    return ('FunÃ§Ãµes do mÃ³dulo', Icons.grid_view_rounded);
+    return ('Funções do módulo', Icons.grid_view_rounded);
   }
 
   Widget _taskCard(Map<String, dynamic> task) {
@@ -1483,7 +1479,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                     }
                   },
                   icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('Cancelar operaÃ§Ã£o'),
+                  label: const Text('Cancelar operação'),
                 ),
               ),
           ],
@@ -1493,7 +1489,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   }
 
   String _taskStatusLabel(String status) => switch (status) {
-    'succeeded' => 'ConcluÃ­da',
+    'succeeded' => 'Concluída',
     'failed' => 'Falhou',
     'cancelled' => 'Cancelada',
     'interrupted' => 'Interrompida',
@@ -1542,7 +1538,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         ),
         title: Text('${task['title']}'),
         subtitle: Text(
-          '${_taskStatusLabel(status)}${date.isEmpty ? '' : ' Â· $date'}',
+          '${_taskStatusLabel(status)}${date.isEmpty ? '' : ' · $date'}',
           style: TextStyle(color: color, fontSize: 12),
         ),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -1563,7 +1559,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               ),
             ),
           if (message.isEmpty && details.isEmpty && artifacts.isEmpty)
-            const Text('Esta operaÃ§Ã£o nÃ£o retornou detalhes adicionais.'),
+            const Text('Esta operação não retornou detalhes adicionais.'),
         ],
       ),
     );
@@ -1573,7 +1569,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
     children: [
       const Text(
-        'OPERAÃ‡Ã•ES NO COMPUTADOR',
+        'OPERAÇÕES NO COMPUTADOR',
         style: TextStyle(
           color: Color(0xff9ea2c4),
           fontSize: 11,
@@ -1589,7 +1585,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       const SizedBox(height: 18),
       if (_approvals.isNotEmpty) ...[
         const Text(
-          'PRECISAM DA SUA CONFIRMAÃ‡ÃƒO',
+          'PRECISAM DA SUA CONFIRMAÇÃO',
           style: TextStyle(
             color: Color(0xffffab00),
             fontSize: 11,
@@ -1635,11 +1631,11 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         _emptyState(
           Icons.task_alt_rounded,
           'Nenhuma tarefa em andamento',
-          'Quando vocÃª iniciar uma operaÃ§Ã£o, o progresso aparecerÃ¡ aqui.',
+          'Quando você iniciar uma operação, o progresso aparecerá aqui.',
         )
       else ...[
         Text(
-          'EM ANDAMENTO Â· ${_activeTasks.length}',
+          'EM ANDAMENTO · ${_activeTasks.length}',
           style: const TextStyle(
             color: Color(0xff00d4ff),
             fontSize: 11,
@@ -1653,7 +1649,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       if (_taskHistory.isNotEmpty) ...[
         const SizedBox(height: 14),
         Text(
-          'HISTÃ“RICO RECENTE Â· ${_taskHistory.length}',
+          'HISTÓRICO RECENTE · ${_taskHistory.length}',
           style: const TextStyle(
             color: Color(0xff9ea2c4),
             fontSize: 11,
@@ -1674,7 +1670,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         const Padding(
           padding: EdgeInsets.only(top: 12, bottom: 18),
           child: Text(
-            'Converse com o Agente por texto ou voz. A transcriÃ§Ã£o Ã© feita no celular quando hÃ¡ reconhecimento offline em portuguÃªs.',
+            'Converse com o Agente por texto ou voz. A transcrição é feita no celular quando há reconhecimento offline em português.',
             style: TextStyle(color: Color(0xff9ea2c4), height: 1.45),
           ),
         ),
@@ -1743,8 +1739,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             onSubmitted: (_) => _send(),
             decoration: InputDecoration(
               hintText: _listening
-                  ? 'Ouvindoâ€¦ fale sua solicitaÃ§Ã£o'
-                  : 'PeÃ§a algo ao Agenteâ€¦',
+                  ? 'Ouvindo… fale sua solicitação'
+                  : 'Peça algo ao Agente…',
               filled: true,
               fillColor: const Color(0xff151730),
               border: OutlineInputBorder(
@@ -1768,7 +1764,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 const Padding(
                   padding: EdgeInsets.only(right: 12),
                   child: Text(
-                    'Ouvindoâ€¦',
+                    'Ouvindo…',
                     style: TextStyle(
                       color: Color(0xffff5252),
                       fontWeight: FontWeight.w600,
@@ -1782,7 +1778,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                   onPressed: _connected && !_sending ? _toggleMic : null,
                   backgroundColor: _listening ? const Color(0xffff5252) : null,
                   tooltip: _listening
-                      ? 'Parar e enviar transcriÃ§Ã£o'
+                      ? 'Parar e enviar transcrição'
                       : 'Falar com o Agente',
                   child: Icon(
                     _listening ? Icons.stop_rounded : Icons.mic_rounded,
@@ -1861,8 +1857,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
             if (!_speakResponses) unawaited(_stopSpeaking());
           },
           tooltip: _speakResponses
-              ? 'Desativar respostas em Ã¡udio'
-              : 'Ativar respostas em Ã¡udio',
+              ? 'Desativar respostas em áudio'
+              : 'Ativar respostas em áudio',
           icon: Icon(
             _speakResponses
                 ? Icons.volume_up_rounded
@@ -1881,7 +1877,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         ),
         IconButton(
           onPressed: _configure,
-          tooltip: 'ConexÃ£o',
+          tooltip: 'Conexão',
           icon: const Icon(Icons.settings_rounded),
         ),
         const SizedBox(width: 4),
@@ -1950,12 +1946,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
         const NavigationDestination(
           icon: Icon(Icons.home_outlined),
           selectedIcon: Icon(Icons.home_rounded),
-          label: 'InÃ­cio',
+          label: 'Início',
         ),
         const NavigationDestination(
           icon: Icon(Icons.apps_outlined),
           selectedIcon: Icon(Icons.apps_rounded),
-          label: 'MÃ³dulos',
+          label: 'Módulos',
         ),
         NavigationDestination(
           icon: Badge(
