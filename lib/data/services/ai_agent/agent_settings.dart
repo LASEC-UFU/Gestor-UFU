@@ -61,14 +61,14 @@ extension AgentProviderLabel on AgentProvider {
   String get cliName => switch (this) {
     AgentProvider.claude => 'claude',
     AgentProvider.chatgpt => 'codex',
-    AgentProvider.gemini => 'agy',
+    AgentProvider.gemini => 'gemini',
     AgentProvider.copilot => 'copilot',
   };
 
   String get cliProductName => switch (this) {
     AgentProvider.claude => 'Claude Code',
     AgentProvider.chatgpt => 'Codex',
-    AgentProvider.gemini => 'Antigravity CLI',
+    AgentProvider.gemini => 'Gemini CLI',
     AgentProvider.copilot => 'GitHub Copilot CLI',
   };
 
@@ -95,8 +95,7 @@ extension AgentProviderLabel on AgentProvider {
       'Um terminal foi aberto com "codex login". Entre com sua conta '
           'ChatGPT e feche o terminal ao terminar.',
     AgentProvider.gemini =>
-      'Um terminal foi aberto com o Antigravity CLI. Entre com sua conta '
-          'Google e feche o terminal ao terminar.',
+      'Foi aberto um terminal do Gemini CLI. Escolha “Sign in with Google” e depois volte ao Gestor UFU.',
     AgentProvider.copilot =>
       'Um terminal foi aberto com "copilot login". Autorize com sua conta '
           'GitHub (Copilot Pro) no navegador e feche o terminal ao terminar.',

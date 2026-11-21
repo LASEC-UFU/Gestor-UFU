@@ -17,6 +17,8 @@ class RemoteAgentService {
   final _approvals = <String, _RemoteApproval>{};
   bool _busy = false;
   bool _cancelRequested = false;
+  bool _stateLoaded = false;
+  AgentProvider? _remoteProvider;
   String? _lastError;
   final _history = <Map<String, Object?>>[];
   Map<String, dynamic> _savedBackendState = const {};
@@ -30,6 +32,40 @@ class RemoteAgentService {
   );
   Future<void> Function(Map<String, Object?> event)? onEvent;
   bool get busy => _busy;
+  Future<Map<String, Object?>> configuration() async {
+    if (!_stateLoaded) await _loadState();
+    final settings = await AgentSettings.load();
+    return {
+      'provider': (_remoteProvider ?? settings.provider).name,
+      'providers': [
+        for (final provider in AgentProvider.values)
+          {
+            'id': provider.name,
+            'label': provider.label,
+            'mode': settings.modeFor(provider).name,
+          },
+      ],
+    };
+  }
+
+  Future<void> selectProvider(String id) async {
+    if (_busy)
+      throw AgentException('Aguarde a tarefa atual antes de trocar de agente.');
+    final provider = AgentProvider.values.where((item) => item.name == id);
+    if (provider.isEmpty) throw AgentException('Agente desconhecido: $id.');
+    if (!_stateLoaded) await _loadState();
+    if ((_remoteProvider ?? (await AgentSettings.load()).provider) ==
+        provider.first)
+      return;
+    await _backend?.dispose();
+    await _mcp?.stop();
+    _backend = null;
+    _mcp = null;
+    _savedBackendState = const {};
+    _remoteProvider = provider.first;
+    await _persistState();
+  }
+
   String? get lastError => _lastError;
   Future<String> Function(String commandId, Map<String, dynamic> input)?
   executeCommand;
@@ -56,9 +92,9 @@ class RemoteAgentService {
 
   Future<void> _connect() async {
     if (_backend != null) return;
-    if (_history.isEmpty && _savedBackendState.isEmpty) await _loadState();
+    if (!_stateLoaded) await _loadState();
     final settings = await AgentSettings.load();
-    final provider = settings.provider;
+    final provider = _remoteProvider ?? settings.provider;
     final mode = settings.modeFor(provider);
     final model = settings.modelFor(provider, mode);
     AgentBackend backend;
@@ -246,6 +282,11 @@ class RemoteAgentService {
       _savedBackendState = Map<String, dynamic>.from(
         data['backend'] as Map? ?? const {},
       );
+      final providerId = data['provider'] as String?;
+      _remoteProvider = null;
+      for (final provider in AgentProvider.values) {
+        if (provider.name == providerId) _remoteProvider = provider;
+      }
       _history
         ..clear()
         ..addAll(
@@ -256,6 +297,8 @@ class RemoteAgentService {
     } catch (_) {
       _history.clear();
       _savedBackendState = const {};
+    } finally {
+      _stateLoaded = true;
     }
   }
 
@@ -266,6 +309,7 @@ class RemoteAgentService {
       await temporary.writeAsString(
         jsonEncode({
           'history': _history,
+          if (_remoteProvider != null) 'provider': _remoteProvider!.name,
           'backend': _backend?.saveState() ?? _savedBackendState,
         }),
         flush: true,

@@ -261,6 +261,35 @@ class RemoteApi {
     }
   }
 
+  Future<Map<String, dynamic>> agentConfiguration() async {
+    final response = await _request(
+      'GET',
+      '/api/v1/agent/config',
+      headers: _headers,
+      timeout: const Duration(seconds: 10),
+    );
+    if (response.statusCode != 200) {
+      final data = jsonDecode(response.body) as Map;
+      throw HttpException('${data['error'] ?? response.statusCode}');
+    }
+    return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  }
+
+  Future<Map<String, dynamic>> selectAgentProvider(String provider) async {
+    final response = await _request(
+      'PUT',
+      '/api/v1/agent/provider',
+      headers: _headers,
+      body: jsonEncode({'provider': provider}),
+      timeout: const Duration(seconds: 15),
+    );
+    final data = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    if (response.statusCode != 200) {
+      throw HttpException('${data['error'] ?? response.statusCode}');
+    }
+    return data;
+  }
+
   Future<void> cancelAgentMessage() async {
     final response = await _request(
       'POST',
@@ -335,6 +364,19 @@ class RemoteApi {
       headers: {'Authorization': 'Bearer $token'},
       customClient: client,
     ).timeout(const Duration(seconds: 10));
+  }
+
+  Future<WebSocket> openPowerShell() {
+    final client = HttpClient(
+      context: SecurityContext(withTrustedRoots: false),
+    );
+    client.badCertificateCallback = (certificate, _, _) =>
+        _matchesPin(certificate);
+    return WebSocket.connect(
+      _uri('/api/v1/powershell').replace(scheme: 'wss').toString(),
+      headers: {'Authorization': 'Bearer $token'},
+      customClient: client,
+    ).timeout(const Duration(seconds: 15));
   }
 
   static Future<void> save({

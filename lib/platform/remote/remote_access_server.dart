@@ -9,10 +9,12 @@ import 'package:path/path.dart' as p;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:gestor_ufu/data/services/ai_agent/agent_backends.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_data_host.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/platform/remote/remote_agent_service.dart';
+import 'package:gestor_ufu/platform/remote/remote_powershell_session.dart';
 
 /// API autenticada do Gestor UFU para o cliente Android.
 /// TLS é obrigatório: o servidor não inicia sem um certificado configurado.
@@ -62,6 +64,7 @@ class RemoteAccessServer {
   Future<void> _artifactWrite = Future<void>.value();
   final FlutterSecureStorage _vault = const FlutterSecureStorage();
   final RemoteAgentService agent = RemoteAgentService();
+  final RemotePowerShellSession _powershell = RemotePowerShellSession();
   int get port => _server?.port ?? 0;
   bool get running => _server != null;
 
@@ -127,6 +130,7 @@ class RemoteAccessServer {
     }
     _sockets.clear();
     await server?.close(force: true);
+    await _powershell.close();
     agent.onEvent = null;
     agent.executeCommand = null;
     await agent.dispose();
@@ -184,6 +188,7 @@ class RemoteAccessServer {
 
   Future<String> rotateToken() async {
     await _vault.delete(key: tokenKey);
+    await _powershell.close();
     final replacement = await token;
     for (final socket in _sockets.toList()) {
       try {
@@ -295,6 +300,37 @@ class RemoteAccessServer {
         }
         await _json(request.response, HttpStatus.accepted, {'accepted': true});
         unawaited(_runAgentMessage(message));
+        return;
+      }
+      if (request.method == 'GET' && path == '/api/v1/agent/config') {
+        await _json(
+          request.response,
+          HttpStatus.ok,
+          await agent.configuration(),
+        );
+        return;
+      }
+      if (request.method == 'PUT' && path == '/api/v1/agent/provider') {
+        final body = await _readJson(request);
+        final provider = body['provider'];
+        if (provider is! String || provider.trim().isEmpty) {
+          await _json(request.response, HttpStatus.badRequest, {
+            'error': 'Informe o agente que deseja usar.',
+          });
+          return;
+        }
+        try {
+          await agent.selectProvider(provider);
+          await _json(
+            request.response,
+            HttpStatus.ok,
+            await agent.configuration(),
+          );
+        } on AgentException catch (error) {
+          await _json(request.response, HttpStatus.conflict, {
+            'error': '$error',
+          });
+        }
         return;
       }
       if (request.method == 'POST' && path == '/api/v1/agent/cancel') {
@@ -426,6 +462,23 @@ class RemoteAccessServer {
           onDone: () => _sockets.remove(socket),
           onError: (_) => _sockets.remove(socket),
         );
+        return;
+      }
+      if (request.method == 'GET' && path == '/api/v1/powershell') {
+        if (!WebSocketTransformer.isUpgradeRequest(request)) {
+          await _json(request.response, HttpStatus.badRequest, {
+            'error': 'WebSocket obrigatório.',
+          });
+          return;
+        }
+        final socket = await WebSocketTransformer.upgrade(request);
+        final source =
+            request.connectionInfo?.remoteAddress.address ?? 'desconhecido';
+        try {
+          await _powershell.attach(socket, source);
+        } catch (error) {
+          await socket.close(WebSocketStatus.internalServerError, '$error');
+        }
         return;
       }
       await _json(request.response, HttpStatus.notFound, {

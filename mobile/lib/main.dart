@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:xterm2/xterm.dart';
 
 import 'remote_api.dart';
 
@@ -157,6 +158,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   final _input = TextEditingController();
   final _messages = <_ChatMessage>[];
   List<Map<String, dynamic>> _modules = [];
+  List<Map<String, dynamic>> _agentProviders = [];
+  String? _agentProvider;
   List<Map<String, dynamic>> _approvals = [];
   final _activeTasks = <String, Map<String, dynamic>>{};
   final _taskHistory = <Map<String, dynamic>>[];
@@ -191,12 +194,31 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   String? _moduleWorkspaceError;
   Map<String, dynamic>? _moduleWorkspaceData;
   bool _moduleActionsTab = false;
+  final _remoteTerminal = Terminal(maxLines: 20000);
+  final _remoteTerminalController = TerminalController();
+  WebSocket? _terminalSocket;
+  bool _terminalConnecting = false;
+  String? _terminalError;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_restore());
+    _remoteTerminal.onOutput = (data) {
+      final socket = _terminalSocket;
+      if (socket != null && socket.readyState == WebSocket.open) {
+        socket.add(jsonEncode({'type': 'input', 'data': data}));
+      }
+    };
+    _remoteTerminal.onResize = (columns, rows, _, __) {
+      final socket = _terminalSocket;
+      if (socket != null && socket.readyState == WebSocket.open) {
+        socket.add(
+          jsonEncode({'type': 'resize', 'columns': columns, 'rows': rows}),
+        );
+      }
+    };
   }
 
   @override
@@ -383,6 +405,12 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     try {
       await api.check();
       _modules = await api.modules();
+      final agentConfig = await api.agentConfiguration();
+      _agentProviders = (agentConfig['providers'] as List? ?? const [])
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      _agentProvider = agentConfig['provider'] as String?;
       _loadTasks(await api.tasks());
       final history = await api.history();
       _messages
@@ -404,6 +432,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           _connected = true;
           _connecting = false;
         });
+      if (_selectedTab == 4) unawaited(_openRemotePowerShell());
       if (_selectedModuleId == 'moodle') unawaited(_loadMoodleHome());
       if (_selectedModuleId == 'agenda-email') unawaited(_loadAgendaHome());
       final selectedModule = _selectedModuleId;
@@ -414,6 +443,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       final staleSocket = _socket;
       _socket = null;
       await staleSocket?.close();
+      await _detachRemotePowerShell();
       if (mounted)
         setState(() {
           _connected = false;
@@ -640,6 +670,33 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           _error = _friendlyError(e);
         });
     }
+  }
+
+  Future<void> _selectRemoteProvider(String? provider) async {
+    if (provider == null || provider == _agentProvider || _api == null) return;
+    try {
+      final config = await _api!.selectAgentProvider(provider);
+      if (!mounted) return;
+      setState(() => _agentProvider = config['provider'] as String?);
+      final selected = _agentProviders.where((item) => item['id'] == provider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Agente ${selected.isEmpty ? provider : selected.first['label']} selecionado no computador.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) setState(() => _error = _friendlyError(error));
+    }
+  }
+
+  void _openPowerShellFromAgent() {
+    setState(() {
+      _selectedTab = 4;
+      _selectedModuleId = null;
+    });
+    unawaited(_openRemotePowerShell());
   }
 
   Future<void> _cancelAgentMessage() async {
@@ -1161,6 +1218,8 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     _speech.stop();
     _input.dispose();
     _emailSearch.dispose();
+    _remoteTerminalController.dispose();
+    unawaited(_terminalSocket?.close());
     super.dispose();
   }
 
@@ -1171,6 +1230,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       0 => 'Início',
       1 => 'Módulos',
       2 => 'Tarefas',
+      4 => 'PowerShell',
       _ => 'Agente',
     };
   }
@@ -3554,9 +3614,184 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     ],
   );
 
+  Future<void> _openRemotePowerShell() async {
+    if (_terminalConnecting || _terminalSocket?.readyState == WebSocket.open) {
+      return;
+    }
+    final api = _api;
+    if (api == null || !_connected) {
+      setState(
+        () => _terminalError = 'Conecte ao computador Windows primeiro.',
+      );
+      return;
+    }
+    setState(() {
+      _terminalConnecting = true;
+      _terminalError = null;
+    });
+    try {
+      final socket = await api.openPowerShell();
+      if (!mounted) {
+        await socket.close();
+        return;
+      }
+      _terminalSocket = socket;
+      socket.listen(
+        (raw) {
+          try {
+            final message = Map<String, dynamic>.from(
+              jsonDecode('$raw') as Map,
+            );
+            switch (message['type']) {
+              case 'output':
+                _remoteTerminal.write('${message['data'] ?? ''}');
+              case 'error':
+                if (mounted)
+                  setState(() => _terminalError = '${message['message']}');
+              case 'closed':
+                if (mounted) {
+                  setState(() {
+                    _terminalSocket = null;
+                    _terminalError =
+                        'PowerShell encerrou: ${message['status'] ?? ''}';
+                  });
+                }
+            }
+          } catch (_) {}
+        },
+        onDone: () {
+          if (mounted && identical(_terminalSocket, socket)) {
+            setState(() {
+              _terminalSocket = null;
+              _terminalError ??= 'Conexão do PowerShell interrompida.';
+            });
+          }
+        },
+        onError: (Object error) {
+          if (mounted) setState(() => _terminalError = 'PowerShell: $error');
+        },
+      );
+    } catch (error) {
+      if (mounted) setState(() => _terminalError = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _terminalConnecting = false);
+    }
+  }
+
+  Future<void> _detachRemotePowerShell() async {
+    final socket = _terminalSocket;
+    _terminalSocket = null;
+    await socket?.close();
+  }
+
+  Widget _buildRemotePowerShell() => Column(
+    children: [
+      Material(
+        color: Theme.of(context).colorScheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: [
+              const Icon(Icons.terminal_rounded),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('PowerShell do computador Windows')),
+              Icon(
+                _terminalSocket?.readyState == WebSocket.open
+                    ? Icons.circle
+                    : Icons.circle_outlined,
+                size: 12,
+                color: _terminalSocket?.readyState == WebSocket.open
+                    ? Colors.green
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              IconButton(
+                tooltip: _terminalSocket?.readyState == WebSocket.open
+                    ? 'Desconectar terminal'
+                    : 'Conectar ao PowerShell',
+                onPressed: _terminalConnecting
+                    ? null
+                    : _terminalSocket?.readyState == WebSocket.open
+                    ? _detachRemotePowerShell
+                    : _openRemotePowerShell,
+                icon: Icon(
+                  _terminalSocket?.readyState == WebSocket.open
+                      ? Icons.link_off_rounded
+                      : Icons.link_rounded,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      if (_terminalError != null)
+        Material(
+          color: Theme.of(context).colorScheme.errorContainer,
+          child: ListTile(
+            dense: true,
+            title: Text(_terminalError!),
+            trailing: IconButton(
+              onPressed: () => setState(() => _terminalError = null),
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ),
+        ),
+      Expanded(
+        child: TerminalView(
+          _remoteTerminal,
+          controller: _remoteTerminalController,
+          theme: TerminalThemes.whiteOnBlack,
+          autofocus: true,
+          keyboardType: TextInputType.multiline,
+        ),
+      ),
+      if (_terminalConnecting) const LinearProgressIndicator(minHeight: 2),
+    ],
+  );
+
   Widget _buildAgent() => ListView(
     padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
     children: [
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'AGENTE NO COMPUTADOR',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                initialValue: _agentProvider,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Escolha o agente',
+                  prefixIcon: Icon(Icons.auto_awesome_rounded),
+                ),
+                items: [
+                  for (final provider in _agentProviders)
+                    DropdownMenuItem<String>(
+                      value: '${provider['id']}',
+                      child: Text('${provider['label']}'),
+                    ),
+                ],
+                onChanged: _connected && !_sending
+                    ? _selectRemoteProvider
+                    : null,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _openPowerShellFromAgent,
+                  icon: const Icon(Icons.terminal_rounded, size: 18),
+                  label: const Text('Abrir PowerShell remoto'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       if (_messages.isEmpty)
         Padding(
           padding: EdgeInsets.only(top: 12, bottom: 18),
@@ -3838,6 +4073,7 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               0 => _buildHome(),
               1 => _buildModules(),
               2 => _buildTasks(),
+              4 => _buildRemotePowerShell(),
               _ => _buildAgent(),
             },
           ),
@@ -3847,10 +4083,17 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     ),
     bottomNavigationBar: NavigationBar(
       selectedIndex: _selectedTab,
-      onDestinationSelected: (index) => setState(() {
-        _selectedTab = index;
-        _selectedModuleId = null;
-      }),
+      onDestinationSelected: (index) {
+        setState(() {
+          _selectedTab = index;
+          _selectedModuleId = null;
+        });
+        if (index == 4) {
+          unawaited(_openRemotePowerShell());
+        } else {
+          unawaited(_detachRemotePowerShell());
+        }
+      },
       destinations: [
         const NavigationDestination(
           icon: Icon(Icons.home_outlined),
@@ -3879,6 +4122,11 @@ class _RemoteHomePageState extends State<RemoteHomePage>
           icon: Icon(Icons.auto_awesome_outlined),
           selectedIcon: Icon(Icons.auto_awesome_rounded),
           label: 'Agente',
+        ),
+        const NavigationDestination(
+          icon: Icon(Icons.terminal_outlined),
+          selectedIcon: Icon(Icons.terminal_rounded),
+          label: 'PowerShell',
         ),
       ],
     ),
