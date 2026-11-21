@@ -691,14 +691,6 @@ class _RemoteHomePageState extends State<RemoteHomePage>
     }
   }
 
-  void _openPowerShellFromAgent() {
-    setState(() {
-      _selectedTab = 4;
-      _selectedModuleId = null;
-    });
-    unawaited(_openRemotePowerShell());
-  }
-
   Future<void> _cancelAgentMessage() async {
     if (!_sending || _api == null) return;
     try {
@@ -1234,6 +1226,21 @@ class _RemoteHomePageState extends State<RemoteHomePage>
       _ => 'Agente',
     };
   }
+
+  String? get _agentProviderLabel {
+    for (final provider in _agentProviders) {
+      if (provider['id'] == _agentProvider) return '${provider['label']}';
+    }
+    return null;
+  }
+
+  String get _agentProviderShortLabel => switch (_agentProvider) {
+    'claude' => 'Claude',
+    'chatgpt' => 'ChatGPT',
+    'gemini' => 'Gemini',
+    'copilot' => 'Copilot',
+    _ => _agentProviderLabel ?? 'Selecionar',
+  };
 
   Color _moduleAccent(Map<String, dynamic> module) {
     final value = module['accentColor'];
@@ -3751,47 +3758,6 @@ class _RemoteHomePageState extends State<RemoteHomePage>
   Widget _buildAgent() => ListView(
     padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
     children: [
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'AGENTE NO COMPUTADOR',
-                style: Theme.of(context).textTheme.labelSmall,
-              ),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                initialValue: _agentProvider,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Escolha o agente',
-                  prefixIcon: Icon(Icons.auto_awesome_rounded),
-                ),
-                items: [
-                  for (final provider in _agentProviders)
-                    DropdownMenuItem<String>(
-                      value: '${provider['id']}',
-                      child: Text('${provider['label']}'),
-                    ),
-                ],
-                onChanged: _connected && !_sending
-                    ? _selectRemoteProvider
-                    : null,
-              ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _openPowerShellFromAgent,
-                  icon: const Icon(Icons.terminal_rounded, size: 18),
-                  label: const Text('Abrir PowerShell remoto'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
       if (_messages.isEmpty)
         Padding(
           padding: EdgeInsets.only(top: 12, bottom: 18),
@@ -3885,61 +3851,51 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide.none,
               ),
-              suffixIcon: IconButton(
+            ),
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _listening
+                      ? 'Ouvindo…'
+                      : _sending
+                      ? 'Agente trabalhando no computador…'
+                      : (_agentProviderLabel ?? 'Agente no computador'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _listening
+                        ? const Color(0xffff5252)
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              IconButton.filledTonal(
+                visualDensity: VisualDensity.compact,
+                onPressed: _connected && !_sending ? _toggleMic : null,
+                tooltip: _listening
+                    ? 'Parar e enviar transcrição'
+                    : 'Falar com o Agente',
+                icon: Icon(_listening ? Icons.stop_rounded : Icons.mic_rounded),
+              ),
+              const SizedBox(width: 6),
+              IconButton.filled(
+                visualDensity: VisualDensity.compact,
                 onPressed: _sending ? _cancelAgentMessage : () => _send(),
                 tooltip: _sending ? 'Interromper o agente' : 'Enviar',
                 icon: Icon(
-                  _sending ? Icons.stop_circle_outlined : Icons.send_rounded,
+                  _sending ? Icons.stop_rounded : Icons.arrow_upward_rounded,
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 7),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_listening)
-                const Padding(
-                  padding: EdgeInsets.only(right: 12),
-                  child: Text(
-                    'Ouvindo…',
-                    style: TextStyle(
-                      color: Color(0xffff5252),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              SizedBox(
-                width: 62,
-                height: 62,
-                child: FloatingActionButton(
-                  onPressed: _connected && !_sending ? _toggleMic : null,
-                  backgroundColor: _listening ? const Color(0xffff5252) : null,
-                  tooltip: _listening
-                      ? 'Parar e enviar transcrição'
-                      : 'Falar com o Agente',
-                  child: Icon(
-                    _listening ? Icons.stop_rounded : Icons.mic_rounded,
-                    size: 29,
-                  ),
-                ),
-              ),
-              if (_sending)
-                const Padding(
-                  padding: EdgeInsets.only(left: 12),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
             ],
           ),
         ],
       ),
     ),
   );
-
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -3964,24 +3920,72 @@ class _RemoteHomePageState extends State<RemoteHomePage>
               onPressed: () => setState(() => _selectedModuleId = null),
               icon: const Icon(Icons.arrow_back_rounded),
             ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _pageTitle,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
-          ),
-          if (_selectedModuleId == null)
-            const Text(
-              'CENTRAL DE UTILIDADES',
-              style: TextStyle(
-                fontSize: 9,
-                letterSpacing: 1.2,
-                color: Color(0xff9ea2c4),
-              ),
+      title: _selectedTab == 3
+          ? Row(
+              children: [
+                const Text(
+                  'Agente',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 3),
+                Flexible(
+                  child: PopupMenuButton<String>(
+                    enabled: _connected && !_sending,
+                    tooltip: 'Escolher agente no computador',
+                    onSelected: _selectRemoteProvider,
+                    itemBuilder: (context) => [
+                      for (final provider in _agentProviders)
+                        PopupMenuItem<String>(
+                          value: '${provider['id']}',
+                          child: Text('${provider['label']}'),
+                        ),
+                    ],
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 72,
+                          child: Text(
+                            _agentProviderShortLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ),
+                        Icon(
+                          Icons.arrow_drop_down_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _pageTitle,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_selectedModuleId == null)
+                  const Text(
+                    'CENTRAL DE UTILIDADES',
+                    style: TextStyle(
+                      fontSize: 9,
+                      letterSpacing: 1.2,
+                      color: Color(0xff9ea2c4),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
       actions: [
         IconButton(
           onPressed: _chooseTheme,
@@ -4013,21 +4017,54 @@ class _RemoteHomePageState extends State<RemoteHomePage>
                 : Icons.volume_off_rounded,
           ),
         ),
-        IconButton(
-          onPressed: _connecting ? null : _connect,
-          tooltip: _connected ? 'Computador conectado' : 'Tentar conectar',
-          icon: Icon(
-            _connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
-            color: _connected
-                ? const Color(0xff00e676)
-                : const Color(0xffffab00),
+        if (_selectedTab == 3)
+          PopupMenuButton<String>(
+            tooltip: 'Conexão com o computador',
+            onSelected: (value) {
+              if (value == 'settings') {
+                _configure();
+              } else if (!_connecting) {
+                _connect();
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'retry',
+                child: Text(
+                  _connected
+                      ? 'Computador conectado'
+                      : 'Conectar ao computador',
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'settings',
+                child: Text('Configuração da conexão'),
+              ),
+            ],
+            icon: Icon(
+              _connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+              color: _connected
+                  ? const Color(0xff00e676)
+                  : const Color(0xffffab00),
+            ),
+          )
+        else ...[
+          IconButton(
+            onPressed: _connecting ? null : _connect,
+            tooltip: _connected ? 'Computador conectado' : 'Tentar conectar',
+            icon: Icon(
+              _connected ? Icons.cloud_done_rounded : Icons.cloud_off_rounded,
+              color: _connected
+                  ? const Color(0xff00e676)
+                  : const Color(0xffffab00),
+            ),
           ),
-        ),
-        IconButton(
-          onPressed: _configure,
-          tooltip: 'Conexão',
-          icon: const Icon(Icons.settings_rounded),
-        ),
+          IconButton(
+            onPressed: _configure,
+            tooltip: 'Conexão',
+            icon: const Icon(Icons.settings_rounded),
+          ),
+        ],
         const SizedBox(width: 4),
       ],
     ),
