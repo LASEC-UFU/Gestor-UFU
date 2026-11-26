@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/checklist_sei.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/extrair_arvore_view.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/parecer_editor.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/simulado_arguicao_dialog.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 
 const _laranja = Color(0xFFFFB454);
@@ -118,7 +120,9 @@ class _RelatorioViewState extends State<RelatorioView> {
                 CheckboxListTile(
                   value: porPastas,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Separar por pastas (Pasta I, II… a cada 20)'),
+                  title: const Text(
+                    'Separar por pastas (Pasta I, II… a cada 20)',
+                  ),
                   onChanged: (v) => setLocal(() => porPastas = v ?? false),
                 ),
               ],
@@ -202,7 +206,8 @@ class _RelatorioViewState extends State<RelatorioView> {
 }
 
 /// Barra comum às abas do parecer: título da seção, dados do parecer
-/// (assunto, ementa, vocativo…) e "Inserir no SEI".
+/// (assunto, ementa, vocativo…) e o simulado de arguição. "Inserir no SEI"
+/// fica no cabeçalho do módulo ([InserirSeiBotao]).
 class ParecerBarra extends StatelessWidget {
   const ParecerBarra({
     required this.service,
@@ -215,35 +220,147 @@ class ParecerBarra extends StatelessWidget {
   final String titulo;
   final Widget? extra;
 
+  /// O tema do app estica os botões contornados na largura toda; aqui eles
+  /// ficam do tamanho do texto, na mesma linha do título da seção.
+  static final _compacto = OutlinedButton.styleFrom(
+    minimumSize: const Size(0, 40),
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+  );
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: service,
+    builder: (context, _) {
+      final perguntas = service.perguntasArguicao().length;
+      return Wrap(
+        spacing: 12,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            titulo,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          ?extra,
+          const SizedBox(width: 4),
+          OutlinedButton.icon(
+            style: _compacto,
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (_) => DadosParecerDialog(service: service),
+            ),
+            icon: const Icon(Icons.badge_outlined, size: 18),
+            label: Text(
+              service.parecer.assunto.trim().isEmpty
+                  ? 'Dados do parecer'
+                  : 'Dados do parecer ✓',
+            ),
+          ),
+          OutlinedButton.icon(
+            style: _compacto,
+            onPressed: () => mostrarSimuladoArguicao(context, service),
+            icon: const Icon(Icons.record_voice_over_outlined, size: 18),
+            label: Text(
+              perguntas == 0
+                  ? 'Simulado de arguição'
+                  : 'Simulado de arguição ($perguntas)',
+            ),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+/// "Inserir no SEI" (cabeçalho do módulo): mostra a verificação do parecer
+/// (comentários pendentes, artigos citados fora da base, campos vazios) e
+/// pede confirmação antes de inserir.
+class InserirSeiBotao extends StatelessWidget {
+  const InserirSeiBotao({required this.service, super.key});
+
+  final ParecerService service;
+
   Future<void> _inserir(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-    final p = service.parecer;
+    final checklist = await showDialog<ChecklistSei>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => FutureBuilder<ChecklistSei>(
+        future: service.checklistSei(),
+        builder: (ctx, snap) {
+          if (snap.connectionState == ConnectionState.done) {
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => Navigator.pop(ctx, snap.data ?? const ChecklistSei([])),
+            );
+          }
+          return const AlertDialog(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 14),
+                Text('Verificando o parecer…'),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    if (checklist == null || !context.mounted) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Inserir o parecer no SEI?'),
         content: SizedBox(
-          width: 520,
-          child: Text(
-            'No Edge aberto pelo app (aba I. RELATÓRIO › Extrair árvore):\n\n'
-            '• se houver um editor de Parecer aberto, ele será preenchido;\n'
-            '• senão, será gerado um documento "Parecer" (público) no '
-            'processo aberto.\n\n'
-            'Assunto, ementa, vocativo, abertura, as três seções, o fecho e o '
-            'signatário vão para os seus campos no modelo do SEI. O documento '
-            'é salvo sem assinatura.'
-            '${p.assunto.trim().isEmpty ? '\n\nAtenção: o assunto está vazio (Dados do parecer).' : ''}',
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (checklist.itens.isNotEmpty) ...[
+                  const Text(
+                    'Verificação',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  for (final item in checklist.itens) _item(item),
+                  const Divider(height: 24),
+                ],
+                const Text(
+                  'No Edge aberto pelo app (aba I. RELATÓRIO › Extrair '
+                  'árvore):\n\n'
+                  '• se houver um editor de Parecer aberto, ele será '
+                  'preenchido;\n'
+                  '• senão, será gerado um documento "Parecer" (público) no '
+                  'processo aberto.\n\n'
+                  'Assunto, ementa, vocativo, abertura, as três seções, o '
+                  'fecho e o signatário vão para os seus campos no modelo do '
+                  'SEI. O documento é salvo sem assinatura. Os comentários não '
+                  'vão para o SEI.',
+                ),
+              ],
+            ),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+            child: Text(checklist.temAvisos ? 'Voltar e revisar' : 'Cancelar'),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.upload_file_rounded),
-            label: const Text('Inserir no SEI'),
+            label: Text(
+              checklist.temAvisos ? 'Inserir mesmo assim' : 'Inserir no SEI',
+            ),
           ),
         ],
       ),
@@ -272,52 +389,54 @@ class ParecerBarra extends StatelessWidget {
     }
   }
 
+  static Widget _item(ItemChecklist item) {
+    final aviso = item.gravidade == GravidadeItem.aviso;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            aviso ? Icons.warning_amber_rounded : Icons.info_outline,
+            size: 18,
+            color: aviso ? AppTheme.warning : AppTheme.textSecondary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.titulo,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                for (final d in item.detalhes)
+                  Text('• $d', style: const TextStyle(fontSize: 12.5)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: service,
-    builder: (context, _) => Wrap(
-      spacing: 12,
-      runSpacing: 10,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        Text(
-          titulo,
-          style: TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        ?extra,
-        const SizedBox(width: 4),
-        OutlinedButton.icon(
-          onPressed: () => showDialog<void>(
-            context: context,
-            builder: (_) => DadosParecerDialog(service: service),
-          ),
-          icon: const Icon(Icons.badge_outlined, size: 18),
-          label: Text(
-            service.parecer.assunto.trim().isEmpty
-                ? 'Dados do parecer'
-                : 'Dados do parecer ✓',
-          ),
-        ),
-        FilledButton.icon(
-          onPressed: service.inserindo ? null : () => _inserir(context),
-          icon: service.inserindo
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.upload_file_rounded, size: 18),
-          label: Text(service.inserindo ? 'Inserindo…' : 'Inserir no SEI'),
-          style: FilledButton.styleFrom(
-            backgroundColor: _laranja,
-            foregroundColor: const Color(0xFF241606),
-          ),
-        ),
-      ],
+    builder: (context, _) => FilledButton.icon(
+      onPressed: service.inserindo ? null : () => _inserir(context),
+      icon: service.inserindo
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.upload_file_rounded, size: 18),
+      label: Text(service.inserindo ? 'Inserindo…' : 'Inserir no SEI'),
+      style: FilledButton.styleFrom(
+        backgroundColor: _laranja,
+        foregroundColor: const Color(0xFF241606),
+      ),
     ),
   );
 }

@@ -157,6 +157,12 @@ class OrqSettings {
 
   static String get machine => Platform.localHostname;
 
+  static String get _localProjectPathFile {
+    final base =
+        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
+    return p.join(base, 'GestorUFU', 'orquestrador', 'project-path.txt');
+  }
+
   /// Pasta do projeto neste computador.
   String get projectPath => projectPaths[machine] ?? '';
   set projectPath(String value) => projectPaths[machine] = value.trim();
@@ -167,9 +173,19 @@ class OrqSettings {
 
   static Future<OrqSettings> load([KeyValueStore? store]) async {
     final kv = store ?? KeyValueStore();
+    await kv.reload();
     final settings = await _load(kv);
-    final own = await kv.readString(projectKey(machine));
-    if (own != null) settings.projectPaths[machine] = own;
+    final file = File(_localProjectPathFile);
+    if (await file.exists()) {
+      settings.projectPaths[machine] = (await file.readAsString()).trim();
+    } else {
+      // Migra o caminho local salvo pelas versões anteriores.
+      final own = await kv.readString(projectKey(machine));
+      if (own != null) {
+        settings.projectPaths[machine] = own.trim();
+        await _writeLocalProjectPath(own);
+      }
+    }
     return settings;
   }
 
@@ -219,13 +235,20 @@ class OrqSettings {
 
   Future<void> save([KeyValueStore? store]) async {
     final kv = store ?? KeyValueStore();
-    await kv.writeString(projectKey(machine), projectPath);
+    await _writeLocalProjectPath(projectPath);
+    await kv.reload();
     final shared = await _load(kv);
     // Só lê o mapa antigo; a pasta deste computador fica na própria chave.
     projectPaths
       ..clear()
       ..addAll({...shared.projectPaths, machine: projectPath});
     await _saveShared(kv, shared.projectPaths);
+  }
+
+  static Future<void> _writeLocalProjectPath(String value) async {
+    final file = File(_localProjectPathFile);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(value.trim(), flush: true);
   }
 
   Future<void> _saveShared(KeyValueStore kv, Map<String, String> legacy) =>

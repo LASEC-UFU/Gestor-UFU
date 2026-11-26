@@ -30,6 +30,82 @@ class ProgressaoComprovantesService {
     return caminho != null && File(caminho).existsSync();
   }
 
+  String? caminhoTitulacao(ProgressaoDocente processo) {
+    final relativo = processo.comprovanteTitulacao.trim();
+    if (relativo.isEmpty || processo.pastaComprovantes.isEmpty) return null;
+    return p.normalize(p.join(processo.pastaComprovantes, relativo));
+  }
+
+  /// Pasta das consultas de avaliação didática (uma por semestre):
+  /// `Avaliacao_Didatica/Avaliacao_Didatica_AAAA-S.pdf`.
+  static const pastaAvaliacaoDidatica = 'Avaliacao_Didatica';
+
+  /// Semestre ("2024/2") no início de uma linha de avaliação didática.
+  static String? semestreAvaliacao(String linha) {
+    final m = RegExp(r'^\s*(\d{4})\s*[/\-.]\s*(\d)\b').firstMatch(linha);
+    return m == null ? null : '${m[1]}/${m[2]}';
+  }
+
+  /// Nome (sem extensão) do comprovante da avaliação didática da [linha],
+  /// se o arquivo existir na pasta do processo. Ex.: Avaliacao_Didatica_2024-2.
+  String? rotuloAvaliacaoDidatica(ProgressaoDocente processo, String linha) {
+    final caminho = caminhoAvaliacaoDidatica(processo, linha);
+    return caminho == null ? null : p.basenameWithoutExtension(caminho);
+  }
+
+  String? caminhoAvaliacaoDidatica(ProgressaoDocente processo, String linha) {
+    final semestre = semestreAvaliacao(linha);
+    if (semestre == null || processo.pastaComprovantes.isEmpty) return null;
+    final base = 'Avaliacao_Didatica_${semestre.replaceAll('/', '-')}';
+    final pasta = p.join(processo.pastaComprovantes, pastaAvaliacaoDidatica);
+    for (final ext in extensoesComprovante) {
+      final caminho = p.join(pasta, '$base.$ext');
+      if (File(caminho).existsSync()) return p.normalize(caminho);
+    }
+    return null;
+  }
+
+  /// Comprovantes das avaliações didáticas listadas no processo, na ordem
+  /// do relatório: (rótulo, caminho absoluto).
+  List<({String rotulo, String caminho})> avaliacoesDidaticas(
+    ProgressaoDocente processo,
+  ) {
+    final vistos = <String>{};
+    return [
+      for (final linha in processo.avaliacoesDidaticas)
+        if (caminhoAvaliacaoDidatica(processo, linha) case final caminho?)
+          if (vistos.add(caminho))
+            (rotulo: p.basenameWithoutExtension(caminho), caminho: caminho),
+    ];
+  }
+
+  bool titulacaoExiste(ProgressaoDocente processo) {
+    final caminho = caminhoTitulacao(processo);
+    return caminho != null && File(caminho).existsSync();
+  }
+
+  /// Arquiva a prova da última titulação sem alterar o arquivo original.
+  Future<String> importarTitulacao({
+    required ProgressaoDocente processo,
+    required String origem,
+  }) async {
+    if (processo.pastaComprovantes.isEmpty) {
+      throw StateError('Escolha a pasta dos comprovantes primeiro.');
+    }
+    final arquivo = File(origem);
+    if (!await arquivo.exists()) throw StateError('Arquivo não encontrado.');
+    final ext = p.extension(origem).toLowerCase();
+    if (!extensoesComprovante.any((aceita) => '.$aceita' == ext)) {
+      throw StateError('Use um arquivo PDF, JPG ou PNG.');
+    }
+    final pasta = p.join(processo.pastaComprovantes, 'Titulacao');
+    await Directory(pasta).create(recursive: true);
+    final nome = 'Comprovante_${processo.titulacao.name}$ext';
+    final destino = p.join(pasta, nome);
+    if (!p.equals(origem, destino)) await arquivo.copy(destino);
+    return p.join('Titulacao', nome);
+  }
+
   /// Copia [origem] para a pasta do processo e retorna o lançamento com o novo
   /// caminho relativo. Um comprovante anterior é movido para os descartados.
   Future<LancamentoProgressao> importar({
@@ -160,6 +236,15 @@ class ProgressaoComprovantesService {
       await Directory(p.dirname(destino)).create(recursive: true);
       await File(origem).copy(destino);
       copiados++;
+    }
+    final origemTitulacao = caminhoTitulacao(processo);
+    if (origemTitulacao != null && await File(origemTitulacao).exists()) {
+      final destino = p.join(novaPasta, processo.comprovanteTitulacao);
+      if (!p.equals(origemTitulacao, destino)) {
+        await Directory(p.dirname(destino)).create(recursive: true);
+        await File(origemTitulacao).copy(destino);
+        copiados++;
+      }
     }
     return copiados;
   }

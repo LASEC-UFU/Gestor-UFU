@@ -178,10 +178,12 @@ class SeiPlanoHtmlMerger {
         insertion,
         _scheduleLabel('Cronograma das atividades curriculares:', top: true),
       );
-      if (theoretical.isNotEmpty)
+      if (theoretical.isNotEmpty) {
         _insertBefore(insertion, _schedule('Dimensão Teórica', theoretical));
-      if (practical.isNotEmpty)
+      }
+      if (practical.isNotEmpty) {
         _insertBefore(insertion, _schedule('Dimensão Prática', practical));
+      }
       substitutions++;
     }
     if (substitutions < 8) {
@@ -392,10 +394,11 @@ class SeiPlanoHtmlMerger {
     final paragraph = Element.tag('p')
       ..attributes['style'] =
           'font-family:Arial,sans-serif;font-size:10.5pt;line-height:1.2;margin:3px 0 6px;text-align:justify;overflow-wrap:anywhere;';
-    if (bold)
+    if (bold) {
       paragraph.append(Element.tag('strong')..text = value);
-    else
+    } else {
       paragraph.text = value;
+    }
     return paragraph;
   }
 
@@ -529,8 +532,9 @@ class SeiPlanoHtmlMerger {
     if (heading == null ||
         end == null ||
         heading.parent == null ||
-        heading.parent != end.parent)
+        heading.parent != end.parent) {
       return false;
+    }
     final siblings = heading.parent!.nodes;
     final startIndex = siblings.indexOf(heading),
         endIndex = siblings.indexOf(end);
@@ -553,8 +557,9 @@ class SeiPlanoHtmlMerger {
         }).toList()..sort((a, b) => a.text.length.compareTo(b.text.length));
     if (matches.isEmpty) return null;
     var node = matches.first;
-    if (['strong', 'b', 'td', 'th'].contains(node.localName))
+    if (['strong', 'b', 'td', 'th'].contains(node.localName)) {
       node = node.parent ?? node;
+    }
     return node;
   }
 

@@ -871,6 +871,9 @@ class _TableEditorPageState extends State<TableEditorPage> {
       buildDefaultDragHandles: false,
       proxyDecorator: (child, index, animation) =>
           Material(color: Colors.transparent, elevation: 0, child: child),
+      // onReorderItem só existe a partir do Flutter 3.42; o build de
+      // release usa o 3.41.9.
+      // ignore: deprecated_member_use
       onReorder: (oldIndex, newIndex) =>
           ctrl.reorderSections(oldIndex, newIndex),
       itemCount: config.sections.length,
@@ -1305,6 +1308,7 @@ class _TableEditorPageState extends State<TableEditorPage> {
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               buildDefaultDragHandles: false,
+                              // ignore: deprecated_member_use
                               onReorder: (oldIdx, newIdx) =>
                                   ctrl.reorderActivities(
                                     section.id,
@@ -2946,7 +2950,7 @@ class _HolidayDatesDialogState extends State<_HolidayDatesDialog>
       lastDate: DateTime(now.year + 3),
       helpText: 'Selecione a data que será trocada',
     );
-    if (picked == null || !mounted) return;
+    if (picked == null || !context.mounted) return;
 
     // Pedir o dia da semana efetivo
     final weekday = await showDialog<int>(

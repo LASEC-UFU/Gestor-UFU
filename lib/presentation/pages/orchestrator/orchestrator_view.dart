@@ -598,6 +598,15 @@ class _OrchestratorViewState extends State<OrchestratorView> {
                   style: TextStyle(fontSize: 12, color: vs.text),
                 ),
                 children: [
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () =>
+                          _run(() => _copyAgentReport(task.result)),
+                      icon: const Icon(Icons.copy_rounded, size: 15),
+                      label: const Text('Copiar relat\u00f3rio completo'),
+                    ),
+                  ),
                   AgentMessage(AgentEntry(AgentEntryKind.agent, task.result)),
                 ],
               ),
@@ -1200,6 +1209,14 @@ class _OrchestratorViewState extends State<OrchestratorView> {
       ),
     );
     if (saved == true) await _orq.saveSettings();
+  }
+
+  Future<void> _copyAgentReport(String report) async {
+    await Clipboard.setData(ClipboardData(text: report));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Relat\u00f3rio completo copiado.')),
+    );
   }
 }
 

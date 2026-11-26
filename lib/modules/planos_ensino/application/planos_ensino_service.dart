@@ -112,8 +112,9 @@ class PlanosEnsinoService {
     String text,
   ) {
     final lines = text.trim().split(RegExp(r'\r?\n'));
-    if (lines.length < 2)
+    if (lines.length < 2) {
       throw const FormatException('Cole a tabela com cabeçalhos e aulas.');
+    }
     final headers = lines.first.split('\t').map(_normalize).toList();
     final dateCol = headers.indexOf('data');
     final modalityCol = headers.indexOf('modalidade');
@@ -168,8 +169,9 @@ class PlanosEnsinoService {
         final date = embeddedDate ?? rowDate;
         if (date == null) continue;
         final activity = _cleanScheduleActivity(candidate);
-        if (activity.isEmpty || _isScheduleBlock(_normalize(activity)))
+        if (activity.isEmpty || _isScheduleBlock(_normalize(activity))) {
           continue;
+        }
         final row = {'data': date, 'atividade': activity};
         (modality == 'T' ? theory : practice).add(row);
       }
@@ -187,8 +189,9 @@ class PlanosEnsinoService {
     updated['cronograma_pratico'] = practice;
     final joined = descriptions.join('\n');
     final index = _normalize(joined).indexOf('quanto as provas');
-    if (index >= 0)
+    if (index >= 0) {
       updated['avaliacao_provas'] = joined.substring(index).trim();
+    }
     return updated;
   }
 
@@ -315,22 +318,27 @@ class PlanosEnsinoService {
     for (final field in fields.entries) {
       if (plan[field.key].toString().trim().isEmpty) missing.add(field.value);
     }
-    if ((plan['cronograma_teorico'] as List).isEmpty)
+    if ((plan['cronograma_teorico'] as List).isEmpty) {
       missing.add('Cronograma teórico');
+    }
     final practice = _normalize(ident['carga_pratica'].toString());
     final exemptPractice = RegExp(
       r'^0+(?:[,.]0+)?(?:\s*(?:h|horas?|ha|h/a|aulas?))?$',
     ).hasMatch(practice);
     if (!exemptPractice) {
-      if (plan['programa_pratico'].toString().trim().isEmpty)
+      if (plan['programa_pratico'].toString().trim().isEmpty) {
         missing.add('Programa prático');
-      if ((plan['cronograma_pratico'] as List).isEmpty)
+      }
+      if ((plan['cronograma_pratico'] as List).isEmpty) {
         missing.add('Cronograma prático');
+      }
     }
-    if ((plan['bibliografia_basica'] as List).isEmpty)
+    if ((plan['bibliografia_basica'] as List).isEmpty) {
       missing.add('Bibliografia básica');
-    if ((plan['bibliografia_complementar'] as List).isEmpty)
+    }
+    if ((plan['bibliografia_complementar'] as List).isEmpty) {
       missing.add('Bibliografia complementar');
+    }
     return missing;
   }
 
@@ -356,10 +364,11 @@ class PlanosEnsinoService {
     out.write('<h2>1. Identificação</h2><table>');
     for (final item in labels.entries) {
       final value = ident[item.key].toString().trim();
-      if (value.isNotEmpty)
+      if (value.isNotEmpty) {
         out.write(
           '<tr><th>${_escape(item.value)}</th><td>${_escape(value)}</td></tr>',
         );
+      }
     }
     void section(String title, String key) {
       final value = plan[key].toString().trim();
@@ -456,7 +465,7 @@ class PlanosEnsinoService {
     };
     for (final item in labels.entries) {
       final value = ident[item.key]?.toString() ?? '';
-      if (value.trim().isNotEmpty) line(item.value + ': ' + value);
+      if (value.trim().isNotEmpty) line('${item.value}: $value');
     }
     section('2. Ementa', 'ementa');
     section('3. Justificativa', 'justificativa');
@@ -472,7 +481,7 @@ class PlanosEnsinoService {
       if (rows.isEmpty) return;
       line(title, bold: true);
       for (final row in rows) {
-        line(row['data'].toString() + '\t' + row['atividade'].toString());
+        line('${row['data']}\t${row['atividade']}');
       }
     }
 
@@ -491,7 +500,7 @@ class PlanosEnsinoService {
       if (values.isEmpty) return;
       line(title, bold: true);
       for (var i = 0; i < values.length; i++) {
-        line((i + 1).toString() + '. ' + values[i]);
+        line('${i + 1}. ${values[i]}');
       }
     }
 
@@ -531,8 +540,9 @@ class PlanosEnsinoService {
   Map<String, dynamic> importDocx(Uint8List bytes, String id) {
     final archive = ZipDecoder().decodeBytes(bytes);
     final file = archive.findFile('word/document.xml');
-    if (file == null)
+    if (file == null) {
       throw const FormatException('O DOCX não contém word/document.xml.');
+    }
     final xml = XmlDocument.parse(utf8.decode(file.content as List<int>));
     final plan = emptyPlan(id);
     final elements = xml.descendants.whereType<XmlElement>();
@@ -637,7 +647,7 @@ class PlanosEnsinoService {
     }
     for (final line in paragraphs) {
       for (final field in fields.entries) {
-        if (_normalize(line).startsWith(_normalize(field.key + ':'))) {
+        if (_normalize(line).startsWith(_normalize('${field.key}:'))) {
           identity[field.value] = line.substring(line.indexOf(':') + 1).trim();
         }
       }

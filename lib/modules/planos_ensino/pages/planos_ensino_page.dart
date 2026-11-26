@@ -17,6 +17,7 @@ class PlanosEnsinoPage extends StatefulWidget {
     required this.service,
     required this.automation,
     this.moodle,
+    this.changes,
     super.key,
   });
 
@@ -27,6 +28,7 @@ class PlanosEnsinoPage extends StatefulWidget {
 
   /// Planejamento do Config Moodle (contrato; opcional).
   final MoodlePlanning? moodle;
+  final Listenable? changes;
   @override
   State<PlanosEnsinoPage> createState() => _PlanosEnsinoPageState();
 }
@@ -44,6 +46,7 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
   @override
   void initState() {
     super.initState();
+    widget.changes?.addListener(_onExternalDataChanged);
     _reload();
     _loadSeiAddress();
   }
@@ -63,8 +66,13 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
 
   @override
   void dispose() {
+    widget.changes?.removeListener(_onExternalDataChanged);
     _seiUrlController.dispose();
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) _reload();
   }
 
   void _log(String message) {
@@ -144,11 +152,12 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
     try {
       _log('Inserindo Plano de Ensino: ${ident['nome']} (${ident['codigo']}).');
       await _automation.insertPlan(plan, _log);
-      if (mounted)
+      if (mounted) {
         _message(
           'Plano enviado ao SEI',
           'O documento foi salvo sem assinatura. Confira o processo e faça a assinatura manual.',
         );
+      }
     } catch (error) {
       _log('Falha ao inserir o plano: $error');
       if (mounted) _message('Falha na inserção', error.toString());
@@ -158,11 +167,12 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
   Future<void> _reload() async {
     final plans = await _service.list();
     plans.sort((a, b) => _name(a).compareTo(_name(b)));
-    if (mounted)
+    if (mounted) {
       setState(() {
         _plans = plans;
         _loading = false;
       });
+    }
   }
 
   String _name(Map<String, dynamic> plan) {
@@ -203,7 +213,7 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
       builder: (dialogContext) => AlertDialog(
         title: const Text('Remover plano?'),
         content: Text(
-          'O plano “' + _name(plan) + '” será removido deste computador.',
+          'O plano “${_name(plan)}” será removido deste computador.',
         ),
         actions: [
           TextButton(
@@ -246,10 +256,11 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
     if (bytes == null) return;
     try {
       final data = jsonDecode(utf8.decode(bytes));
-      if (data is! List)
+      if (data is! List) {
         throw const FormatException(
           'O arquivo precisa conter uma lista de planos.',
         );
+      }
       for (final item in data.whereType<Map>()) {
         final plan = Map<String, dynamic>.from(item);
         final id =
@@ -258,11 +269,12 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
         await _service.save(_service.normalize(plan, id));
       }
       await _reload();
-      if (mounted)
+      if (mounted) {
         _message(
           'Backup importado',
           'Os planos foram mesclados ao cadastro atual.',
         );
+      }
     } catch (error) {
       if (mounted) _message('Falha ao importar', error.toString());
     }
@@ -297,7 +309,7 @@ class _PlanosEnsinoPageState extends State<PlanosEnsinoPage> {
     );
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Exportar plano de ensino para Word',
-      fileName: 'Plano_de_Ensino_' + code + '.docx',
+      fileName: 'Plano_de_Ensino_$code.docx',
       type: FileType.custom,
       allowedExtensions: ['docx'],
       bytes: PlanosEnsinoService.exportDocx(plan),
@@ -514,10 +526,7 @@ class _PlanCard extends StatelessWidget {
           ),
         ),
         subtitle: Text(
-          (ident['codigo']?.toString() ?? 'Sem código') +
-              '  ·  ' +
-              count.toString() +
-              ' aulas no cronograma',
+          '${ident['codigo']?.toString() ?? 'Sem código'}  ·  $count aulas no cronograma',
           style: TextStyle(color: AppTheme.textSecondary),
         ),
         trailing: Wrap(
@@ -738,7 +747,7 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
     _plan = _service.normalize(widget.plan, widget.plan['id'].toString());
     final ident = Map<String, dynamic>.from(_plan['identificacao'] as Map);
     for (final key in _identFields.keys) {
-      _controllers['identificacao.' + key] = TextEditingController(
+      _controllers['identificacao.$key'] = TextEditingController(
         text: ident[key]?.toString() ?? '',
       );
     }
@@ -748,19 +757,16 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
       );
     }
     for (final kind in ['teorico', 'pratico']) {
-      final key = 'cronograma_' + kind;
+      final key = 'cronograma_$kind';
       final rows = (_plan[key] as List).whereType<Map>();
       _controllers[key] = TextEditingController(
         text: rows
-            .map(
-              (row) =>
-                  row['data'].toString() + '\t' + row['atividade'].toString(),
-            )
+            .map((row) => '${row['data']}\t${row['atividade']}')
             .join('\n'),
       );
     }
     for (final kind in ['basica', 'complementar']) {
-      final key = 'bibliografia_' + kind;
+      final key = 'bibliografia_$kind';
       _controllers[key] = TextEditingController(
         text: (_plan[key] as List).join('\n'),
       );
@@ -782,18 +788,18 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
     final plan = jsonDecode(jsonEncode(_plan)) as Map<String, dynamic>;
     final ident = Map<String, dynamic>.from(plan['identificacao'] as Map);
     for (final key in _identFields.keys) {
-      ident[key] = _c('identificacao.' + key).text.trim();
+      ident[key] = _c('identificacao.$key').text.trim();
     }
     plan['identificacao'] = ident;
     for (final key in _bodyFields.keys) {
       plan[key] = _c(key).text.trim();
     }
     for (final kind in ['teorico', 'pratico']) {
-      final key = 'cronograma_' + kind;
+      final key = 'cronograma_$kind';
       plan[key] = _parseSchedule(_c(key).text);
     }
     for (final kind in ['basica', 'complementar']) {
-      plan['bibliografia_' + kind] = _c('bibliografia_' + kind).text
+      plan['bibliografia_$kind'] = _c('bibliografia_$kind').text
           .split('\n')
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
@@ -807,8 +813,9 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
     for (final line in text.split('\n')) {
       final cells = line.split('\t');
       if (cells.length < 2 ||
-          !RegExp(r'^\d{2}/\d{2}/\d{4}$').hasMatch(cells.first.trim()))
+          !RegExp(r'^\d{2}/\d{2}/\d{4}$').hasMatch(cells.first.trim())) {
         continue;
+      }
       result.add({
         'data': cells.first.trim(),
         'atividade': cells.skip(1).join(' — ').trim(),
@@ -826,10 +833,7 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
       for (final key in ['cronograma_teorico', 'cronograma_pratico']) {
         final rows = (updated[key] as List).whereType<Map>();
         _c(key).text = rows
-            .map(
-              (row) =>
-                  row['data'].toString() + '\t' + row['atividade'].toString(),
-            )
+            .map((row) => '${row['data']}\t${row['atividade']}')
             .join('\n');
       }
       _c('avaliacao_provas').text =
@@ -1008,7 +1012,7 @@ class _PlanoEditorDialogState extends State<_PlanoEditorDialog>
                                   ? (constraints.maxWidth - 14) / 2
                                   : constraints.maxWidth,
                               child: _field(
-                                'identificacao.' + field.key,
+                                'identificacao.${field.key}',
                                 field.value,
                                 lines: field.key == 'observacoes' ? 3 : 1,
                               ),

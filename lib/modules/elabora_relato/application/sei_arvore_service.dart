@@ -35,6 +35,29 @@ class SeiArvoreService extends ChangeNotifier {
   /// Resumos com IA em andamento.
   bool get resumindo => _resumindo;
 
+  String _processoId = '';
+
+  String get _inventoryKey =>
+      _processoId.isEmpty ? inventoryKey : '$inventoryKey.$_processoId';
+
+  /// Troca o inventário pelo do processo [id] (o Edge do SEI continua
+  /// aberto). Não troca durante uma leitura ou resumo.
+  Future<void> usarProcesso(String id) async {
+    if (_extraindo || _resumindo) {
+      throw const CommandException(
+        'em_andamento',
+        'Aguarde a leitura da árvore ou os resumos terminarem antes de '
+            'trocar de processo.',
+      );
+    }
+    _processoId = id;
+    _documentos.clear();
+    _logs.clear();
+    _carregado = false;
+    await carregarInventario();
+    notifyListeners();
+  }
+
   final List<SeiDocumento> _documentos = [];
   final List<String> _logs = [];
   String _host = '';
@@ -132,12 +155,14 @@ class SeiArvoreService extends ChangeNotifier {
             log('Sem texto de "${node.text}": $error');
           }
         }
-        _documentos.add(SeiDocumento.fromTree(
+        _documentos.add(
+          SeiDocumento.fromTree(
             i + 1,
             node.text,
             texto: texto,
             href: node.href,
-          ));
+          ),
+        );
       }
       log('Inventário com ${_documentos.length} documento(s).');
       await _salvarInventario();
@@ -156,7 +181,7 @@ class SeiArvoreService extends ChangeNotifier {
     if (_carregado) return;
     _carregado = true;
     if (_documentos.isNotEmpty) return;
-    final raw = await _store.readJson(inventoryKey);
+    final raw = await _store.readJson(_inventoryKey);
     if (raw is! List) return;
     _documentos.addAll([
       for (final item in raw.whereType<Map>())
@@ -165,7 +190,44 @@ class SeiArvoreService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _salvarInventario() => _store.writeJson(inventoryKey, [
+  /// Relê o inventário alterado por fora (agente gravando direto na chave,
+  /// outro computador). Mantém o texto lido dos documentos (só em memória)
+  /// quando a árvore é a mesma. Não age durante leitura ou resumos.
+  Future<bool> recarregarDoBanco() async {
+    if (!_carregado || _extraindo || _resumindo) return false;
+    final raw = await _store.readJson(_inventoryKey);
+    if (raw is! List) return false;
+    final novos = [
+      for (final item in raw.whereType<Map>())
+        SeiDocumento.fromJson(Map<String, dynamic>.from(item)),
+    ];
+    String assinatura(List<SeiDocumento> l) =>
+        l.map((d) => d.toJson().toString()).join('|');
+    if (assinatura(novos) == assinatura(_documentos)) return false;
+    final mesmaArvore =
+        novos.length == _documentos.length &&
+        [
+          for (var i = 0; i < novos.length; i++)
+            novos[i].ordem == _documentos[i].ordem &&
+                novos[i].codigoSei == _documentos[i].codigoSei,
+        ].every((x) => x);
+    final atualizados = mesmaArvore
+        ? [
+            for (var i = 0; i < novos.length; i++)
+              _documentos[i].copyWith(
+                data: novos[i].data,
+                resumo: novos[i].resumo,
+              ),
+          ]
+        : novos;
+    _documentos
+      ..clear()
+      ..addAll(atualizados);
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> _salvarInventario() => _store.writeJson(_inventoryKey, [
     for (final d in _documentos) d.toJson(),
   ]);
 
@@ -236,8 +298,10 @@ class SeiArvoreService extends ChangeNotifier {
         );
         final resumos = lerResumos(resposta);
         if (resumos.isEmpty) {
-          log('A IA não devolveu resumos legíveis para o lote '
-              '${lote.first.ordem}–${lote.last.ordem}.');
+          log(
+            'A IA não devolveu resumos legíveis para o lote '
+            '${lote.first.ordem}–${lote.last.ordem}.',
+          );
         }
         for (final d in lote) {
           final r = resumos[d.ordem];
@@ -286,7 +350,9 @@ Responda SOMENTE com JSON: [{"ordem": 1, "resumo": "..."}, ...]''';
         ..writeln('ordem: ${d.ordem}')
         ..writeln('nome na árvore: ${d.nomeArvore}')
         ..writeln('data: ${d.data.isEmpty ? 'não identificada' : d.data}')
-        ..writeln('texto: ${texto.isEmpty ? '(sem texto: PDF ou anexo)' : texto}');
+        ..writeln(
+          'texto: ${texto.isEmpty ? '(sem texto: PDF ou anexo)' : texto}',
+        );
     }
     return b.toString();
   }

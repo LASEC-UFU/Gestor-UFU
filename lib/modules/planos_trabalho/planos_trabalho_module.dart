@@ -16,6 +16,7 @@ class PlanosTrabalhoModule extends GestorModule {
 
   PlanosTrabalhoStore _store = PlanosTrabalhoStore();
   final _sei = SeiAutomationService();
+  final _changes = ValueNotifier<int>(0);
 
   @override
   Future<void> activate(GestorServices services) async {
@@ -48,8 +49,11 @@ class PlanosTrabalhoModule extends GestorModule {
   List<RouteBase> get routes => [
     GoRoute(
       path: route,
-      builder: (context, state) =>
-          PlanosTrabalhoPage(store: _store, automation: _sei),
+      builder: (context, state) => PlanosTrabalhoPage(
+        store: _store,
+        automation: _sei,
+        changes: _changes,
+      ),
     ),
   ];
 
@@ -58,4 +62,7 @@ class PlanosTrabalhoModule extends GestorModule {
 
   @override
   List<ModuleCommand> get commands => planosTrabalhoCommands(_store, _sei);
+
+  @override
+  Future<void> onExternalDataChanged() async => _changes.value++;
 }

@@ -221,7 +221,7 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
                       ? _empty()
                       : ListView.separated(
                           itemCount: visible.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(height: 10),
                           itemBuilder: (context, i) => _caseTile(visible[i]),
                         ),
@@ -267,7 +267,7 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
     ValueChanged<String?> onChanged,
   ) => DropdownButtonFormField<String>(
     isExpanded: true,
-    value: _curricula.any((c) => c.id == value) ? value : null,
+    initialValue: _curricula.any((c) => c.id == value) ? value : null,
     decoration: InputDecoration(labelText: label),
     items: _curricula
         .map(
@@ -556,7 +556,7 @@ class _CaseDialogState extends State<_CaseDialog> {
       _notes = TextEditingController(text: widget.value.notes);
   late String _current = widget.value.currentCurriculumId,
       _status = widget.value.status;
-  late List<EquivalenceBlock> _blocks = [...widget.value.blocks];
+  late final List<EquivalenceBlock> _blocks = [...widget.value.blocks];
   late final List<Subject> _currentCatalog = mergeSubjects([
     ...?widget.curricula
         .where((c) => c.id == widget.value.currentCurriculumId)
@@ -597,16 +597,18 @@ class _CaseDialogState extends State<_CaseDialog> {
         },
       ),
     );
-    if (value != null)
+    if (value != null) {
       setState(() {
         addSubjects(_currentCatalog, value.current);
         addSubjects(_priorCatalog, value.prior);
         final i = _blocks.indexWhere((b) => b.id == value.id);
-        if (i < 0)
+        if (i < 0) {
           _blocks.add(value);
-        else
+        } else {
           _blocks[i] = value;
+        }
       });
+    }
   }
 
   Future<void> _manageCatalog() async {
@@ -711,7 +713,7 @@ class _CaseDialogState extends State<_CaseDialog> {
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     isExpanded: true,
-                    value: _current,
+                    initialValue: _current,
                     decoration: const InputDecoration(
                       labelText: 'Curso / currículo de destino',
                     ),
@@ -931,24 +933,26 @@ class _CaseDialogState extends State<_CaseDialog> {
                 ),
                 const SizedBox(height: 8),
                 Expanded(
-                  child: ListView.builder(
-                    itemCount: candidates.length,
-                    itemBuilder: (_, i) {
-                      final candidate = candidates[i];
-                      final blockIndex = _blocks.indexOf(candidate);
-                      return RadioListTile<String>(
-                        value: candidate.id,
-                        groupValue: selectedId,
-                        onChanged: (value) =>
-                            setDialogState(() => selectedId = value),
-                        title: Text(
-                          'Bloco ${blockIndex + 1}${candidate.period.trim().isEmpty ? '' : ' · Período ${candidate.period}'}',
-                        ),
-                        subtitle: Text(
-                          '${candidate.currentHours} h destino · ${candidate.priorHours} h cursado',
-                        ),
-                      );
-                    },
+                  child: RadioGroup<String>(
+                    groupValue: selectedId,
+                    onChanged: (value) =>
+                        setDialogState(() => selectedId = value),
+                    child: ListView.builder(
+                      itemCount: candidates.length,
+                      itemBuilder: (_, i) {
+                        final candidate = candidates[i];
+                        final blockIndex = _blocks.indexOf(candidate);
+                        return RadioListTile<String>(
+                          value: candidate.id,
+                          title: Text(
+                            'Bloco ${blockIndex + 1}${candidate.period.trim().isEmpty ? '' : ' · Período ${candidate.period}'}',
+                          ),
+                          subtitle: Text(
+                            '${candidate.currentHours} h destino · ${candidate.priorHours} h cursado',
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -1026,7 +1030,7 @@ class _BlockDialog extends StatefulWidget {
 
 class _BlockDialogState extends State<_BlockDialog> {
   late final _period = TextEditingController(text: widget.value?.period ?? '');
-  late List<Subject> _current = [...?widget.value?.current],
+  late final List<Subject> _current = [...?widget.value?.current],
       _prior = [...?widget.value?.prior];
   @override
   void dispose() {
@@ -1064,12 +1068,13 @@ class _BlockDialogState extends State<_BlockDialog> {
             : null,
       ),
     );
-    if (selected != null)
+    if (selected != null) {
       setState(
         () => list
           ..clear()
           ..addAll(selected),
       );
+    }
   }
 
   @override

@@ -1,0 +1,21 @@
+Poppler (pdftotext e pdftoppm) incluído no Gestor UFU
+=====================================================
+
+O Gestor UFU usa as ferramentas de linha de comando do Poppler para ler o
+texto de PDFs (base de documentos, documentos do processo) e para gerar o
+PDF anotado do Audita Bancas. Esta pasta contém pdftotext.exe, pdftoppm.exe
+e as bibliotecas de que eles dependem, sem modificações.
+
+Versão: Poppler 26.09.0, binários para Windows do projeto
+poppler-windows (https://github.com/oschwartz10612/poppler-windows),
+pacote Release-26.09.0-0.zip
+(SHA-256 7a6f256a0ddf7536182246a5733331bf4677cbcc34f4663774947ad34556c8d0).
+
+Licença: o Poppler é software livre distribuído sob a GNU General Public
+License, versão 2 ou posterior (texto em COPYING.gpl2). As bibliotecas
+incluídas seguem as próprias licenças livres (ver o projeto poppler-windows
+e os pacotes conda-forge de onde vêm).
+
+Código-fonte:
+- Poppler: https://poppler.freedesktop.org/ (https://gitlab.freedesktop.org/poppler/poppler)
+- Compilação para Windows: https://github.com/oschwartz10612/poppler-windows

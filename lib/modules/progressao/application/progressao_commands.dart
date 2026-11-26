@@ -346,4 +346,178 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
       );
     },
   ),
+  ModuleCommand(
+    id: 'progressao.verificarSei',
+    title: 'Verificar as etapas do dossiê no SEI',
+    description:
+        'Abre o processo salvo no Edge controlado e lê a árvore do SEI: '
+        'informa login, processo, requerimento, comprovantes (presentes/total), '
+        'titulação e relatório. Não grava nada no SEI.',
+    inputSchema: {
+      'type': 'object',
+      'properties': {..._processoId},
+      'required': ['processoId'],
+    },
+    run: (input, origin) async {
+      final s = await service.verificarSei(input.requireString('processoId'));
+      return CommandResult.ok(
+        message: !s.logado
+            ? 'O Edge não está logado no SEI; peça ao usuário para entrar.'
+            : s.numeroProcesso.isEmpty
+            ? 'Processo do cadastro não aberto no SEI'
+                  '${s.numeroAberto.isEmpty ? '' : ' (aberto no Edge: ${s.numeroAberto})'}.'
+            : 'Processo ${s.numeroProcesso}: requerimento '
+                  '${s.requerimento ? 'presente' : 'pendente'}; comprovantes '
+                  '${s.comprovantesNoSei}/${s.comprovantesTotal}; titulação '
+                  '${s.titulacao ? 'presente' : 'pendente'}; relatório '
+                  '${s.relatorio ? 'presente' : 'pendente'}.',
+        data: {
+          'logado': s.logado,
+          'numeroProcesso': s.numeroProcesso,
+          'numeroAberto': s.numeroAberto,
+          'etapas': {
+            for (final e in EtapaSei.values)
+              e.name: {
+                'concluida': s.concluida(e),
+                'disponivel': s.disponivel(e),
+              },
+          },
+          'comprovantesFaltantes': s.comprovantesFaltantes,
+        },
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'progressao.executarEtapaSei',
+    title: 'Executar uma etapa do dossiê no SEI',
+    description:
+        'Executa só a etapa indicada no processo salvo (processo, '
+        'requerimento, comprovantes, titulacao, relatorio) — ou "pendentes" '
+        'para todas as que faltam, em ordem, ou "atualizarRelatorio" para gerar '
+        'de novo o relatório e trocar o PDF do documento já existente no SEI. '
+        'Documentos presentes não são duplicados. Pede confirmação.',
+    approval: CommandApproval.required,
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        ..._processoId,
+        'etapa': {
+          'type': 'string',
+          'enum': [
+            ...EtapaSei.values.map((e) => e.name),
+            'pendentes',
+            'atualizarRelatorio',
+          ],
+        },
+      },
+      'required': ['processoId', 'etapa'],
+    },
+    run: (input, origin) async {
+      final id = input.requireString('processoId');
+      final nome = input.requireString('etapa');
+      if (nome == 'pendentes') {
+        await service.executarEtapasPendentes(id);
+      } else if (nome == 'atualizarRelatorio') {
+        await service.atualizarRelatorioSei(id);
+      } else {
+        final etapa = EtapaSei.values.where((e) => e.name == nome).firstOrNull;
+        if (etapa == null) {
+          throw CommandException('etapa_invalida', 'Etapa desconhecida: $nome');
+        }
+        final s = service.envio.situacoes[id];
+        if (etapa != EtapaSei.processo && !(s?.disponivel(etapa) ?? false)) {
+          throw CommandException(
+            'etapa_bloqueada',
+            'Conclua as etapas anteriores (use progressao.verificarSei).',
+          );
+        }
+        await service.executarEtapaSei(id, etapa);
+      }
+      final s = service.envio.situacoes[id];
+      return CommandResult.ok(
+        message: s == null
+            ? 'Etapa executada.'
+            : 'Etapa executada. Requerimento ${s.requerimento ? 'presente' : 'pendente'}; '
+                  'comprovantes ${s.comprovantesNoSei}/${s.comprovantesTotal}; '
+                  'titulação ${s.titulacao ? 'presente' : 'pendente'}; '
+                  'relatório ${s.relatorio ? 'presente' : 'pendente'}.',
+      );
+    },
+  ),
+  ModuleCommand(
+    id: 'progressao.montarProcessoSei',
+    title: 'Montar dossiê de progressão/promoção no SEI',
+    description:
+        'Cria um processo docente no SEI ou usa um existente; preenche o '
+        'requerimento, inclui comprovantes e titulação e envia o relatório '
+        'por último. Requer confirmação do usuário antes de qualquer gravação '
+        'externa. O usuário precisa estar logado no Edge controlado.',
+    approval: CommandApproval.required,
+    mutates: true,
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        ..._processoId,
+        'criarNovo': {'type': 'boolean', 'default': false},
+        'numeroProcesso': {'type': 'string'},
+        'especificacao': {'type': 'string'},
+        'interessado': {'type': 'string'},
+        'acessoComprovantes': {
+          'type': 'string',
+          'enum': ['restrito', 'publico'],
+          'default': 'restrito',
+        },
+        'incluirRequerimento': {'type': 'boolean', 'default': true},
+        'incluirComprovantes': {'type': 'boolean', 'default': true},
+        'incluirTitulacao': {'type': 'boolean', 'default': true},
+        'incluirRelatorio': {'type': 'boolean', 'default': true},
+        'confirmarNovoComProcessoSalvo': {'type': 'boolean', 'default': false},
+      },
+      'required': ['processoId'],
+    },
+    run: (input, origin) async {
+      final acesso = input.optionalString('acessoComprovantes') == 'publico'
+          ? AcessoComprovantesSei.publico
+          : AcessoComprovantesSei.restrito;
+      final r = await service.montarProcessoSei(
+        input.requireString('processoId'),
+        ProgressaoDossieSeiOpcoes(
+          criarNovo: input.flag('criarNovo'),
+          numeroProcesso: input.optionalString('numeroProcesso') ?? '',
+          especificacao: input.optionalString('especificacao') ?? '',
+          interessado: input.optionalString('interessado') ?? '',
+          acessoComprovantes: acesso,
+          incluirRequerimento: input.flag(
+            'incluirRequerimento',
+            fallback: true,
+          ),
+          incluirComprovantes: input.flag(
+            'incluirComprovantes',
+            fallback: true,
+          ),
+          incluirTitulacao: input.flag('incluirTitulacao', fallback: true),
+          incluirRelatorio: input.flag('incluirRelatorio', fallback: true),
+          confirmarNovoComProcessoSalvo: input.flag(
+            'confirmarNovoComProcessoSalvo',
+          ),
+        ),
+      );
+      return CommandResult.ok(
+        message:
+            'Processo ${r.numeroProcesso} montado: requerimento ${r.requerimento}; '
+            '${r.comprovantesNovos} comprovantes novos, ${r.comprovantesExistentes} já existentes; '
+            'titulação ${r.titulacao}; relatório ${r.relatorio}. '
+            'O requerimento não foi assinado; o docente deve conferir e assinar no SEI.',
+        data: {
+          'numeroProcesso': r.numeroProcesso,
+          'requerimento': r.requerimento,
+          'comprovantesNovos': r.comprovantesNovos,
+          'comprovantesExistentes': r.comprovantesExistentes,
+          'titulacao': r.titulacao,
+          'relatorio': r.relatorio,
+        },
+      );
+    },
+  ),
 ];

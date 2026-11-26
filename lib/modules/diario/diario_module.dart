@@ -20,6 +20,7 @@ class DiarioModule extends GestorModule {
 
   DiarioService? _service;
   GestorServices? _services;
+  final _changes = ValueNotifier<int>(0);
 
   DiarioService get service => _service ??= DiarioService(
     KeyValueStore(),
@@ -62,12 +63,16 @@ class DiarioModule extends GestorModule {
       builder: (context, state) => PreencheDiariosPage(
         moodle: _services?.contract<MoodlePlanning>(),
         terms: _services?.terms,
+        changes: _changes,
       ),
     ),
   ];
 
   @override
   ModuleSkill get skill => diarioSkill();
+
+  @override
+  Future<void> onExternalDataChanged() async => _changes.value++;
 
   @override
   List<ModuleCommand> get commands => diarioCommands(service);

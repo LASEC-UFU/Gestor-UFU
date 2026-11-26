@@ -1,4 +1,6 @@
 import 'package:gestor_ufu/modules/ajusta_horarios/ajusta_horarios_module.dart';
+import 'package:gestor_ufu/modules/audita_bancas/audita_bancas_module.dart';
+import 'package:gestor_ufu/modules/agenda_email/agenda_email_module.dart';
 import 'package:gestor_ufu/modules/diario/diario_module.dart';
 import 'package:gestor_ufu/modules/equivalencia/equivalencia_module.dart';
 import 'package:gestor_ufu/modules/inserir_documentos_sei/inserir_documentos_sei_module.dart';
@@ -17,6 +19,8 @@ void installModules([ModuleRegistry? target]) {
   final registry = target ?? ModuleRegistry.instance;
   if (registry.modules.isNotEmpty) return;
   registry
+    ..register(AuditaBancasModule())
+    ..register(AgendaEmailModule())
     ..register(MoodleModule())
     ..register(DiarioModule())
     ..register(ElaboraRelatoModule())

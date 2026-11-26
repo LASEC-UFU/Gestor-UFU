@@ -77,8 +77,9 @@ class DiarioLancamentos {
       final map = _columnMap(rows[i]);
       if (map.containsKey('data') &&
           map.containsKey('modality') &&
-          map.containsKey('content'))
+          map.containsKey('content')) {
         return i;
+      }
     }
     return null;
   }
@@ -97,8 +98,9 @@ class DiarioLancamentos {
         'conteudo',
         'conteudo lecionado',
         'descricao',
-      }.contains(text))
+      }.contains(text)) {
         map['content'] = i;
+      }
     }
     return map;
   }
@@ -118,10 +120,12 @@ class DiarioLancamentos {
     final value = cell?.value;
     if (value is DateCellValue) return value.asDateTimeLocal();
     if (value is DateTimeCellValue) return value.asDateTimeLocal();
-    if (value is IntCellValue)
+    if (value is IntCellValue) {
       return DateTime(1899, 12, 30).add(Duration(days: value.value));
-    if (value is DoubleCellValue)
+    }
+    if (value is DoubleCellValue) {
       return DateTime(1899, 12, 30).add(Duration(days: value.value.floor()));
+    }
     final text = _cellText(cell).trim();
     final match = RegExp(r'^(\d{1,2})/(\d{1,2})/(\d{2,4})$').firstMatch(text);
     if (match == null) return null;
@@ -187,11 +191,12 @@ class DiarioLancamentos {
   }
 
   static DiarioValidation validate(dynamic raw) {
-    if (raw is! Map)
+    if (raw is! Map) {
       return const DiarioValidation({}, {
         '__root__':
             'O JSON precisa ser um objeto {"DD/MM/AAAA -P": "conteúdo"}.',
       });
+    }
     final valid = <String, String>{};
     final errors = <String, String>{};
     for (final entry in raw.entries) {
@@ -228,8 +233,9 @@ class DiarioLancamentos {
     var year = int.parse(match.group(3)!);
     if (year < 100) year += 2000;
     final date = DateTime(year, month, day);
-    if (date.year != year || date.month != month || date.day != day)
+    if (date.year != year || date.month != month || date.day != day) {
       return null;
+    }
     final suffix = (match.group(4) ?? '').trim();
     return '${formatDate(date)} -${suffix.isEmpty ? 'P' : suffix}';
   }

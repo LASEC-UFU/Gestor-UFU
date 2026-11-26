@@ -1,15 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/gestures.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import 'package:webview_windows/webview_windows.dart';
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/base_documentos_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/consulta_trecho.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/domain/parecer.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/base_documentos_dialog.dart';
+import 'package:gestor_ufu/modules/elabora_relato/pages/consulta_ia_dialog.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/comentario_documento.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/leitor_comentado_controller.dart';
+import 'package:gestor_ufu/platform/ui/leitor_comentado/webview_local.dart';
 
 /// Arquivos do editor (CKEditor 5 + estilos do SEI) copiados dos assets para
 /// uma pasta local servida ao WebView2 por um host virtual.
@@ -24,7 +36,6 @@ class _EditorArquivos {
   ];
 
   static Future<String>? _pasta;
-  static bool _ambiente = false;
 
   static Future<String> pasta() => _pasta ??= _copiar();
 
@@ -43,21 +54,9 @@ class _EditorArquivos {
     return dir.path;
   }
 
-  /// O ambiente do WebView2 é único por processo e precisa vir antes do
-  /// primeiro controlador.
-  static Future<void> ambiente() async {
-    if (_ambiente) return;
-    _ambiente = true;
-    final base =
-        Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
-    try {
-      await WebviewController.initializeEnvironment(
-        userDataPath: p.join(base, 'GestorUFU', 'ParecerEditor', 'perfil'),
-      );
-    } on PlatformException {
-      // Já inicializado por outra tela.
-    }
-  }
+  /// O ambiente do WebView2 é único por processo (compartilhado com o
+  /// visualizador de PDF).
+  static Future<void> ambiente() => WebviewLocal.ambiente();
 }
 
 /// Editor HTML de uma seção do parecer, com os recursos de edição do SEI
@@ -88,13 +87,36 @@ class _ParecerEditorState extends State<ParecerEditor>
   bool _pronto = false;
   String? _erro;
   double _zoom = 1;
+  Map<String, dynamic>? _selecao;
+  final _leitor = LeitorComentadoController();
+  WindowController? _janelaComentarios;
+  WindowMethodChannel? _canalJanelaComentarios;
+  bool _abrindoJanelaComentarios = false;
+  bool _textoEmTelaCheia = false;
+  OverlayEntry? _sobreposicaoTexto;
+
+  // Ao mover o WebView2 para a sobreposição de tela cheia, o Windows passa a
+  // compô-lo na escala física da janela. Sem esta compensação ele fica cerca
+  // de 25% maior e com a rasterização visivelmente pior. O zoom escolhido no
+  // rodapé continua sendo a referência e é restaurado ao fechar.
+  static const _compensacaoTelaCheia = 0.8;
 
   @override
   bool get wantKeepAlive => true;
 
+  /// Processo deste editor: mensagens que cheguem depois de trocar de
+  /// processo não podem gravar no outro.
+  late final String _processoId = widget.service.processoId;
+
+  bool get _mesmoProcesso => widget.service.processoId == _processoId;
+
   @override
   void initState() {
     super.initState();
+    _processoId;
+    _leitor
+      ..navegar = _navegarComentario
+      ..aoLimpar = () => _js('window.parecer.limparSelecaoComentario()');
     widget.service.arvore.addListener(_atualizarLinks);
     _iniciar();
   }
@@ -123,18 +145,33 @@ class _ParecerEditorState extends State<ParecerEditor>
       _controladorCriado = true;
       _subs.add(_web.webMessage.listen(_mensagem));
       _subs.add(
-        widget.service.insercoes
-            .where((i) => i.secao == widget.secao)
-            .listen((i) => _js('window.parecer.inserir(${jsonEncode(i.html)})')),
+        _web.containsFullScreenElementChanged.listen(_mudarTelaCheiaTexto),
       );
       _subs.add(
-        widget.service.substituicoes
-            .where((s) => s == widget.secao)
+        widget.service.insercoes
+            .where((i) => i.secao == widget.secao)
             .listen(
-              (_) => _js(
-                'window.parecer.definir(${jsonEncode(widget.service.parecer.secao(widget.secao))})',
-              ),
+              (i) => _js('window.parecer.inserir(${jsonEncode(i.html)})'),
             ),
+      );
+      _subs.add(
+        widget.service.substituicoes.where((s) => s == widget.secao).listen((
+          _,
+        ) async {
+          await _js(
+            'window.parecer.definir(${jsonEncode(widget.service.parecer.secao(widget.secao))})',
+          );
+          _repintarComentarios();
+        }),
+      );
+      _subs.add(
+        widget.service.comentariosAlterados
+            .where((s) => s == widget.secao)
+            .listen((_) {
+              _repintarComentarios();
+              unawaited(_atualizarJanelaComentarios(_leitor.selecionado));
+              if (mounted) setState(() {});
+            }),
       );
       await _web.setBackgroundColor(const Color(0xFFE9EAEE));
       await _web.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
@@ -150,6 +187,47 @@ class _ParecerEditorState extends State<ParecerEditor>
     }
   }
 
+  void _mudarTelaCheiaTexto(bool ativa) {
+    if (!mounted || ativa == _textoEmTelaCheia) return;
+    if (!ativa) {
+      _sobreposicaoTexto?.remove();
+      _sobreposicaoTexto = null;
+      setState(() => _textoEmTelaCheia = false);
+      unawaited(_web.setZoomFactor(_zoom));
+      return;
+    }
+    unawaited(_web.setZoomFactor(_zoom * _compensacaoTelaCheia));
+    setState(() => _textoEmTelaCheia = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_textoEmTelaCheia || _sobreposicaoTexto != null) return;
+      final overlay = Overlay.of(context, rootOverlay: true);
+      _sobreposicaoTexto = OverlayEntry(
+        builder: (_) => Material(
+          color: const Color(0xFFE9EAEE),
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _webviewComRoda()),
+                Positioned(
+                  top: 10,
+                  right: 12,
+                  child: Tooltip(
+                    message: 'Sair da tela cheia do texto (Esc)',
+                    child: IconButton.filledTonal(
+                      onPressed: () => _js('document.exitFullscreen()'),
+                      icon: const Icon(Icons.fullscreen_exit_rounded),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      overlay.insert(_sobreposicaoTexto!);
+    });
+  }
+
   void _mensagem(dynamic msg) {
     if (msg is! Map) return;
     switch (msg['tipo']) {
@@ -160,14 +238,47 @@ class _ParecerEditorState extends State<ParecerEditor>
           'estilos': widget.service.estilos,
           'dica': widget.dica,
           'linksSei': widget.service.linksSei(),
+          'comentarios': widget.service.comentarios(widget.secao),
         };
         _js('window.parecer.iniciar(${jsonEncode(opcoes)})');
       case 'pronto':
         if (mounted) setState(() => _pronto = true);
       case 'mudou':
-        widget.service.definirSecaoDoEditor(widget.secao, '${msg['html'] ?? ''}');
+        if (!_mesmoProcesso) return;
+        widget.service.definirSecaoDoEditor(
+          widget.secao,
+          '${msg['html'] ?? ''}',
+        );
       case 'erro':
         if (mounted) setState(() => _erro = '${msg['mensagem']}');
+      case 'selecao':
+        if (mounted) setState(() => _selecao = Map<String, dynamic>.from(msg));
+      case 'consultarIa':
+        final dados = Map<String, dynamic>.from(msg);
+        if (mounted) setState(() => _selecao = dados);
+        unawaited(_consultarIa(dados));
+      case 'comentar':
+        unawaited(_novoComentario());
+      case 'comentarioClic':
+        unawaited(_leitor.selecionar('${msg['id']}', rolar: false));
+      case 'navegarComentario':
+        if (msg['direcao'] == 'anterior') {
+          unawaited(_leitor.anterior());
+        } else if (msg['direcao'] == 'proximo') {
+          unawaited(_leitor.proximo());
+        }
+      case 'statusComentario':
+        final c = msg['comentario'];
+        if (c is Map) {
+          final atualizado = Map<String, dynamic>.from(c);
+          final atual = widget.service.parecer.comentarios
+              .where((x) => '${x['id']}' == '${atualizado['id']}')
+              .firstOrNull;
+          if (atual != null &&
+              atual['localizado'] != atualizado['localizado']) {
+            unawaited(widget.service.salvarComentario(atualizado));
+          }
+        }
     }
   }
 
@@ -177,9 +288,25 @@ class _ParecerEditorState extends State<ParecerEditor>
     } catch (_) {}
   }
 
+  /// O [Webview] recebe a roda como sinal de ponteiro no Flutter. Repassamos
+  /// também ao contêiner HTML da folha, que é quem realmente deve rolar.
+  Widget _webviewComRoda() => Listener(
+    behavior: HitTestBehavior.opaque,
+    onPointerSignal: (sinal) {
+      if (sinal is PointerScrollEvent && sinal.scrollDelta.dy != 0) {
+        unawaited(
+          _js(
+            'window.parecer.rolar(${sinal.scrollDelta.dy.toStringAsFixed(2)})',
+          ),
+        );
+      }
+    },
+    child: Webview(_web),
+  );
+
   Future<void> _definirZoom(double z) async {
     setState(() => _zoom = z);
-    await _web.setZoomFactor(z);
+    await _web.setZoomFactor(_textoEmTelaCheia ? z * _compensacaoTelaCheia : z);
   }
 
   /// Recarrega o editor (ex.: depois de capturar os estilos do SEI).
@@ -196,7 +323,10 @@ class _ParecerEditorState extends State<ParecerEditor>
     }
     // Garante que o último trecho digitado (antes do debounce) seja salvo.
     unawaited(widget.service.salvarAgora());
+    _sobreposicaoTexto?.remove();
     if (_controladorCriado) _web.dispose();
+    unawaited(_canalJanelaComentarios?.setMethodCallHandler(null));
+    _leitor.dispose();
     super.dispose();
   }
 
@@ -234,19 +364,30 @@ class _ParecerEditorState extends State<ParecerEditor>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              children: [
-                if (_iniciado) Positioned.fill(child: Webview(_web)),
-                if (!_pronto)
-                  const Positioned.fill(
-                    child: ColoredBox(
-                      color: Color(0xFFE9EAEE),
-                      child: Center(child: CircularProgressIndicator()),
+          child: LeitorComentado(
+            controller: _leitor,
+            comentarios: _comentariosDocumento(),
+            onSelectionChanged: _atualizarJanelaComentarios,
+            ocultarPainel: _janelaComentarios != null,
+            acoesPainel: _acoesPainel(),
+            vazio:
+                'Selecione um trecho (ou clique no texto) e use o botão '
+                'direito para consultar a IA ou comentar.',
+            documento: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                children: [
+                  if (_iniciado && !_textoEmTelaCheia)
+                    Positioned.fill(child: _webviewComRoda()),
+                  if (!_pronto)
+                    const Positioned.fill(
+                      child: ColoredBox(
+                        color: Color(0xFFE9EAEE),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -254,7 +395,11 @@ class _ParecerEditorState extends State<ParecerEditor>
           padding: const EdgeInsets.only(top: 6),
           child: Row(
             children: [
-              Icon(Icons.zoom_in_rounded, size: 16, color: AppTheme.textSecondary),
+              Icon(
+                Icons.zoom_in_rounded,
+                size: 16,
+                color: AppTheme.textSecondary,
+              ),
               const SizedBox(width: 6),
               DropdownButton<double>(
                 value: _zoom,
@@ -280,5 +425,725 @@ class _ParecerEditorState extends State<ParecerEditor>
         ),
       ],
     );
+  }
+
+  /// Ações do topo do painel de comentários.
+  List<Widget> _acoesPainel() {
+    final temSelecao = '${_selecao?['texto'] ?? ''}'.trim().isNotEmpty;
+    return [
+      IconButton(
+        tooltip: 'Abrir comentários em janela separada',
+        onPressed: _abrirJanelaComentarios,
+        icon: const Icon(Icons.open_in_new_rounded),
+      ),
+      IconButton(
+        tooltip:
+            'Consultar a IA sobre a seleção ou o cursor (também pelo botão '
+            'direito no texto)',
+        onPressed: _selecao == null ? null : () => _consultarIa(),
+        icon: const Icon(Icons.auto_awesome_outlined),
+      ),
+      PopupMenuButton<String>(
+        tooltip: 'Mais ações',
+        icon: const Icon(Icons.more_vert),
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: 'comentar',
+            enabled: temSelecao,
+            child: const Text('Comentar a seleção'),
+          ),
+          const PopupMenuItem(
+            value: 'analisar',
+            child: Text('Analisar a seção com a base'),
+          ),
+          const PopupMenuItem(
+            value: 'base',
+            child: Text('Base de documentos…'),
+          ),
+        ],
+        onSelected: (v) => switch (v) {
+          'base' => mostrarBaseDocumentos(context, widget.service.base),
+          'analisar' => _analisarRelato(),
+          _ => _novoComentario(),
+        },
+      ),
+    ];
+  }
+
+  List<Map<String, dynamic>> _dadosJanelaComentarios() => [
+    for (final c in _comentariosDocumento())
+      {
+        'id': c.id,
+        'titulo': c.titulo,
+        'cor': c.cor.toARGB32(),
+        'local': c.local,
+        'etiquetas': c.etiquetas,
+        'ancorado': c.ancorado,
+        'trechoMarcado': c.trechoMarcado,
+        'secoes': [
+          for (final s in c.secoes)
+            {'rotulo': s.rotulo, 'texto': s.texto, 'icone': s.icone?.codePoint},
+        ],
+      },
+  ];
+
+  Future<void> _atualizarJanelaComentarios(String? selecionado) async {
+    final canal = _canalJanelaComentarios;
+    if (canal == null) return;
+    try {
+      await canal.invokeMethod<bool>('atualizar', {
+        'comentarios': _dadosJanelaComentarios(),
+        'selecionado': selecionado,
+      });
+    } catch (_) {
+      // A janela pode ter sido fechada pelo X do sistema. O próximo clique em
+      // "abrir" cria uma nova conexão limpa.
+      _canalJanelaComentarios = null;
+      _janelaComentarios = null;
+    }
+  }
+
+  Future<void> _abrirJanelaComentarios() async {
+    final existente = _janelaComentarios;
+    final canalExistente = _canalJanelaComentarios;
+    if (existente != null && canalExistente != null) {
+      final abertas = await WindowController.getAll();
+      if (abertas.any((w) => w.windowId == existente.windowId)) {
+        await _atualizarJanelaComentarios(_leitor.selecionado);
+        await existente.show();
+        return;
+      }
+      await canalExistente.setMethodCallHandler(null);
+      _canalJanelaComentarios = null;
+      _janelaComentarios = null;
+    }
+    if (_abrindoJanelaComentarios) return;
+    _abrindoJanelaComentarios = true;
+    final nomeCanal = 'gestor_ufu_comentarios_${const Uuid().v4()}';
+    final canal = WindowMethodChannel(
+      nomeCanal,
+      mode: ChannelMode.bidirectional,
+    );
+    try {
+      await canal.setMethodCallHandler((call) async {
+        if (call.method == 'selecionar') {
+          final id = '${call.arguments ?? ''}';
+          if (id.isEmpty) return false;
+          await _leitor.selecionar(id);
+          return true;
+        }
+        if (call.method == 'acoplar') {
+          if (mounted) {
+            setState(() {
+              _canalJanelaComentarios = null;
+              _janelaComentarios = null;
+            });
+          }
+          return true;
+        }
+        if (call.method == 'acaoPainel') {
+          final acao = '${call.arguments ?? ''}';
+          switch (acao) {
+            case 'consultarIa':
+              await _consultarIa();
+            case 'comentar':
+              await _novoComentario();
+            case 'analisar':
+              await _analisarRelato();
+            case 'base':
+              if (mounted) mostrarBaseDocumentos(context, widget.service.base);
+          }
+          return true;
+        }
+        throw MissingPluginException('Método não reconhecido: ${call.method}');
+      });
+      final controlador = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'commentsPanel',
+            'channel': nomeCanal,
+            'comentarios': _dadosJanelaComentarios(),
+            'selecionado': _leitor.selecionado,
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _canalJanelaComentarios = canal;
+      if (mounted) setState(() => _janelaComentarios = controlador);
+      await controlador.show();
+    } catch (_) {
+      await canal.setMethodCallHandler(null);
+      rethrow;
+    } finally {
+      _abrindoJanelaComentarios = false;
+    }
+  }
+
+  /// Comentários da seção na ordem do texto (os sem trecho no fim).
+  List<ComentarioDocumento> _comentariosDocumento() {
+    final cs = [...widget.service.comentarios(widget.secao)];
+    int pos(Map<String, dynamic> c) => c['localizado'] == false
+        ? 1 << 30
+        : ((c['posicao'] as num?)?.toInt() ?? 0);
+    cs.sort((a, b) => pos(a).compareTo(pos(b)));
+    return [for (final c in cs) _comentarioDocumento(c)];
+  }
+
+  /// Organiza o comentário para quem o lê: o ponto de atenção, por que ele
+  /// merece revisão e o que fazer — sem repetir o trecho (que está
+  /// destacado no texto).
+  ComentarioDocumento _comentarioDocumento(Map<String, dynamic> c) {
+    String campo(String k) => '${c[k] ?? ''}'.trim();
+    final texto = campo('texto');
+    final importancia = campo('importancia');
+    final simples = campo('explicacao_simples');
+    final titulo = texto.isNotEmpty
+        ? texto
+        : simples.isNotEmpty
+        ? simples
+        : importancia;
+    final categoria = '${c['categoria'] ?? ''}';
+    final fundamento = [
+      if (campo('referencia').isNotEmpty) campo('referencia'),
+      if (campo('citacao_literal').isNotEmpty) '“${campo('citacao_literal')}”',
+    ].join('\n');
+    final fontes = [
+      for (final f in (c['fontes'] as List? ?? const []))
+        if (f is Map)
+          '${f['arquivo']}'
+              '${'${f['localizacao'] ?? ''}'.isEmpty ? '' : ' — ${f['localizacao']}'}',
+    ].join('\n');
+    final arguicao = [
+      if (campo('pergunta_arguicao').isNotEmpty)
+        'Pergunta provável: ${campo('pergunta_arguicao')}',
+      if (campo('resposta_oral').isNotEmpty)
+        'Como responder: ${campo('resposta_oral')}',
+      if (campo('contra_argumento').isNotEmpty)
+        'Se insistirem: ${campo('contra_argumento')}',
+    ].join('\n\n');
+    final status = '${c['status'] ?? ''}';
+    return ComentarioDocumento(
+      id: '${c['id']}',
+      titulo: titulo,
+      cor: switch (status) {
+        'revisar' => const Color(0xFFE6A100),
+        'confirmado' => const Color(0xFF43A047),
+        'nao_aplica' => const Color(0xFF9E9E9E),
+        _ => const Color(0xFFD18A00),
+      },
+      local: widget.secao.titulo,
+      ancorado:
+          c['localizado'] != false && '${c['selecionado'] ?? ''}'.isNotEmpty,
+      trechoMarcado: '${c['selecionado'] ?? c['trecho'] ?? ''}',
+      etiquetas: [
+        _categoria(c),
+        if (status.isNotEmpty) _status(c),
+        if ('${c['avaliacao'] ?? ''}'.isNotEmpty) '${c['avaliacao']}',
+      ],
+      secoes: [
+        if (importancia.isNotEmpty && importancia != titulo)
+          SecaoComentario(
+            'Por que merece atenção',
+            importancia,
+            icone: Icons.priority_high_rounded,
+          ),
+        if (campo('sugestao').isNotEmpty)
+          SecaoComentario(
+            'Como melhorar',
+            campo('sugestao'),
+            icone: Icons.lightbulb_outline,
+          ),
+        if (simples.isNotEmpty && simples != titulo && simples != importancia)
+          SecaoComentario(
+            'Em palavras simples',
+            simples,
+            icone: Icons.translate_rounded,
+          ),
+        if (fundamento.isNotEmpty)
+          SecaoComentario(
+            'Fundamento',
+            fundamento,
+            icone: Icons.menu_book_outlined,
+          ),
+        if (campo('pergunta').isNotEmpty && categoria == 'consulta_ia')
+          SecaoComentario(
+            'Pergunta feita à IA',
+            campo('pergunta'),
+            icone: Icons.help_outline,
+          ),
+        if (fontes.isNotEmpty)
+          SecaoComentario(
+            'Fontes usadas no texto aceito',
+            fontes,
+            icone: Icons.source_outlined,
+          ),
+        if (campo('texto_anterior').isNotEmpty)
+          SecaoComentario(
+            'Texto antes da alteração',
+            campo('texto_anterior'),
+            icone: Icons.history,
+          ),
+        // Perguntas de arguição só nas anotações de defesa do voto, onde
+        // são o próprio conteúdo (nas demais, ficam no Simulado).
+        if (categoria == 'defesa' && arguicao.isNotEmpty)
+          SecaoComentario(
+            'Na arguição',
+            arguicao,
+            icone: Icons.record_voice_over_outlined,
+          ),
+      ],
+      acoes: [
+        AcaoComentario(
+          rotulo: 'Editar',
+          icone: Icons.edit_outlined,
+          aoAcionar: () => _editarComentario(c),
+        ),
+        if (status != 'confirmado')
+          AcaoComentario(
+            rotulo: 'Marcar resolvido',
+            icone: Icons.check_circle_outline,
+            aoAcionar: () => _mudarStatus(c, 'confirmado'),
+          ),
+        if (status != 'revisar')
+          AcaoComentario(
+            rotulo: 'Para revisão',
+            icone: Icons.flag_outlined,
+            aoAcionar: () => _mudarStatus(c, 'revisar'),
+          ),
+        if (status != 'nao_aplica')
+          AcaoComentario(
+            rotulo: 'Não se aplica',
+            icone: Icons.block_outlined,
+            aoAcionar: () => _mudarStatus(c, 'nao_aplica'),
+          ),
+        AcaoComentario(
+          rotulo: 'Excluir',
+          icone: Icons.delete_outline,
+          destrutiva: true,
+          aoAcionar: () async {
+            await widget.service.excluirComentario('${c['id']}');
+            _repintarComentarios();
+            if (mounted) setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  Future<void> _mudarStatus(Map<String, dynamic> c, String status) async {
+    await widget.service.salvarComentario({...c, 'status': status});
+    _repintarComentarios();
+    if (mounted) setState(() {});
+  }
+
+  /// Leva o editor ao trecho do comentário e o destaca.
+  Future<bool> _navegarComentario(ComentarioDocumento c, bool rolar) async {
+    if (!_pronto) return false;
+    try {
+      final r = await _web.executeScript(
+        'window.parecer.selecionarComentario(${jsonEncode(c.id)}, '
+        '${rolar ? 'true' : 'false'})',
+      );
+      // WebView2 pode devolver o objeto JavaScript já convertido ou como JSON.
+      // Nos dois casos o resultado precisa confirmar a ida à marcação.
+      final resposta = r is String ? jsonDecode(r) : r;
+      return resposta is Map && resposta['ok'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static String _categoria(Map<String, dynamic> c) =>
+      switch ('${c['categoria'] ?? ''}') {
+        '' => 'Nota',
+        'analise_normativa' => 'Análise normativa',
+        'consulta_ia' => 'Consulta à IA',
+        'rastreabilidade' => 'Fontes do texto aceito',
+        'defesa' => 'Defesa do voto',
+        final x => x,
+      };
+
+  static String _status(Map<String, dynamic> c) =>
+      switch ('${c['status'] ?? ''}') {
+        'confirmado' => 'Resolvido',
+        'revisar' => 'Para revisão',
+        'nao_aplica' => 'Não se aplica',
+        _ => 'Anotação',
+      };
+
+  void _repintarComentarios() => _js(
+    'window.parecer.definirComentarios(${jsonEncode(widget.service.comentarios(widget.secao))})',
+  );
+
+  /// Âncora de um comentário na seleção (texto + contexto em volta).
+  Map<String, dynamic> _ancora(Map<String, dynamic> s) {
+    final t = '${s['texto'] ?? ''}';
+    return {
+      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'secao': widget.secao.id,
+      'selecionado': t,
+      'anterior': _fim('${s['anterior'] ?? ''}', 80),
+      'posterior': _ini('${s['posterior'] ?? ''}', 80),
+      'posicao': s['posicao'] ?? 0,
+      'trecho': t.substring(0, math.min(100, t.length)),
+      'localizado': true,
+    };
+  }
+
+  static String _fim(String s, int n) =>
+      s.length <= n ? s : s.substring(s.length - n);
+  static String _ini(String s, int n) => s.length <= n ? s : s.substring(0, n);
+
+  Future<void> _novoComentario() async {
+    final s = _selecao;
+    if (s == null || '${s['texto'] ?? ''}'.trim().isEmpty) return;
+    await _editarComentario(_ancora(s));
+  }
+
+  /// Criar/editar: o ponto de atenção, por que merece revisão e como
+  /// melhorar (só o primeiro é obrigatório).
+  Future<void> _editarComentario(Map<String, dynamic> c) async {
+    final ponto = TextEditingController(text: '${c['texto'] ?? ''}');
+    final motivo = TextEditingController(text: '${c['importancia'] ?? ''}');
+    final sugestao = TextEditingController(text: '${c['sugestao'] ?? ''}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          c['texto'] == null ? 'Novo comentário' : 'Editar comentário',
+        ),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ponto,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'O que precisa de atenção',
+                  hintText: 'Ex.: A data do ofício não confere com a da ata.',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: motivo,
+                minLines: 1,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Por que merece revisão (opcional)',
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: sugestao,
+                minLines: 1,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  labelText: 'Como melhorar (opcional)',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Salvar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && ponto.text.trim().isNotEmpty) {
+      final novo = {
+        ...c,
+        'texto': ponto.text.trim(),
+        'importancia': motivo.text.trim(),
+        'sugestao': sugestao.text.trim(),
+      }..removeWhere((k, v) => v is String && v.isEmpty && k != 'texto');
+      await widget.service.salvarComentario(novo);
+      _repintarComentarios();
+      if (mounted) setState(() {});
+      await _leitor.selecionar('${c['id']}', rolar: false);
+    }
+    ponto.dispose();
+    motivo.dispose();
+    sugestao.dispose();
+  }
+
+  bool _consultaAberta = false;
+
+  /// Abre a caixa "Consultar a IA" sobre a seleção (ou o cursor). O trecho
+  /// fica reservado no editor (marcador vivo, destacado) enquanto a caixa
+  /// está aberta; o relato só muda se o usuário aceitar a proposta.
+  Future<void> _consultarIa([Map<String, dynamic>? dados]) async {
+    if (_consultaAberta) return;
+    final s = dados ?? _selecao;
+    if (s == null) return;
+    _consultaAberta = true;
+    final id = 'c${DateTime.now().microsecondsSinceEpoch}';
+    try {
+      final reserva = await _web.executeScript(
+        'window.parecer.reservar(${jsonEncode(id)})',
+      );
+      if (reserva is! Map || reserva['ok'] != true) {
+        _aviso(
+          reserva is Map
+              ? '${reserva['motivo']}'
+              : 'Não foi possível marcar o trecho no editor.',
+        );
+        return;
+      }
+      final esperado = '${reserva['texto'] ?? ''}';
+      final trecho = TrechoConsultado(
+        secao: widget.secao.titulo,
+        texto: esperado.trim().isEmpty
+            ? ''
+            : ('${s['texto'] ?? ''}'.trim().isEmpty
+                  ? esperado
+                  : '${s['texto']}'),
+        anterior: '${s['anterior'] ?? ''}',
+        posterior: '${s['posterior'] ?? ''}',
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ConsultaIaDialog(
+          service: widget.service,
+          trecho: trecho,
+          aceitar: (texto, proposta) async {
+            final r = await _web.executeScript(
+              'window.parecer.aplicar(${jsonEncode(id)}, '
+              '${jsonEncode(texto)}, ${jsonEncode(esperado)})',
+            );
+            if (r is Map && r['ok'] == true) {
+              await _registrarFontes(s, trecho, texto, proposta);
+              return null;
+            }
+            return r is Map
+                ? '${r['motivo']}'
+                : 'O editor não confirmou a alteração.';
+          },
+          salvarComentario: (campos) async {
+            final c = {..._ancora(s), ...campos};
+            if (trecho.soCursor) {
+              c['selecionado'] = '';
+              c['trecho'] = 'Ponto do texto';
+              c['localizado'] = false;
+            }
+            await widget.service.salvarComentario(c);
+            _repintarComentarios();
+            if (mounted) setState(() {});
+          },
+        ),
+      );
+    } finally {
+      _consultaAberta = false;
+      await _js('window.parecer.liberar(${jsonEncode(id)})');
+    }
+  }
+
+  /// Rastreabilidade: ao aceitar uma proposta baseada em fontes, cria um
+  /// comentário no texto aceito com as referências usadas (arquivo,
+  /// localização e o início do trecho de cada fonte).
+  Future<void> _registrarFontes(
+    Map<String, dynamic> s,
+    TrechoConsultado trecho,
+    String texto,
+    PropostaTexto proposta,
+  ) async {
+    if (proposta.fontes.isEmpty) return;
+    // Âncora: o primeiro parágrafo do texto aceito.
+    final ancora = texto
+        .split(RegExp(r'\n\s*\n'))
+        .first
+        .trim()
+        .replaceAll(RegExp(r'\s*\n\s*'), ' ');
+    final editado = texto.trim() != proposta.texto.trim();
+    await widget.service.salvarComentario({
+      ..._ancora({...s, 'texto': ancora}),
+      'categoria': 'rastreabilidade',
+      'texto':
+          'Texto ${trecho.soCursor ? 'inserido' : 'substituído'} com base em '
+          '${proposta.fontes.length} fonte(s)'
+          '${editado ? ' (proposta da IA editada pelo relator)' : ''}.',
+      'referencia': proposta.fontes.map((f) => f.referencia).join('; '),
+      'fontes': [
+        for (final f in proposta.fontes)
+          {
+            'arquivo': f.arquivo,
+            'localizacao': f.localizacao,
+            'trecho': f.texto.length <= 400
+                ? f.texto
+                : '${f.texto.substring(0, 399)}…',
+          },
+      ],
+      'explicacao_simples': proposta.justificativa,
+      if (!trecho.soCursor) 'texto_anterior': trecho.texto,
+      'aceito_em': DateTime.now().toIso8601String(),
+    });
+    _repintarComentarios();
+    if (mounted) setState(() {});
+  }
+
+  /// Revisa a seção inteira contra a base de documentos e o processo:
+  /// cada apontamento vira um comentário "para revisão" (o texto não muda).
+  Future<void> _analisarRelato() async {
+    final ai = widget.service.ia;
+    if (ai == null) {
+      _aviso('O Agente de IA não está disponível.');
+      return;
+    }
+    final textoRelato = _textoHtml(widget.service.parecer.secao(widget.secao));
+    if (textoRelato.trim().isEmpty) {
+      _aviso('A seção está vazia.');
+      return;
+    }
+    _aviso('Analisando a seção com a base de documentos…');
+    try {
+      // Fontes: os trechos mais relevantes para cada frase/parágrafo.
+      final vistos = <String>{};
+      final fontes = <FonteConsulta>[];
+      final partes = textoRelato
+          .split(RegExp(r'\n|(?<=[.;:])\s+(?=[A-Z0-9ÁÉÍÓÚÂÊÔÃÕÇ])'))
+          .where((x) => x.trim().length > 30)
+          .take(40);
+      for (final parte in partes) {
+        final achadas = await widget.service.base.fontesPara(
+          parte,
+          processo: widget.service.arvore.documentos,
+          limiteBase: 3,
+          limiteProcesso: 1,
+        );
+        for (final f in achadas) {
+          if (vistos.add('${f.arquivo}|${f.localizacao}|${f.texto.length}')) {
+            fontes.add(
+              FonteConsulta(
+                id: 'F${fontes.length + 1}',
+                arquivo: f.arquivo,
+                localizacao: f.localizacao,
+                texto: f.texto,
+                caminho: f.caminho,
+              ),
+            );
+          }
+        }
+        if (fontes.length >= 30) break;
+      }
+      if (fontes.isEmpty) {
+        _aviso(
+          'Nenhuma fonte encontrada: escolha a pasta da base de documentos '
+          'ou extraia a árvore do SEI com leitura dos documentos.',
+        );
+        return;
+      }
+      final raw = await ai.gerar(
+        sistema: _sistemaAnalise,
+        prompt:
+            'SEÇÃO: ${widget.secao.titulo}\nTEXTO:\n$textoRelato\n\n'
+            'FONTES:\n${ConsultaTrecho.fontesTexto(fontes)}',
+      );
+      final a = raw.indexOf('['), b = raw.lastIndexOf(']');
+      if (a < 0 || b <= a) {
+        throw const FormatException('a resposta não veio em JSON.');
+      }
+      final lista = jsonDecode(raw.substring(a, b + 1));
+      if (lista is! List) throw const FormatException('JSON inválido.');
+      final porId = {for (final f in fontes) f.id.toUpperCase(): f};
+      var criados = 0;
+      for (final item in lista.whereType<Map>()) {
+        final idFonte = '${item['fonte'] ?? ''}'
+            .replaceAll(RegExp(r'[\[\]\s]'), '')
+            .toUpperCase();
+        final fonte = porId[idFonte];
+        final citacao = '${item['citacao'] ?? ''}';
+        final ancora = '${item['trecho'] ?? ''}';
+        final at = ancora.isEmpty ? -1 : textoRelato.indexOf(ancora);
+        await widget.service.salvarComentario({
+          ..._ancora({
+            'texto': at < 0 ? '' : ancora,
+            'anterior': at < 0 ? '' : textoRelato.substring(0, at),
+            'posterior': at < 0
+                ? ''
+                : textoRelato.substring(at + ancora.length),
+            'posicao': math.max(0, at),
+          }),
+          'id': '${DateTime.now().microsecondsSinceEpoch}-$criados',
+          'trecho': ancora.isEmpty ? 'Análise da seção' : ancora,
+          'localizado': at >= 0,
+          'texto': '${item['ponto'] ?? item['identificacao'] ?? ''}',
+          'sugestao': '${item['sugestao'] ?? ''}',
+          'categoria': 'analise_normativa',
+          'referencia':
+              fonte?.referencia ?? 'Fundamento não localizado nas fontes',
+          'citacao_literal':
+              fonte != null &&
+                  ConsultaTrecho.citacaoNaFonte(citacao, fonte.texto)
+              ? citacao
+              : '',
+          'explicacao_simples': '${item['explicacao_simples'] ?? ''}',
+          'importancia': '${item['motivo'] ?? item['importancia'] ?? ''}',
+          'pergunta_arguicao': '${item['pergunta'] ?? ''}',
+          'resposta_oral': '${item['resposta_oral'] ?? ''}',
+          'status': 'revisar',
+        });
+        criados++;
+      }
+      _repintarComentarios();
+      if (mounted) setState(() {});
+      _aviso(
+        '$criados apontamento(s) adicionados como comentários para revisão '
+        '(${fontes.length} trechos de fontes consultados).',
+      );
+    } catch (e) {
+      _aviso('Não foi possível concluir a análise: $e');
+    }
+  }
+
+  static const _sistemaAnalise = '''
+Você revisa uma seção de parecer de conselho da UFU com rigor documental e
+escreve comentários para o relator, em português direto, didático e
+respeitoso.
+Use SOMENTE as fontes numeradas [F1], [F2]… Não invente normas, artigos,
+fatos ou citações; "citacao" deve ser copiada literalmente da fonte.
+Aponte afirmações sem suporte, divergências com as normas e requisitos não
+mencionados. Cada comentário deve deixar claro, em frases completas (nunca
+só rótulos):
+- "ponto": qual é o ponto que precisa de atenção;
+- "motivo": por que ele merece revisão (o que a fonte diz ou o que falta);
+- "sugestao": o que o relator pode fazer para melhorar o trecho.
+Se a fonte não bastar, diga isso no "motivo" e deixe "fonte" vazio.
+"trecho" deve ser copiado literalmente do TEXTO da seção (até 120
+caracteres) para ancorar o comentário.
+Opcional, só se ajudar a preparar a arguição: "pergunta" (o que podem
+perguntar) e "resposta_oral".
+Responda SOMENTE com JSON: [{"trecho": "...", "ponto": "...",
+"motivo": "...", "sugestao": "...", "fonte": "F1", "citacao": "...",
+"pergunta": "...", "resposta_oral": "..."}]''';
+
+  /// Texto visível da seção (o mesmo que o editor mostra), sem as tags.
+  String _textoHtml(String html) => html
+      .replaceAll(RegExp(r'</(p|div|li|h\d|tr)>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&')
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r' *\n *'), '\n')
+      .trim();
+
+  void _aviso(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    }
   }
 }

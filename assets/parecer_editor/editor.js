@@ -6,8 +6,11 @@
  * Comunicação com o app (WebView2):
  *   app → página: parecer.iniciar({html, css, estilos, dica}),
  *                 parecer.definir(html), parecer.inserir(html), parecer.foco()
+ *                 parecer.reservar(id), parecer.aplicar(id, texto, esperado),
+ *                 parecer.liberar(id)
  *   página → app: {tipo:'carregado'}, {tipo:'pronto'}, {tipo:'mudou', html},
- *                 {tipo:'erro', mensagem}
+ *                 {tipo:'erro', mensagem}, {tipo:'selecao', texto, …},
+ *                 {tipo:'consultarIa', texto, …}, {tipo:'comentar'}
  */
 (() => {
   'use strict';
@@ -39,6 +42,7 @@
     pincel: '<svg viewBox="0 0 20 20"><path fill="currentColor" d="M15.5 2.5a1 1 0 0 1 1.4 1.4l-6.6 6.6-1.4-1.4zM8.2 9.8l1.4 1.4-1 1c-.4 1.8-2 3.3-4.6 3.3.8-.8 1-1.6 1.1-2.5.1-1.3 1-2.3 2.1-2.4z"/></svg>',
     sei: '<svg viewBox="0 0 20 20"><rect x="0" y="3" width="20" height="14" rx="3" fill="#52b6e0"/><text x="2.5" y="14" font-size="10" font-family="Segoe UI" font-weight="700" fill="#fff">sei!</text></svg>',
     moeda: '<svg viewBox="0 0 20 20"><text x="0" y="15" font-size="12" font-family="Segoe UI" font-weight="700" fill="currentColor">R$</text></svg>',
+    telaCheia: '<svg viewBox="0 0 20 20"><path fill="currentColor" d="M3 8V3h5v2H5v3H3zm9-5h5v5h-2V5h-3V3zM3 12h2v3h3v2H3v-5zm12 0h2v5h-5v-2h3v-3z"/></svg>',
   };
 
   // ---------------------------------------------------------- Aa (caixa)
@@ -282,8 +286,195 @@
   };
 
   let editor = null;
+  let comentarios = [];
+  let comentarioAtivo = null;
+  let highlightRanges = [];
+  let savedModelRange = null;
+
+  function textoEditor() { return editor ? (editor.ui.getEditableElement().textContent || '') : ''; }
+  function offsetSelecao(root, node, offset) {
+    try { const r = document.createRange(); r.selectNodeContents(root); r.setEnd(node, offset); return r.toString().length; } catch (_) { return -1; }
+  }
+  function rangeTexto(root, start, length) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let n, pos = 0, a = null, b = null, ao = 0, bo = 0;
+    while ((n = walker.nextNode())) { const end = pos + n.nodeValue.length;
+      if (a === null && start >= pos && start <= end) { a = n; ao = start - pos; }
+      if (a !== null && start + length >= pos && start + length <= end) { b = n; bo = start + length - pos; break; }
+      pos = end;
+    }
+    if (!a || !b) return null;
+    const r = document.createRange(); r.setStart(a, ao); r.setEnd(b, bo); return r;
+  }
+  /** Range do trecho de um comentário (relocaliza pelo contexto se o texto
+   *  mudou de lugar); null se o trecho não existe mais. */
+  function localizar(c) {
+    if (!editor || !c) return null;
+    const root = editor.ui.getEditableElement(), all = textoEditor(), selected = String(c.selecionado || '');
+    if (!selected) return null;
+    const antes = c.localizado;
+    const falhou = () => {
+      c.localizado = false;
+      if (antes !== false) enviar({ tipo: 'statusComentario', comentario: c });
+      return null;
+    };
+    let at = Number(c.posicao);
+    if (all.slice(at, at + selected.length) !== selected) {
+      const prev = String(c.anterior || '').slice(-30), next = String(c.posterior || '').slice(0, 30);
+      const hits = []; let from = 0, i;
+      while ((i = all.indexOf(selected, from)) >= 0) { hits.push(i); from = i + Math.max(1, selected.length); }
+      if (!hits.length) return falhou();
+      const score = (x) => (all.slice(Math.max(0,x-prev.length),x) === prev ? 2 : 0) + (all.slice(x+selected.length,x+selected.length+next.length) === next ? 2 : 0);
+      at = hits.sort((x,y) => score(y) - score(x) || Math.abs(x - Number(c.posicao || 0)) - Math.abs(y - Number(c.posicao || 0)))[0];
+    }
+    const r = rangeTexto(root, at, selected.length);
+    if (!r) return falhou();
+    c.posicao = at;
+    c.localizado = true;
+    if (antes === false) enviar({ tipo: 'statusComentario', comentario: c });
+    return r;
+  }
+
+  function pintar(c) {
+    const r = localizar(c);
+    if (r) highlightRanges.push(r);
+    return !!r;
+  }
+
+  /** Repinta todas as marcações e o destaque do comentário selecionado. */
+  function repintar() {
+    highlightRanges = [];
+    for (const c of comentarios) pintar(c);
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      if (highlightRanges.length) CSS.highlights.set('parecer-comentarios', new Highlight(...highlightRanges));
+      else CSS.highlights.delete('parecer-comentarios');
+    }
+    return pintarAtivo();
+  }
+
+  /** Destaque do comentário selecionado: cor própria + sublinhado +
+   *  contorno e uma barra na margem (não só a cor). */
+  function pintarAtivo() {
+    const folha = document.getElementById('folha');
+    for (const el of folha.querySelectorAll('.gestor-ativo-caixa, .gestor-ativo-barra')) el.remove();
+    if (window.CSS && CSS.highlights) CSS.highlights.delete('parecer-ativo');
+    if (comentarioAtivo == null) return null;
+    const c = comentarios.find((x) => String(x.id) === String(comentarioAtivo));
+    const r = localizar(c);
+    if (!r) return null;
+    if (window.CSS && CSS.highlights && window.Highlight) {
+      const h = new Highlight(r);
+      h.priority = 1;
+      CSS.highlights.set('parecer-ativo', h);
+    }
+    const base = folha.getBoundingClientRect();
+    const rects = [...r.getClientRects()].filter((q) => q.width > 0.5 && q.height > 0.5);
+    for (const q of rects) {
+      const d = document.createElement('div');
+      d.className = 'gestor-ativo-caixa';
+      d.style.left = (q.left - base.left - 1) + 'px';
+      d.style.top = (q.top - base.top - 1) + 'px';
+      d.style.width = (q.width + 2) + 'px';
+      d.style.height = (q.height + 2) + 'px';
+      folha.appendChild(d);
+    }
+    if (rects.length) {
+      const topo = Math.min(...rects.map((q) => q.top)) - base.top;
+      const fim = Math.max(...rects.map((q) => q.bottom)) - base.top;
+      const barra = document.createElement('div');
+      barra.className = 'gestor-ativo-barra';
+      barra.style.top = topo + 'px';
+      barra.style.height = (fim - topo) + 'px';
+      folha.appendChild(barra);
+    }
+    return r;
+  }
+  window.addEventListener('resize', () => pintarAtivo());
+
+
+  // Seleção atual (ou cursor) com o contexto em volta, para o app.
+  function dadosSelecao() {
+    if (!editor) return null;
+    const editable = editor.ui.getEditableElement();
+    const s = window.getSelection();
+    if (!s || !s.rangeCount || !editable.contains(s.anchorNode)) return null;
+    const start = offsetSelecao(editable, s.anchorNode, s.anchorOffset);
+    const end = offsetSelecao(editable, s.focusNode, s.focusOffset);
+    const lo = Math.min(start, end), hi = Math.max(start, end), all = textoEditor();
+    const texto = s.isCollapsed ? '' : s.toString();
+    return { texto: texto.trim() ? texto : '', colapsado: s.isCollapsed || !texto.trim(), posicao: lo,
+      anterior: all.slice(Math.max(0, lo - 400), lo), posterior: all.slice(hi, hi + 400) };
+  }
+  function reportarSelecao() {
+    const d = dadosSelecao(); if (!d) return;
+    const mr = editor.model.document.selection.getFirstRange();
+    if (mr) savedModelRange = editor.model.createRange(mr.start, mr.end);
+    enviar(Object.assign({ tipo: 'selecao' }, d));
+  }
+
+  // Menu do botão direito (Shift + botão direito abre o menu padrão).
+  function fecharMenu() { const m = document.getElementById('menu-ia'); if (m) m.remove(); }
+  function abrirMenu(x, y) {
+    fecharMenu();
+    const d = dadosSelecao() || { texto: '', colapsado: true };
+    const m = document.createElement('div');
+    m.id = 'menu-ia';
+    const item = (rotulo, acao, ativo = true) => {
+      const b = document.createElement('button');
+      b.textContent = rotulo; b.disabled = !ativo;
+      b.addEventListener('mousedown', (ev) => ev.preventDefault());
+      b.addEventListener('click', () => { fecharMenu(); acao(); });
+      m.appendChild(b);
+    };
+    item(d.colapsado ? '✦ Consultar a IA neste ponto…' : '✦ Consultar a IA sobre o trecho…',
+      () => enviar(Object.assign({ tipo: 'consultarIa' }, d)));
+    item('Comentar seleção', () => enviar({ tipo: 'comentar' }), !d.colapsado);
+    item('Copiar', () => document.execCommand('copy'), !d.colapsado);
+    item('Recortar', () => document.execCommand('cut'), !d.colapsado);
+    const dica = document.createElement('div');
+    dica.className = 'dica'; dica.textContent = 'Shift + botão direito: menu padrão';
+    m.appendChild(dica);
+    document.body.appendChild(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + 'px';
+  }
+  document.addEventListener('mousedown', (e) => { if (!e.target.closest || !e.target.closest('#menu-ia')) fecharMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharMenu(); });
+  window.addEventListener('blur', fecharMenu);
+  document.addEventListener('scroll', fecharMenu, true);
+
+  // Texto de um intervalo do modelo (blocos separados por \n).
+  function textoModelo(range) {
+    let out = '', ultimoBloco = null;
+    for (const item of range.getItems()) {
+      if (!item.is('$textProxy')) continue;
+      const bloco = item.parent;
+      if (ultimoBloco && bloco !== ultimoBloco) out += '\n';
+      ultimoBloco = bloco;
+      out += item.data;
+    }
+    return out;
+  }
+  const semEspacos = (t) => String(t || '').replace(/\s+/g, '');
+  const nomeMarcador = (id) => 'consulta:' + id;
+  const nomeCursor = (id) => 'consultaCursor:' + id;
 
   const toModel = (html) => editor.data.toModel(editor.data.processor.toView(html));
+
+  // Executada diretamente pelo clique do usuário no botão ⛶. A Fullscreen
+  // API exige esse gesto; chamar a partir do Flutter/WebView depois da
+  // mensagem perde a autorização e acaba deixando a janela inteira igual.
+  async function alternarTelaCheiaDoEditor() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch (_) {
+      // Fallback para WebView2 sem Fullscreen API: amplia só o conteúdo HTML
+      // dentro da região do editor, sem alterar a janela do Gestor.
+      document.body.classList.toggle('gestor-tela-cheia');
+    }
+  }
 
   window.parecer = {
     async iniciar(opcoes) {
@@ -321,7 +512,7 @@
             items: [
               'undo', 'redo', '|', 'style', '|', 'findAndReplace', 'pincel', 'removeFormat', '|',
               'bold', 'italic', 'underline', 'strikethrough', 'subscript', 'superscript', 'alterarCaixa', '|',
-              'fontColor', 'fontBackgroundColor', 'fontSize', '|', 'showBlocks', 'specialCharacters', '|',
+              'fontColor', 'fontBackgroundColor', 'fontSize', 'fontFamily', '|', 'showBlocks', 'specialCharacters', '|',
               'numberedList', 'bulletedList', 'outdent', 'indent', 'alignment', '|',
               'horizontalLine', 'pageBreak', '|', 'insertImage', 'insertTable', 'link', '|', 'linkSei',
               'valorExtenso', '|', 'sourceEditing',
@@ -347,16 +538,55 @@
         return;
       }
       document.getElementById('barra').appendChild(editor.ui.view.toolbar.element);
+      document.getElementById('gestor-tela-cheia').addEventListener('click', alternarTelaCheiaDoEditor);
       const contagem = document.getElementById('contagem');
       const wc = editor.plugins.get('WordCount');
       const atualizarContagem = () => { contagem.textContent = `${wc.words} palavras · ${wc.characters} caracteres`; };
       wc.on('update', atualizarContagem);
       atualizarContagem();
 
+      // Trecho reservado para uma consulta à IA: destacado enquanto a caixa
+      // de consulta está aberta (marcadores acompanham as edições).
+      editor.conversion.for('editingDowncast').markerToHighlight({
+        model: 'consulta', view: { classes: 'gestor-consulta' },
+      });
+      editor.conversion.for('editingDowncast').markerToElement({
+        model: 'consultaCursor',
+        view: (data, { writer }) => data.isOpening === false ? null
+          : writer.createUIElement('span', { class: 'gestor-consulta-cursor' }),
+      });
+
+      comentarios = Array.isArray(o.comentarios) ? o.comentarios : [];
+      const editable = editor.ui.getEditableElement();
+      editable.addEventListener('mouseup', () => setTimeout(reportarSelecao, 0));
+      editable.addEventListener('keyup', reportarSelecao);
+      // O WebView2 pode entregar a roda ao contêiner nativo sem acionar a
+      // rolagem padrão do CKEditor. Rolamos explicitamente a área da folha,
+      // preservando a edição e a seleção de texto.
+      document.addEventListener('wheel', (e) => {
+        if (!e.target.closest || !e.target.closest('#area')) return;
+        const area = document.getElementById('area');
+        if (!area || !e.deltaY) return;
+        area.scrollTop += e.deltaY;
+        e.preventDefault();
+      }, { passive: false, capture: true });
+      editable.addEventListener('contextmenu', (e) => {
+        if (e.shiftKey) return; // Shift + botão direito: menu padrão do navegador.
+        e.preventDefault();
+        setTimeout(() => { reportarSelecao(); abrirMenu(e.clientX, e.clientY); }, 0);
+      });
+      repintar();
+      editable.addEventListener('click', () => {
+        const s = window.getSelection(); if (!s || !s.isCollapsed) return;
+        const pos = offsetSelecao(editable, s.anchorNode, s.anchorOffset);
+        const c = comentarios.find(x => x.localizado !== false && pos >= Number(x.posicao) && pos <= Number(x.posicao) + String(x.selecionado || '').length);
+        if (c) enviar({ tipo: 'comentarioClic', id: c.id });
+      });
+
       let timer = null;
       editor.model.document.on('change:data', () => {
         clearTimeout(timer);
-        timer = setTimeout(() => enviar({ tipo: 'mudou', html: editor.getData() }), 400);
+        timer = setTimeout(() => { enviar({ tipo: 'mudou', html: editor.getData() }); repintar(); }, 400);
       });
       // Sai do modo código-fonte: garante que o app receba o HTML editado.
       editor.plugins.get('SourceEditing').on('change:isSourceEditingMode', (_, __, ativo) => {
@@ -382,6 +612,97 @@
     },
 
     definirLinks(mapa) { linksSei = mapa || {}; },
+
+    definirComentarios(lista) { comentarios = Array.isArray(lista) ? lista : []; repintar(); return true; },
+
+    /// Recebe a roda encaminhada pelo Flutter quando o cursor está sobre a
+    /// textura do WebView. O WebView2 não a entrega de modo consistente ao
+    /// elemento scrollável interno em builds Windows.
+    rolar(deltaY) {
+      const area = document.getElementById('area');
+      if (!area) return false;
+      area.scrollTop += Number(deltaY) || 0;
+      return true;
+    },
+
+    /// Seleciona o comentário [id]: destaca o trecho e, com [rolar], leva a
+    /// folha até ele. Devolve {ok:false} se o trecho não existe mais.
+    selecionarComentario(id, rolar) {
+      comentarioAtivo = id;
+      const r = repintar();
+      if (!r) return { ok: false };
+      if (rolar !== false) {
+        const area = document.getElementById('area');
+        const q = r.getBoundingClientRect(), a = area.getBoundingClientRect();
+        area.scrollTo({ top: area.scrollTop + q.top - a.top - area.clientHeight * 0.3, behavior: 'smooth' });
+      }
+      return { ok: true };
+    },
+
+    limparSelecaoComentario() { comentarioAtivo = null; pintarAtivo(); return true; },
+
+    /// Reserva a última seleção (ou cursor) para uma consulta: guarda um
+    /// marcador vivo e devolve o texto reservado. O relato não é alterado.
+    reservar(id) {
+      if (!editor) return { ok: false, motivo: 'O editor não está pronto.' };
+      const model = editor.model;
+      const range = savedModelRange || model.document.selection.getFirstRange();
+      if (!range) return { ok: false, motivo: 'Clique no texto ou selecione um trecho.' };
+      let texto;
+      try { texto = textoModelo(range); } catch (_) { savedModelRange = null; return { ok: false, motivo: 'O texto mudou. Selecione o trecho de novo.' }; }
+      model.change((writer) => {
+        const nome = range.isCollapsed || !texto.trim() ? nomeCursor(id) : nomeMarcador(id);
+        const r = nome === nomeCursor(id) ? model.createRange(range.end) : range;
+        if (model.markers.has(nome)) writer.updateMarker(nome, { range: r });
+        else writer.addMarker(nome, { range: r, usingOperation: false, affectsData: false });
+      });
+      return { ok: true, texto: texto.trim() ? texto : '', cursor: !texto.trim() };
+    },
+
+    /// Substitui o trecho reservado [id] por [texto] (ou insere no cursor).
+    /// Recusa se o trecho mudou desde a reserva ([esperado]).
+    aplicar(id, texto, esperado) {
+      if (!editor) return { ok: false, motivo: 'O editor não está pronto.' };
+      const model = editor.model;
+      const marcador = model.markers.get(nomeMarcador(id)) || model.markers.get(nomeCursor(id));
+      if (!marcador) return { ok: false, motivo: 'O ponto de edição não existe mais. Selecione o trecho de novo.' };
+      const range = marcador.getRange();
+      if (esperado && semEspacos(textoModelo(range)) !== semEspacos(esperado)) {
+        return { ok: false, motivo: 'O trecho foi alterado depois da consulta. Selecione-o de novo.' };
+      }
+      const paragrafos = String(texto || '').split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+      if (!paragrafos.length) return { ok: false, motivo: 'Texto vazio.' };
+      model.change((writer) => {
+        if (paragrafos.length === 1) {
+          // Mantém a formatação do início do trecho.
+          const no = range.start.textNode || range.start.nodeAfter || range.start.nodeBefore;
+          const attrs = no && no.is('$text') ? no.getAttributes() : [];
+          model.insertContent(writer.createText(paragrafos[0].replace(/\s*\n\s*/g, ' '), attrs), range);
+        } else {
+          const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const bloco = range.start.parent;
+          const classe = bloco && bloco.getAttribute && bloco.getAttribute('htmlPAttributes');
+          const cls = classe && classe.classes ? ` class="${classe.classes.join(' ')}"` : '';
+          const html = paragrafos.map((t) => `<p${cls}>${esc(t).replace(/\n/g, '<br>')}</p>`).join('');
+          model.insertContent(toModel(html), range);
+        }
+        for (const nome of [nomeMarcador(id), nomeCursor(id)]) if (model.markers.has(nome)) writer.removeMarker(nome);
+      });
+      savedModelRange = null;
+      editor.editing.view.focus();
+      enviar({ tipo: 'mudou', html: editor.getData() });
+      return { ok: true };
+    },
+
+    /// Descarta a reserva [id] (caixa fechada sem aceitar).
+    liberar(id) {
+      if (!editor) return false;
+      const model = editor.model;
+      model.change((writer) => {
+        for (const nome of [nomeMarcador(id), nomeCursor(id)]) if (model.markers.has(nome)) writer.removeMarker(nome);
+      });
+      return true;
+    },
 
     obter() { return editor ? editor.getData() : ''; },
 

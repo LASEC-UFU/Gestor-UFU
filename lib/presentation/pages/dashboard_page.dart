@@ -503,6 +503,8 @@ class _SharedDatabaseDialogState extends State<_SharedDatabaseDialog> {
                     itemCount: _modules.length,
                     // onReorder entrega newIndex antes de remover o item;
                     // ajusta para a semântica usada por _reorderModules.
+                    // (onReorderItem só existe a partir do Flutter 3.42.)
+                    // ignore: deprecated_member_use
                     onReorder: (oldIndex, newIndex) => _reorderModules(
                       oldIndex,
                       newIndex > oldIndex ? newIndex - 1 : newIndex,
@@ -836,10 +838,11 @@ class _DashboardFooter extends StatelessWidget {
         context,
       ).showSnackBar(SnackBar(content: Text('Backup exportado: $path')));
     } catch (error) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Falha ao exportar backup: $error')),
         );
+      }
     }
   }
 
@@ -875,10 +878,11 @@ class _DashboardFooter extends StatelessWidget {
         ),
       );
     } catch (error) {
-      if (context.mounted)
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Falha ao importar backup: $error')),
         );
+      }
     }
   }
 }

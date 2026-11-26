@@ -29,8 +29,10 @@ class AgentTextService implements AiTextService {
     final provider = settings.provider;
     final mode = settings.modeFor(provider);
     final model = settings.modelFor(provider, mode);
-    Future<String> semFerramentas(String name, Map<String, dynamic> input) async =>
-        'Ferramenta indisponível neste pedido.';
+    Future<String> semFerramentas(
+      String name,
+      Map<String, dynamic> input,
+    ) async => 'Ferramenta indisponível neste pedido.';
 
     AgentMcpServer? mcp;
     late AgentBackend backend;

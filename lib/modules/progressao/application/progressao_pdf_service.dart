@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
 import 'package:gestor_ufu/modules/progressao/domain/resolucao_condir_03_2017.dart';
 
@@ -29,7 +30,11 @@ class ProgressaoPdfService {
     'dezembro',
   ];
 
-  Future<Uint8List> gerar(ProgressaoDocente p, {DateTime? hoje}) async {
+  Future<Uint8List> gerar(
+    ProgressaoDocente p, {
+    DateTime? hoje,
+    bool incluirRequerimento = true,
+  }) async {
     final fonts = await _Fonts.load();
     final logo = await _logo(p.logoPath);
     final doc = pw.Document(
@@ -43,7 +48,9 @@ class ProgressaoPdfService {
       ),
     );
     final b = _Builder(p, fonts, logo, hoje ?? DateTime.now());
-    doc.addPage(b.pagina((ctx) => b.requerimento(), mostrarNome: false));
+    if (incluirRequerimento) {
+      doc.addPage(b.pagina((ctx) => b.requerimento(), mostrarNome: false));
+    }
     doc.addPage(b.pagina((ctx) => b.capa(), mostrarNome: false));
     doc.addPage(b.pagina((ctx) => b.sumario()));
     doc.addPage(
@@ -56,6 +63,11 @@ class ProgressaoPdfService {
     );
     return doc.save();
   }
+
+  /// Gera somente o relatório de atividades para anexá-lo ao SEI como último
+  /// documento, separado do requerimento interno do sistema.
+  Future<Uint8List> gerarRelatorio(ProgressaoDocente p, {DateTime? hoje}) =>
+      gerar(p, hoje: hoje, incluirRequerimento: false);
 
   Future<pw.ImageProvider?> _logo(String path) async {
     if (path.trim().isEmpty) return null;
@@ -459,13 +471,48 @@ class _Builder {
           'discente. ${p.textoAvaliacaoDidatica.trim()}',
         ),
       );
+    const comprovantes = ProgressaoComprovantesService();
     for (final a in p.avaliacoesDidaticas.where((a) => a.trim().isNotEmpty)) {
+      // Como nas demais seções, cite em vermelho o documento comprobatório
+      // (consulta do semestre em Avaliacao_Didatica/).
+      final rotulo = comprovantes.rotuloAvaliacaoDidatica(p, a);
       out.add(
         pw.Padding(
           padding: const pw.EdgeInsets.only(left: 18, bottom: 4),
-          child: pw.Bullet(
-            text: a.trim(),
-            style: const pw.TextStyle(fontSize: 10.5),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Container(
+                width: 5,
+                height: 5,
+                margin: const pw.EdgeInsets.only(top: 5, right: 8),
+                decoration: const pw.BoxDecoration(
+                  color: PdfColors.black,
+                  shape: pw.BoxShape.circle,
+                ),
+              ),
+              pw.Expanded(
+                child: pw.RichText(
+                  textAlign: pw.TextAlign.justify,
+                  text: pw.TextSpan(
+                    style: const pw.TextStyle(fontSize: 10.5),
+                    children: [
+                      pw.TextSpan(text: a.trim()),
+                      if (rotulo != null) ...[
+                        const pw.TextSpan(text: ' ('),
+                        pw.TextSpan(
+                          text: rotulo,
+                          style: const pw.TextStyle(
+                            color: ProgressaoPdfService._vermelho,
+                          ),
+                        ),
+                        const pw.TextSpan(text: ')'),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );

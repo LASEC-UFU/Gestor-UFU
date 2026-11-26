@@ -47,12 +47,38 @@ altere `pastaComprovantes`/`logoPath` (caminhos locais).
 ## Catálogo do Anexo 1 (item: descrição — regra de pontuação)
 ${_anexo1()}
 
+## Diagnóstico assistido da automação do SEI
+- Para investigar o fluxo de criação do processo, inicie um fluxo retomável com
+  `workflow_start` (módulo `progressao`) e registre cada passo com
+  `workflow_checkpoint`. Inspecione a tela antes e depois das ações usando as
+  ferramentas de navegador/computador; registre os rótulos, resultado e erro.
+- Se depender de login, seleção de unidade ou outra ação manual, registre com
+  `workflow_request_user`, pergunte na conversa e retome somente após a resposta.
+- Não repita a mesma abordagem mais de duas vezes. Se não resolver, conclua com
+  `workflow_finish` usando `handoff` e entregue o relatório Markdown gerado para
+  correção do código.
+- Na interface, ao criar processo novo, aguarde o login e a unidade no SEI; só
+  prossiga depois do clique do usuário em **Criar processo agora**.
+- Log completo do envio: DocumentosGestorUFU Agentelogsprogressao_sei.log.
+
+## Montagem no SEI em etapas (aba Resumo, cartão "Montar processo no SEI")
+1. Processo no SEI ("Criar processo" ou "Abrir processo"/"Usar processo
+   aberto"), 2. Requerimento, 3. Comprovantes das atividades, 4. Comprovante
+   da última titulação, 5. Relatório de atividades. Cada etapa só é liberada
+   quando as anteriores estão concluídas. "Verificar no SEI" abre o processo e
+   lê a árvore, marcando o que já existe; "Executar etapas pendentes" faz as
+   que faltam, em ordem. Também é possível executar só uma etapa.
+   Pelo agente: progressao.verificarSei (só lê) e progressao.executarEtapaSei
+   (etapa = processo|requerimento|comprovantes|titulacao|relatorio|pendentes).
+
 ## Comandos (run_command)
 progressao.listar, progressao.itensAnexo1 (busca no catálogo), progressao.criar,
 progressao.lancar, progressao.removerLancamento, progressao.anexarComprovante,
 progressao.gerarPdf, progressao.duplicar, progressao.excluir (pede
-confirmação), progressao.abrirSei e progressao.enviarComprovantesSei (pede
-confirmação). Prefira os comandos às gravações diretas no banco.
+confirmação), progressao.abrirSei, progressao.verificarSei,
+progressao.executarEtapaSei, progressao.enviarComprovantesSei e
+progressao.montarProcessoSei (pedem confirmação). Prefira os comandos às
+gravações diretas no banco.
 ''',
 );
 

@@ -15,6 +15,7 @@ class PlanosTrabalhoPage extends StatefulWidget {
   const PlanosTrabalhoPage({
     required this.store,
     required this.automation,
+    this.changes,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class PlanosTrabalhoPage extends StatefulWidget {
 
   /// Sessão do SEI do módulo (compartilhada com os comandos do agente).
   final SeiAutomationService automation;
+  final Listenable? changes;
 
   @override
   State<PlanosTrabalhoPage> createState() => _PlanosTrabalhoPageState();
@@ -49,6 +51,7 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
   @override
   void initState() {
     super.initState();
+    widget.changes?.addListener(_onExternalDataChanged);
     _reload();
     _loadUrl();
   }
@@ -96,8 +99,13 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
 
   @override
   void dispose() {
+    widget.changes?.removeListener(_onExternalDataChanged);
     _urlController.dispose();
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) _reload();
   }
 
   Future<String?> _pickPdf({String? initial}) async {
@@ -299,6 +307,7 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
       if (selected == null) return;
       pdfPath = selected;
     }
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -340,11 +349,12 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
         );
         await _reload(selectId: plan.id);
       }
-      if (mounted)
+      if (mounted) {
         _message(
           'Documento inserido',
           'O SEI confirmou o novo documento na árvore do processo. Revise o cadastro antes de assinar.',
         );
+      }
     } catch (error) {
       _log('Falha ao inserir no SEI: $error');
       if (mounted) _message('Falha na inserção', error.toString());
@@ -489,7 +499,7 @@ class _PlanosTrabalhoPageState extends State<PlanosTrabalhoPage> {
                 )
               : ListView.separated(
                   itemCount: _plans.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final plan = _plans[index];
                     final selected = plan.id == _selectedId;
@@ -990,11 +1000,12 @@ class _SpreadsheetDialogState extends State<_SpreadsheetDialog> {
     final data = _data;
     if (data == null) return;
     await widget.store.saveSpreadsheetData(widget.plan.id, data);
-    if (mounted)
+    if (mounted) {
       _showMessage(
         'Dados salvos',
         'Os valores foram guardados junto ao plano neste computador.',
       );
+    }
   }
 
   Future<void> _fillWorkbook() async {
@@ -1009,7 +1020,7 @@ class _SpreadsheetDialogState extends State<_SpreadsheetDialog> {
     final source = await _pickSpreadsheet(
       title: 'Selecione o novo modelo de planilha',
     );
-    if (source == null) return;
+    if (source == null || !mounted) return;
     try {
       final preview = _service.preview(data, source);
       final accepted = await showDialog<bool>(
@@ -1078,11 +1089,12 @@ class _SpreadsheetDialogState extends State<_SpreadsheetDialog> {
         destinationPath: output,
         data: data,
       );
-      if (mounted)
+      if (mounted) {
         _showMessage(
           'Cópia preenchida',
           '${result.length} campos transferidos. Abra o arquivo no Excel para recalcular as fórmulas e confira a aba Compilado antes de gerar o PDF.\n\n$output',
         );
+      }
     } catch (error) {
       _showMessage('Não foi possível preencher', error.toString());
     } finally {
@@ -1116,8 +1128,9 @@ class _SpreadsheetDialogState extends State<_SpreadsheetDialog> {
     final visible = <(int, Map<String, dynamic>)>[];
     for (var index = 0; index < fields.length; index++) {
       if (_showEmpty ||
-          fields[index]['value'] != null && fields[index]['value'] != '')
+          fields[index]['value'] != null && fields[index]['value'] != '') {
         visible.add((index, fields[index]));
+      }
     }
     return Dialog(
       child: ConstrainedBox(
@@ -1193,7 +1206,7 @@ class _SpreadsheetDialogState extends State<_SpreadsheetDialog> {
                       )
                     : ListView.separated(
                         itemCount: visible.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (_, row) {
                           final (index, field) = visible[row];
                           return ListTile(

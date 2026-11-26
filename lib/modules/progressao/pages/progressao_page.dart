@@ -10,6 +10,7 @@ import 'package:gestor_ufu/presentation/widgets/common_widgets.dart';
 import 'package:gestor_ufu/modules/progressao/application/progressao_comprovantes_service.dart';
 import 'package:gestor_ufu/modules/progressao/application/progressao_pdf_service.dart';
 import 'package:gestor_ufu/modules/progressao/application/progressao_service.dart';
+import 'package:gestor_ufu/modules/progressao/application/progressao_sei_text.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 import 'package:gestor_ufu/modules/progressao/domain/progressao.dart';
 import 'package:gestor_ufu/modules/progressao/domain/comprovantes.dart';
@@ -423,7 +424,7 @@ class _Editor extends StatelessWidget {
                         envio: envio,
                         service: service,
                       ),
-                      _ResumoTab(processo: p),
+                      _ResumoTab(processo: p, service: service, envio: envio),
                     ],
                   ),
                 ),
@@ -641,6 +642,11 @@ class _DadosTab extends StatelessWidget {
             onChanged: (v) => onChanged(p.copyWith(lotacao: v)),
             width: 420,
           ),
+          _CampoData(
+            label: 'Data de admissão na UFU',
+            value: p.dataAdmissao,
+            onChanged: (d) => onChanged(p.copyWith(dataAdmissao: d)),
+          ),
           _drop<Regime>(
             label: 'Regime de trabalho',
             value: p.regime,
@@ -741,6 +747,15 @@ class _DadosTab extends StatelessWidget {
             hint: '2022/01 parcial; 2022/02; 2023/01; 2023/02; 2024/01',
             onChanged: (v) => onChanged(p.copyWith(semestres: v)),
             width: 520,
+          ),
+          _Campo(
+            label: 'Justificativa para alteracao do intersticio',
+            value: p.justificativaIntersticio,
+            hint: 'Obrigatoria quando o relatorio comeca antes do intersticio',
+            maxLines: 3,
+            width: 860,
+            onChanged: (v) =>
+                onChanged(p.copyWith(justificativaIntersticio: v)),
           ),
           SizedBox(
             width: 900,
@@ -1613,6 +1628,30 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
     }
   }
 
+  Future<void> _selecionarComprovanteTitulacao() async {
+    if (p.pastaComprovantes.isEmpty) {
+      _avisar(context, 'Escolha a pasta dos comprovantes primeiro.');
+      return;
+    }
+    final resultado = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Selecione o comprovante da última titulação',
+      type: FileType.custom,
+      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
+    );
+    final origem = resultado?.files.single.path;
+    if (origem == null) return;
+    try {
+      final relativo = await _comprovantes.importarTitulacao(
+        processo: p,
+        origem: origem,
+      );
+      widget.onChanged(p.copyWith(comprovanteTitulacao: relativo));
+      if (mounted) _avisar(context, 'Comprovante da titulação arquivado.');
+    } on Object catch (error) {
+      if (mounted) _avisar(context, 'Não foi possível arquivar: $error');
+    }
+  }
+
   Future<void> _reorganizar() async {
     setState(() => _ocupado = true);
     try {
@@ -1764,6 +1803,32 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
                 ],
               ),
               const SizedBox(height: 10),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.school_outlined),
+                title: Text(
+                  'Comprovante da última titulação (${p.titulacao.rotulo})',
+                ),
+                subtitle: Text(
+                  _comprovantes.titulacaoExiste(p)
+                      ? p.comprovanteTitulacao
+                      : 'Ainda não selecionado (ex.: diploma de doutorado)',
+                ),
+                trailing: SizedBox(
+                  width: 132,
+                  child: OutlinedButton.icon(
+                    onPressed: _ocupado
+                        ? null
+                        : _selecionarComprovanteTitulacao,
+                    icon: const Icon(Icons.attach_file, size: 18),
+                    label: Text(
+                      _comprovantes.titulacaoExiste(p)
+                          ? 'Trocar'
+                          : 'Selecionar',
+                    ),
+                  ),
+                ),
+              ),
               Text(
                 '${lista.length} comprovante(s) arquivado(s)'
                 '${ausentes > 0 ? ' · $ausentes não encontrado(s) na pasta' : ''}'
@@ -1970,9 +2035,242 @@ class _ComprovantesTabState extends State<_ComprovantesTab> {
 
 // ------------------------------------------------------------------ Resumo
 class _ResumoTab extends StatelessWidget {
-  const _ResumoTab({required this.processo});
+  const _ResumoTab({
+    required this.processo,
+    required this.service,
+    required this.envio,
+  });
 
   final ProgressaoDocente processo;
+  final ProgressaoService service;
+  final ProgressaoEnvioSei envio;
+
+  /// [somenteCriar]: diálogo da etapa 1 — só cria o processo; os documentos
+  /// são enviados depois, etapa por etapa.
+  Future<void> _montarDossie(
+    BuildContext context, {
+    bool somenteCriar = false,
+  }) async {
+    final spec = TextEditingController(
+      text: processo.especificacaoSei.isNotEmpty
+          ? processo.especificacaoSei
+          : especificacaoProcessoSei(processo),
+    );
+    final numero = TextEditingController(text: processo.processoSei);
+    final interessado = TextEditingController(text: processo.docente);
+    var criarNovo = somenteCriar;
+    final tipo = tipoProcessoSugeridoSei(processo);
+    var acesso = processo.acessoComprovantesSei;
+    var requerimento = !somenteCriar;
+    var comprovantes = !somenteCriar;
+    var titulacao = !somenteCriar;
+    var relatorio = !somenteCriar;
+    var confirmarNovo = false;
+    final opcoes = await showDialog<ProgressaoDossieSeiOpcoes>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text(
+            somenteCriar ? 'Criar processo no SEI' : 'Montar processo no SEI',
+          ),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!somenteCriar)
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          label: Text('Usar existente'),
+                        ),
+                        ButtonSegment(value: true, label: Text('Criar novo')),
+                      ],
+                      selected: {criarNovo},
+                      onSelectionChanged: (s) =>
+                          setDialogState(() => criarNovo = s.first),
+                    ),
+                  if (!criarNovo) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: numero,
+                      decoration: const InputDecoration(
+                        labelText:
+                            'N\u00famero SEI (vazio usa processo aberto no Edge)',
+                      ),
+                    ),
+                  ],
+                  if (criarNovo) ...[
+                    const SizedBox(height: 12),
+                    InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo do processo',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: Text(tipo),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: spec,
+                      maxLength: 100,
+                      decoration: const InputDecoration(
+                        labelText: 'Especifica\u00e7\u00e3o',
+                      ),
+                    ),
+                    TextField(
+                      controller: interessado,
+                      decoration: const InputDecoration(
+                        labelText: 'Interessado',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<AcessoComprovantesSei>(
+                    initialValue: acesso,
+                    decoration: const InputDecoration(
+                      labelText: 'Acesso dos comprovantes',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: AcessoComprovantesSei.restrito,
+                        child: Text(
+                          'Restrito \u2014 Informa\u00e7\u00e3o Pessoal (Art. 31)',
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: AcessoComprovantesSei.publico,
+                        child: Text('P\u00fablico'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setDialogState(() => acesso = v);
+                    },
+                  ),
+                  if (!somenteCriar) ...[
+                    const Divider(height: 24),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: requerimento,
+                      title: const Text('Requerimento preenchido'),
+                      onChanged: (v) =>
+                          setDialogState(() => requerimento = v ?? false),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: comprovantes,
+                      title: const Text('Comprovantes das atividades'),
+                      onChanged: (v) =>
+                          setDialogState(() => comprovantes = v ?? false),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: titulacao,
+                      title: const Text(
+                        'Comprovante da \u00faltima titula\u00e7\u00e3o',
+                      ),
+                      onChanged: (v) =>
+                          setDialogState(() => titulacao = v ?? false),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: relatorio,
+                      title: const Text(
+                        'Relat\u00f3rio de atividades (\u00faltimo)',
+                      ),
+                      onChanged: (v) =>
+                          setDialogState(() => relatorio = v ?? false),
+                    ),
+                  ],
+                  if (criarNovo && processo.processoSei.trim().isNotEmpty)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: confirmarNovo,
+                      title: Text(
+                        'Confirmo criar outro; j\u00e1 existe ${processo.processoSei}',
+                      ),
+                      onChanged: (v) =>
+                          setDialogState(() => confirmarNovo = v ?? false),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(
+                ctx,
+                ProgressaoDossieSeiOpcoes(
+                  criarNovo: criarNovo,
+                  numeroProcesso: numero.text.trim(),
+                  especificacao: spec.text.trim(),
+                  interessado: interessado.text.trim(),
+                  acessoComprovantes: acesso,
+                  incluirRequerimento: requerimento,
+                  incluirComprovantes: comprovantes,
+                  incluirTitulacao: titulacao,
+                  incluirRelatorio: relatorio,
+                  confirmarNovoComProcessoSalvo: confirmarNovo,
+                ),
+              ),
+              child: Text(somenteCriar ? 'Continuar' : 'Iniciar montagem'),
+            ),
+          ],
+        ),
+      ),
+    );
+    // O diálogo ainda anima o fechamento usando os controllers; descartá-los
+    // na hora quebra a árvore de widgets (assert `_dependents.isEmpty`).
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      spec.dispose();
+      numero.dispose();
+      interessado.dispose();
+    });
+    if (opcoes == null || !context.mounted) return;
+    try {
+      if (opcoes.criarNovo) {
+        await service.prepararMontagemProcessoSei(processo.id, opcoes);
+        return;
+      }
+      final r = await service.montarProcessoSei(processo.id, opcoes);
+      if (context.mounted) {
+        _avisar(
+          context,
+          'Processo ${r.numeroProcesso}: requerimento ${r.requerimento}; '
+          '${r.comprovantesNovos} comprovante(s) novo(s), ${r.comprovantesExistentes} existente(s); '
+          'titula\u00e7\u00e3o ${r.titulacao}; relat\u00f3rio ${r.relatorio}. Confira e assine no SEI.',
+        );
+      }
+    } on Object catch (error) {
+      envio.log('Falha ao montar o dossi\u00ea: $error');
+      if (context.mounted) {
+        _avisar(context, 'Falha ao montar o dossi\u00ea: $error');
+      }
+    }
+  }
+
+  Future<void> _continuarMontagemSei(BuildContext context) async {
+    try {
+      final r = await service.continuarMontagemProcessoSei();
+      if (context.mounted) {
+        _avisar(
+          context,
+          'Processo ${r.numeroProcesso} criado e montado. Confira e assine o requerimento no SEI.',
+        );
+      }
+    } on Object catch (error) {
+      envio.log('Falha ao continuar a montagem no SEI: $error');
+      if (context.mounted) {
+        _avisar(context, 'Falha ao continuar a montagem no SEI: $error');
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2001,6 +2299,8 @@ class _ResumoTab extends StatelessWidget {
         'Escolha a pasta dos comprovantes (aba Comprovantes / SEI).',
       if (p.lancamentos.any((l) => l.comprovante.trim().isEmpty))
         '${p.lancamentos.where((l) => l.comprovante.trim().isEmpty).length} lançamento(s) sem comprovante.',
+      if (!_comprovantes.titulacaoExiste(p))
+        'Selecione o comprovante da ultima titulacao na aba Comprovantes / SEI.',
       if (lancamentosComComprovante(p).any((l) => !_comprovantes.existe(p, l)))
         'Há comprovantes que não estão mais na pasta do processo.',
     ];
@@ -2072,7 +2372,7 @@ class _ResumoTab extends StatelessWidget {
                   children: [
                     Icon(Icons.check_circle_outline, color: AppTheme.green),
                     const SizedBox(width: 8),
-                    const Text('Tudo pronto para gerar o PDF.'),
+                    const Text('Dados e comprovantes conferidos.'),
                   ],
                 ),
               for (final a in avisos)
@@ -2094,6 +2394,14 @@ class _ResumoTab extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 14),
+        _EtapasSeiCartao(
+          processo: processo,
+          service: service,
+          envio: envio,
+          onCriarProcesso: () => _montarDossie(context, somenteCriar: true),
+          onContinuarCriacao: () => _continuarMontagemSei(context),
+        ),
       ],
     );
   }
@@ -2113,6 +2421,410 @@ class _CelulaResumo extends StatelessWidget {
       texto,
       textAlign: direita ? TextAlign.right : TextAlign.left,
       style: TextStyle(fontWeight: negrito ? FontWeight.bold : null),
+    ),
+  );
+}
+
+/// Montagem do dossiê no SEI em etapas. Cada etapa só é liberada quando as
+/// anteriores estão concluídas; ao abrir o processo, o Gestor lê a árvore do
+/// SEI e marca o que já está feito, de modo que é possível executar apenas a
+/// etapa que falta.
+class _EtapasSeiCartao extends StatelessWidget {
+  const _EtapasSeiCartao({
+    required this.processo,
+    required this.service,
+    required this.envio,
+    required this.onCriarProcesso,
+    required this.onContinuarCriacao,
+  });
+
+  final ProgressaoDocente processo;
+  final ProgressaoService service;
+  final ProgressaoEnvioSei envio;
+  final VoidCallback onCriarProcesso;
+  final VoidCallback onContinuarCriacao;
+
+  // O tema do app estica os botões contornados; aqui eles ficam compactos.
+  static final _botaoCompacto = OutlinedButton.styleFrom(
+    minimumSize: const Size(0, 40),
+  );
+  static final _botaoCompactoCheio = FilledButton.styleFrom(
+    minimumSize: const Size(0, 40),
+  );
+
+  bool get _ocupado =>
+      envio.enviando || envio.verificando || envio.etapaEmExecucao != null;
+
+  Future<void> _rodar(
+    BuildContext context,
+    Future<void> Function() acao,
+    String falha,
+  ) async {
+    try {
+      await acao();
+    } on Object catch (error) {
+      envio.log('$falha: $error');
+      if (context.mounted) _avisar(context, '$falha: $error');
+    }
+  }
+
+  String _detalhe(EtapaSei etapa, SituacaoSei? s) {
+    if (s == null) {
+      if (etapa != EtapaSei.processo) {
+        return 'Aguardando a verificação do processo no SEI.';
+      }
+      return processo.processoSei.isEmpty
+          ? 'Nenhum processo salvo. Crie um processo ou abra um existente no Edge.'
+          : 'Processo salvo: ${processo.processoSei}. Clique em "Abrir processo" para verificar o SEI.';
+    }
+    switch (etapa) {
+      case EtapaSei.processo:
+        if (!s.logado) return 'Entre no SEI pelo Edge e verifique novamente.';
+        if (s.numeroProcesso.isNotEmpty) {
+          return 'Processo ${s.numeroProcesso} aberto no SEI.';
+        }
+        if (s.numeroAberto.isNotEmpty) {
+          return 'Aberto no Edge: ${s.numeroAberto} (ainda não vinculado a este cadastro).';
+        }
+        return 'Nenhum processo aberto no SEI.';
+      case EtapaSei.requerimento:
+        return s.requerimento
+            ? 'Requerimento presente no processo (confira e assine no SEI).'
+            : 'Requerimento ainda não incluído.';
+      case EtapaSei.comprovantes:
+        final faltam = s.comprovantesTotal - s.comprovantesNoSei;
+        final resto = faltam > 0 ? ' — faltam $faltam' : '';
+        return '${s.comprovantesNoSei} de ${s.comprovantesTotal} no SEI$resto.';
+      case EtapaSei.titulacao:
+        return s.titulacao
+            ? 'Comprovante da titulação presente.'
+            : 'Comprovante da titulação ainda não incluído.';
+      case EtapaSei.relatorio:
+        return s.relatorio
+            ? 'Relatório de atividades presente.'
+            : 'O relatório é gerado em PDF e enviado por último.';
+    }
+  }
+
+  String _rotuloBotao(EtapaSei etapa, bool concluida) => switch (etapa) {
+    EtapaSei.processo =>
+      processo.processoSei.isEmpty ? 'Usar processo aberto' : 'Abrir processo',
+    EtapaSei.requerimento =>
+      concluida ? 'Conferir requerimento' : 'Inserir requerimento',
+    EtapaSei.comprovantes =>
+      concluida ? 'Conferir comprovantes' : 'Enviar comprovantes',
+    EtapaSei.titulacao => concluida ? 'Conferir titulação' : 'Enviar titulação',
+    EtapaSei.relatorio =>
+      concluida ? 'Atualizar relatório' : 'Enviar relatório',
+  };
+
+  VoidCallback? _acao(BuildContext context, EtapaSei etapa, SituacaoSei? s) {
+    // Relatório já no SEI: gera de novo e troca o PDF do mesmo documento.
+    if (etapa == EtapaSei.relatorio && (s?.relatorio ?? false)) {
+      return () => _rodar(
+        context,
+        () => service.atualizarRelatorioSei(processo.id),
+        'Falha ao atualizar o relatório',
+      );
+    }
+    if (etapa != EtapaSei.processo) {
+      return () => _rodar(
+        context,
+        () => service.executarEtapaSei(processo.id, etapa),
+        'Falha na etapa "${etapa.titulo}"',
+      );
+    }
+    if (processo.processoSei.isNotEmpty) {
+      return () => _rodar(
+        context,
+        () => service.verificarSei(processo.id),
+        'Falha ao abrir o processo',
+      );
+    }
+    if ((s?.numeroAberto ?? '').isEmpty) return null;
+    return () => _rodar(
+      context,
+      () => service.executarEtapaSei(processo.id, etapa),
+      'Falha ao vincular o processo',
+    );
+  }
+
+  Widget _etapa(BuildContext context, int indice, EtapaSei etapa) {
+    final s = envio.situacoes[processo.id];
+    final concluida = s?.concluida(etapa) ?? false;
+    final emExecucao = envio.etapaEmExecucao == etapa;
+    final liberada =
+        etapa == EtapaSei.processo || (s?.disponivel(etapa) ?? false);
+    final acao = liberada && !_ocupado ? _acao(context, etapa, s) : null;
+    final cor = concluida
+        ? AppTheme.green
+        : liberada
+        ? Theme.of(context).colorScheme.primary
+        : AppTheme.textSecondary;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: emExecucao
+                ? const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : CircleAvatar(
+                    radius: 16,
+                    backgroundColor: cor.withValues(alpha: 0.15),
+                    child: concluida
+                        ? Icon(Icons.check, size: 18, color: cor)
+                        : Text(
+                            '${indice + 1}',
+                            style: TextStyle(
+                              color: cor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  etapa.titulo,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: liberada ? null : AppTheme.textSecondary,
+                  ),
+                ),
+                Text(
+                  _detalhe(etapa, s),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          if (etapa == EtapaSei.processo && processo.processoSei.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilledButton.tonalIcon(
+                onPressed: _ocupado || envio.prontoParaCriarProcesso
+                    ? null
+                    : onCriarProcesso,
+                icon: const Icon(Icons.add_business_outlined, size: 18),
+                label: const Text('Criar processo'),
+              ),
+            ),
+          if (concluida)
+            OutlinedButton(
+              style: _botaoCompacto,
+              onPressed: acao,
+              child: Text(_rotuloBotao(etapa, true)),
+            )
+          else
+            FilledButton(
+              style: _botaoCompactoCheio,
+              onPressed: acao,
+              child: Text(_rotuloBotao(etapa, false)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _faltantes(SituacaoSei s) {
+    final lista = s.comprovantesFaltantes;
+    final extra = lista.length > 5 ? ' e mais ${lista.length - 5}' : '';
+    return Padding(
+      padding: const EdgeInsets.only(left: 44, top: 2),
+      child: Text(
+        'Faltam: ${lista.take(5).join(', ')}$extra.',
+        style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => _cartao(
+    child: ListenableBuilder(
+      listenable: envio,
+      builder: (context, _) {
+        final s = envio.situacoes[processo.id];
+        final processoOk = s?.concluida(EtapaSei.processo) ?? false;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Montar processo no SEI',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Siga as etapas na ordem: cada uma é liberada quando a anterior '
+              'está concluída. Ao abrir o processo, o Gestor lê a árvore do SEI '
+              'e marca o que já foi feito, então você pode executar só a etapa '
+              'que falta. Documentos já presentes não são duplicados.',
+              style: TextStyle(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                OutlinedButton.icon(
+                  style: _botaoCompacto,
+                  onPressed: _ocupado
+                      ? null
+                      : () => _rodar(
+                          context,
+                          () => service.verificarSei(processo.id),
+                          'Falha ao verificar o SEI',
+                        ),
+                  icon: envio.verificando
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.fact_check_outlined),
+                  label: Text(
+                    envio.automation.isConnected
+                        ? 'Verificar no SEI'
+                        : 'Abrir SEI e verificar',
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: _ocupado || !processoOk
+                      ? null
+                      : () => _rodar(
+                          context,
+                          () => service.executarEtapasPendentes(processo.id),
+                          'Falha ao executar as etapas',
+                        ),
+                  icon: const Icon(Icons.playlist_play),
+                  label: const Text('Executar etapas pendentes'),
+                ),
+                if (_ocupado)
+                  TextButton.icon(
+                    onPressed: () {
+                      envio.cancelar = true;
+                      envio.atualizar();
+                    },
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('Interromper'),
+                  ),
+                SizedBox(
+                  width: 380,
+                  child: DropdownButtonFormField<AcessoComprovantesSei>(
+                    initialValue: processo.acessoComprovantesSei,
+                    isDense: true,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Acesso dos comprovantes',
+                      isDense: true,
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: AcessoComprovantesSei.restrito,
+                        child: Text('Restrito — Informação Pessoal (Art. 31)'),
+                      ),
+                      DropdownMenuItem(
+                        value: AcessoComprovantesSei.publico,
+                        child: Text('Público'),
+                      ),
+                    ],
+                    onChanged: _ocupado
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            service.save(
+                              processo.copyWith(acessoComprovantesSei: v),
+                            );
+                          },
+                  ),
+                ),
+              ],
+            ),
+            if (envio.prontoParaCriarProcesso) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Login detectado e unidade selecionada: '
+                        '${envio.unidadeSeiSelecionada}. Confira a unidade e '
+                        'crie o processo.',
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: onContinuarCriacao,
+                      icon: const Icon(Icons.add_business_outlined),
+                      label: const Text('Criar processo agora'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            for (final (i, etapa) in EtapaSei.values.indexed) ...[
+              _etapa(context, i, etapa),
+              if (etapa == EtapaSei.comprovantes &&
+                  s != null &&
+                  s.comprovantesFaltantes.isNotEmpty &&
+                  s.disponivel(EtapaSei.comprovantes))
+                _faltantes(s),
+            ],
+            if (s?.tudoConcluido ?? false)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.verified_outlined, color: AppTheme.green),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'Dossiê completo no SEI. Pendente: conferir e assinar o '
+                        'requerimento no SEI.',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 220),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(8),
+              // Os logs ficam do mais novo para o mais antigo: o mais recente
+              // aparece em cima, sempre visível.
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: envio.logs.length,
+                itemBuilder: (context, index) => SelectableText(
+                  envio.logs[index],
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     ),
   );
 }

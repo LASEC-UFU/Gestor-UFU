@@ -6167,7 +6167,7 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: destination,
+                  initialValue: destination,
                   decoration: const InputDecoration(
                     labelText: 'Semestre de destino',
                   ),
@@ -6180,8 +6180,9 @@ class _HorarioEditorDialogState extends State<_HorarioEditorDialog> {
                       )
                       .toList(),
                   onChanged: (value) {
-                    if (value != null)
+                    if (value != null) {
                       setDialogState(() => destination = value);
+                    }
                   },
                 ),
               ],

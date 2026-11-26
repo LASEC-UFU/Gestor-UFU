@@ -12,8 +12,12 @@ class Responsive {
   static bool isDesktop(BuildContext context) =>
       MediaQuery.of(context).size.width >= 1200;
 
-  static T value<T>(BuildContext context,
-      {required T mobile, T? tablet, T? desktop}) {
+  static T value<T>(
+    BuildContext context, {
+    required T mobile,
+    T? tablet,
+    T? desktop,
+  }) {
     if (isDesktop(context)) return desktop ?? tablet ?? mobile;
     if (isTablet(context)) return tablet ?? mobile;
     return mobile;

@@ -60,8 +60,11 @@ class StringMatcher {
 
   /// Encontra o melhor match de `query` em uma lista de `candidates`.
   /// Retorna (index, score) ou (-1, 0.0) se nenhum acima do threshold.
-  static (int, double) findBestMatch(String query, List<String> candidates,
-      {double threshold = 0.6}) {
+  static (int, double) findBestMatch(
+    String query,
+    List<String> candidates, {
+    double threshold = 0.6,
+  }) {
     int bestIdx = -1;
     double bestScore = 0.0;
 

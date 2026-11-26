@@ -33,6 +33,7 @@ class Parecer {
     this.nomeSignatario = '',
     this.cargoSignatario = '',
     this.descricaoSei = '',
+    this.comentarios = const [],
   });
 
   /// Linha "ASSUNTO:" da tabela do modelo.
@@ -59,6 +60,9 @@ class Parecer {
   /// Descrição do documento no SEI (metadados ao gerar o documento).
   final String descricaoSei;
 
+  /// Anotações privadas vinculadas a texto. Mantidas fora do HTML exportado.
+  final List<Map<String, dynamic>> comentarios;
+
   String secao(ParecerSecao s) => switch (s) {
     ParecerSecao.relatorio => relatorio,
     ParecerSecao.fundamentacao => fundamentacao,
@@ -83,6 +87,7 @@ class Parecer {
     String? nomeSignatario,
     String? cargoSignatario,
     String? descricaoSei,
+    List<Map<String, dynamic>>? comentarios,
   }) => Parecer(
     assunto: assunto ?? this.assunto,
     ementa: ementa ?? this.ementa,
@@ -95,6 +100,7 @@ class Parecer {
     nomeSignatario: nomeSignatario ?? this.nomeSignatario,
     cargoSignatario: cargoSignatario ?? this.cargoSignatario,
     descricaoSei: descricaoSei ?? this.descricaoSei,
+    comentarios: comentarios ?? this.comentarios,
   );
 
   factory Parecer.fromJson(Map<String, dynamic> json) {
@@ -113,6 +119,10 @@ class Parecer {
       nomeSignatario: s('nome_signatario', vazio.nomeSignatario),
       cargoSignatario: s('cargo_signatario', vazio.cargoSignatario),
       descricaoSei: s('descricao_sei', vazio.descricaoSei),
+      comentarios: [
+        for (final c in (json['comentarios'] as List? ?? const []))
+          if (c is Map) Map<String, dynamic>.from(c),
+      ],
     );
   }
 
@@ -128,5 +138,6 @@ class Parecer {
     'nome_signatario': nomeSignatario,
     'cargo_signatario': cargoSignatario,
     'descricao_sei': descricaoSei,
+    'comentarios': comentarios,
   };
 }

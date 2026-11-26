@@ -11,7 +11,10 @@ typedef ParecerLog = void Function(String message);
 
 /// Estilos do editor do SEI capturados durante a inserção (CSS das classes
 /// de parágrafo e a lista "Escolha o estilo").
-typedef SeiEstilosCapturados = ({String css, List<Map<String, dynamic>> estilos});
+typedef SeiEstilosCapturados = ({
+  String css,
+  List<Map<String, dynamic>> estilos,
+});
 
 /// Resultado da inserção: avisos da montagem, modelo nativo lido e estilos.
 typedef ParecerInsercao = ({
@@ -47,7 +50,9 @@ class SeiParecerAutomation {
 
     (Page, String)? editor = await _acharEditor();
     if (editor != null) {
-      log('SEI: editor de documento já aberto; o parecer será preenchido nele.');
+      log(
+        'SEI: editor de documento já aberto; o parecer será preenchido nele.',
+      );
     } else {
       final host = Uri.tryParse(page.url ?? '')?.host.toLowerCase() ?? '';
       if (!host.contains('sei.')) {
@@ -92,8 +97,7 @@ class SeiParecerAutomation {
       );
     }
     await _esperar<bool>(
-      () async =>
-          await editorPage.evaluate<bool>(_isEditorSavedScript) == true
+      () async => await editorPage.evaluate<bool>(_isEditorSavedScript) == true
           ? true
           : null,
       const Duration(seconds: 35),
@@ -142,15 +146,22 @@ class SeiParecerAutomation {
         );
         log('SEI: iniciada a inclusão de documento.');
       }
-      await _esperar<bool>(() async {
-        final ok = await _emQualquerFrame<bool>(
-          _chooseTypeScript,
-          args: const ['Parecer'],
-        );
-        if (ok == true) return true;
-        await _emQualquerFrame<bool>(_filterTypeScript, args: const ['Parecer']);
-        return null;
-      }, const Duration(seconds: 25), 'o tipo de documento "Parecer"');
+      await _esperar<bool>(
+        () async {
+          final ok = await _emQualquerFrame<bool>(
+            _chooseTypeScript,
+            args: const ['Parecer'],
+          );
+          if (ok == true) return true;
+          await _emQualquerFrame<bool>(
+            _filterTypeScript,
+            args: const ['Parecer'],
+          );
+          return null;
+        },
+        const Duration(seconds: 25),
+        'o tipo de documento "Parecer"',
+      );
       log('SEI: tipo Parecer selecionado.');
     } else {
       log('SEI: retomando o formulário do documento já aberto.');
@@ -240,7 +251,8 @@ const _clickIncludeDocumentScript = r'''() => {
 const _isMetadataFormScript =
     r'''() => !!(document.getElementById('txtDescricao') || document.querySelector('[name="txtDescricao"]'))''';
 
-const _isTypeChoiceScript = r'''() => (document.body?.innerText || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes('escolha o tipo do documento')''';
+const _isTypeChoiceScript =
+    r'''() => (document.body?.innerText || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().includes('escolha o tipo do documento')''';
 
 const _chooseTypeScript = r'''(wanted) => {
   const norm = v => (v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();

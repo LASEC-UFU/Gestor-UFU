@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -33,6 +32,7 @@ import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/module_registry.dart';
 import 'package:gestor_ufu/platform/services/session_lease.dart';
 import 'package:gestor_ufu/presentation/pages/ai_agent_widgets.dart';
+import 'package:gestor_ufu/presentation/pages/powershell_console.dart';
 
 /// Abre (ou traz para frente) a janela separada do Agente de IA. A janela é
 /// independente e pode ser arrastada para outro monitor.
@@ -271,6 +271,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
   );
   final _aiMemoryRuntime = AiMemoryRuntime();
   bool _orqTab = true;
+  bool _powerShellTab = false;
   final _orqMcp = <AgentBackend, AgentMcpServer>{};
 
   /// Uma sessão por agente (aba); a janela mostra a da aba selecionada.
@@ -916,7 +917,12 @@ class _AiAgentPageState extends State<AiAgentPage> {
   /// Troca de aba. Cada agente mantém a sua sessão (conectado, com a sua
   /// conversa e até trabalhando), então voltar a ele é imediato.
   Future<void> _selectProvider(AgentProvider provider) async {
-    if (_orqTab) setState(() => _orqTab = false);
+    if (_orqTab || _powerShellTab) {
+      setState(() {
+        _orqTab = false;
+        _powerShellTab = false;
+      });
+    }
     if (provider == _settings.provider) {
       if (_backend == null) await _autoConnect();
       return;
@@ -2112,6 +2118,19 @@ class _AiAgentPageState extends State<AiAgentPage> {
   Widget build(BuildContext context) {
     final vs = VsColors.of(context);
     final connected = _backend != null;
+    if (_powerShellTab) {
+      return Scaffold(
+        backgroundColor: vs.bg,
+        body: SafeArea(
+          child: Column(
+            children: [
+              _tabs(vs),
+              const Expanded(child: PowerShellConsole()),
+            ],
+          ),
+        ),
+      );
+    }
     if (_orqTab) {
       return Scaffold(
         backgroundColor: vs.bg,
@@ -2172,11 +2191,35 @@ class _AiAgentPageState extends State<AiAgentPage> {
           padding: const EdgeInsets.only(right: 4),
           child: InkWell(
             borderRadius: BorderRadius.circular(5),
-            onTap: () => setState(() => _orqTab = true),
+            onTap: () => setState(() {
+              _powerShellTab = true;
+              _orqTab = false;
+            }),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
-                color: _orqTab ? vs.tab : null,
+                color: _powerShellTab ? vs.tab : null,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                'PowerShell',
+                style: TextStyle(fontSize: 13, color: vs.text),
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 4),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(5),
+            onTap: () => setState(() {
+              _powerShellTab = false;
+              _orqTab = true;
+            }),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: _orqTab && !_powerShellTab ? vs.tab : null,
                 borderRadius: BorderRadius.circular(5),
               ),
               child: Row(

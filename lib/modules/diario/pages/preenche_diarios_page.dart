@@ -36,7 +36,7 @@ const _portalDefaultUrl = 'https://www.portaldocente.ufu.br';
 const _portalAddressKey = 'portal_docente_url';
 
 class PreencheDiariosPage extends StatefulWidget {
-  const PreencheDiariosPage({this.moodle, this.terms, super.key});
+  const PreencheDiariosPage({this.moodle, this.terms, this.changes, super.key});
 
   /// Períodos letivos compartilhados (padrão: lidos do banco local).
   final AcademicTermService? terms;
@@ -44,6 +44,7 @@ class PreencheDiariosPage extends StatefulWidget {
   /// Planejamento do Config Moodle (contrato; ausente se o módulo não estiver
   /// instalado).
   final MoodlePlanning? moodle;
+  final Listenable? changes;
 
   @override
   State<PreencheDiariosPage> createState() => _PreencheDiariosPageState();
@@ -86,6 +87,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   void initState() {
     super.initState();
     _termService.addListener(_onSharedTermChanged);
+    widget.changes?.addListener(_onExternalDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final snapshots =
           await widget.moodle?.snapshots() ?? <MoodleConfigSnapshot>[];
@@ -124,9 +126,14 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
   @override
   void dispose() {
     _termService.removeListener(_onSharedTermChanged);
+    widget.changes?.removeListener(_onExternalDataChanged);
     _urlController.dispose();
     unawaited(_automation.close());
     super.dispose();
+  }
+
+  void _onExternalDataChanged() {
+    if (mounted) unawaited(_loadSavedEntries());
   }
 
   Future<void> _loadSavedEntries() async {
@@ -580,6 +587,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
 
   Future<void> _copyDiary() async {
     await _persist();
+    if (!mounted) return;
     final sourceTerm = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -738,19 +746,22 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       final bytes =
           picked.bytes ??
           (picked.path == null ? null : await File(picked.path!).readAsBytes());
-      if (bytes == null)
+      if (bytes == null) {
         throw StateError('Não foi possível ler o arquivo selecionado.');
+      }
       final workbook = Excel.decodeBytes(bytes);
-      if (workbook.tables.isEmpty)
+      if (workbook.tables.isEmpty) {
         throw const FormatException('O arquivo não contém abas legíveis.');
+      }
       String? sheetName = workbook.tables.keys.first;
       if (workbook.tables.length > 1) {
         sheetName = await _chooseSheet(workbook.tables.keys.toList());
       }
       if (sheetName == null || !mounted) return;
       final sheet = workbook.tables[sheetName];
-      if (sheet == null)
+      if (sheet == null) {
         throw const FormatException('A aba selecionada não foi encontrada.');
+      }
       final resultMap = _parseWorksheet(sheet);
       if (resultMap.valid.isEmpty) {
         _showMessage(
@@ -774,8 +785,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _log(
         'Planilha importada: ${resultMap.valid.length} válido(s), ${resultMap.skipped} ignorado(s), ${resultMap.duplicates} repetido(s) na planilha e $overwritten sobrescrito(s) na mesclagem.',
       );
-      if (resultMap.errors.isNotEmpty)
+      if (resultMap.errors.isNotEmpty) {
         _log('Chaves inválidas descartadas: ${resultMap.errors.length}.');
+      }
     } catch (error) {
       _showMessage('Falha na importação Excel', '$error');
       _log('Falha ao importar Excel: $error');
@@ -846,7 +858,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('Escolher aba da planilha'),
           content: DropdownButtonFormField<String>(
-            value: selected,
+            initialValue: selected,
             items: names
                 .map((name) => DropdownMenuItem(value: name, child: Text(name)))
                 .toList(),
@@ -895,12 +907,13 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       if (bytes == null) throw StateError('Não foi possível ler o arquivo.');
       final raw = jsonDecode(utf8.decode(bytes));
       final validated = _validateMap(raw);
-      if (validated.valid.isEmpty && validated.errors.isNotEmpty)
+      if (validated.valid.isEmpty && validated.errors.isNotEmpty) {
         throw FormatException(
           validated.errors.entries
               .map((e) => '${e.key}: ${e.value}')
               .join('\n'),
         );
+      }
       setState(() {
         _entries
           ..clear()
@@ -911,7 +924,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
       _log(
         'JSON carregado: ${validated.valid.length} item(ns) válido(s), ${validated.errors.length} inválido(s).',
       );
-      if (validated.errors.isNotEmpty)
+      if (validated.errors.isNotEmpty) {
         _showMessage(
           'Alguns registros foram ignorados',
           validated.errors.entries
@@ -919,6 +932,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
               .map((e) => '${e.key}: ${e.value}')
               .join('\n'),
         );
+      }
     } catch (error) {
       _showMessage('Falha ao carregar JSON', '$error');
       _log('Falha ao carregar JSON: $error');
@@ -1272,8 +1286,9 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                           DropdownMenuItem(value: 'P', child: Text('Prática')),
                         ],
                         onChanged: (value) {
-                          if (value != null)
+                          if (value != null) {
                             setDialogState(() => modality = value);
+                          }
                         },
                       ),
                     ),
@@ -1494,7 +1509,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   DropdownButtonFormField<String>(
-                    value: shiftMode,
+                    initialValue: shiftMode,
                     decoration: const InputDecoration(
                       labelText: 'Como definir a mudança',
                     ),
@@ -1514,7 +1529,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                   ),
                   if (shiftMode == 'amount') ...[
                     DropdownButtonFormField<String>(
-                      value: unit,
+                      initialValue: unit,
                       decoration: const InputDecoration(labelText: 'Unidade'),
                       items: const ['Dias', 'Meses', 'Anos']
                           .map(
@@ -1616,7 +1631,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                     ),
                   ],
                   DropdownButtonFormField<String>(
-                    value: filter,
+                    initialValue: filter,
                     decoration: const InputDecoration(labelText: 'Aplicar em'),
                     items: const [
                       DropdownMenuItem(value: 'all', child: Text('Todas')),
@@ -2477,7 +2492,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                             onRequireEmpty: (value) =>
                                 setState(() => _requireEmpty = value),
                           );
-                          if (compact)
+                          if (compact) {
                             return ListView(
                               padding: const EdgeInsets.fromLTRB(
                                 24,
@@ -2491,6 +2506,7 @@ class _PreencheDiariosPageState extends State<PreencheDiariosPage> {
                                 SizedBox(height: 610, child: browser),
                               ],
                             );
+                          }
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(28, 12, 28, 28),
                             child: Row(
@@ -3520,8 +3536,9 @@ class _SavedDiary {
 
   factory _SavedDiary.fromJson(Map<String, dynamic> json) {
     final rawEntries = json['entries'];
-    if (rawEntries is! Map)
+    if (rawEntries is! Map) {
       throw const FormatException('Invalid diary entries');
+    }
     return _SavedDiary(
       id: json['id'] as String,
       name: json['name'] as String,

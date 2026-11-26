@@ -7,21 +7,40 @@
 <link rel="stylesheet" id="estilos-padrao" href="sei_estilos.css">
 <style id="estilos-sei"></style>
 <style>
-  html, body { margin: 0; height: 100%; background: #e9eaee; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9eaee; }
   body { display: flex; flex-direction: column; font-family: "Segoe UI", sans-serif; }
-  #barra { position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 1px solid #d6d8de; }
+  #barra { position: sticky; top: 0; z-index: 10; background: #fff; border-bottom: 1px solid #d6d8de; padding-right: 46px; }
   #barra .ck.ck-toolbar { border: 0; background: #fff; padding: 2px 6px; }
-  #area { flex: 1; overflow: auto; padding: 18px 12px 40px; }
-  #folha { max-width: 21cm; margin: 0 auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  #gestor-tela-cheia { position: absolute; right: 7px; top: 7px; width: 32px; height: 32px; border: 0; border-radius: 4px; background: #fff; color: #2f3545; font: 20px/1 "Segoe UI Symbol", sans-serif; cursor: pointer; }
+  #gestor-tela-cheia:hover { background: #e9efff; color: #215bd8; }
+  /* min-height: 0 é indispensável em um filho flex: sem ele, a área cresce
+     com o documento e a roda do mouse não encontra um contêiner rolável. */
+  #area { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 12px 40px; }
+  #folha { position: relative; max-width: 21cm; margin: 0 auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.18); }
+  /* Comentário selecionado: cor própria, sublinhado, contorno e barra na margem. */
+  ::highlight(parecer-ativo) { background-color: #64b5f6; color: #062a57; text-decoration: underline; text-decoration-thickness: 2px; text-decoration-color: #0b4fa8; }
+  .gestor-ativo-caixa { position: absolute; pointer-events: none; outline: 2px solid #0b4fa8; border-radius: 2px; z-index: 5; }
+  .gestor-ativo-barra { position: absolute; left: 6px; width: 6px; border-radius: 3px; background: #0b4fa8; pointer-events: none; z-index: 5; }
   #folha .ck-editor__editable { min-height: 24cm; padding: 1.5cm 1.8cm; border: 0 !important; box-shadow: none !important; }
   #rodape { font: 11px "Segoe UI", sans-serif; color: #5e6478; padding: 4px 10px; background: #fff; border-top: 1px solid #d6d8de; display: flex; gap: 16px; }
+  /* Alternativa quando o WebView não autorizar a Fullscreen API. */
+  body.gestor-tela-cheia #area { padding: 0; }
+  body.gestor-tela-cheia #folha { max-width: none; min-height: 100%; box-shadow: none; }
   .ck.ck-button.gestor-ativo { background: #ffe3b3 !important; }
   .ck-content a.ancora_sei { color: #1f4e9c; text-decoration: underline; cursor: default; }
+  ::highlight(parecer-comentarios) { background: #ffe7a8; text-decoration: underline; text-decoration-color: #d18a00; }
+  .ck-content .gestor-consulta { background: #cfe3ff; outline: 1px solid #6b9be0; }
+  .ck-content .gestor-consulta-cursor { display: inline-block; width: 2px; height: 1.1em; margin: 0 -1px; vertical-align: text-bottom; background: #1f6fd1; box-shadow: 0 0 0 2px #cfe3ff; }
+  #menu-ia { position: fixed; z-index: 100; min-width: 230px; background: #fff; border: 1px solid #c9ccd4; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.18); padding: 4px 0; font: 13px "Segoe UI", sans-serif; }
+  #menu-ia button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 6px 14px; font: inherit; color: #1d2230; cursor: pointer; }
+  #menu-ia button:hover:not(:disabled) { background: #eef3fb; }
+  #menu-ia button:disabled { color: #a3a8b4; cursor: default; }
+  #menu-ia .dica { border-top: 1px solid #e3e5ea; margin-top: 4px; padding: 5px 14px 2px; font-size: 11px; color: #7a8090; }
   @media (max-width: 700px) { #folha .ck-editor__editable { padding: 1cm 0.8cm; } }
 </style>
 </head>
 <body>
-<div id="barra"></div>
+<div id="barra"><button id="gestor-tela-cheia" type="button" title="Tela cheia do texto" aria-label="Tela cheia do texto">⛶</button></div>
 <div id="area"><div id="folha"><div id="editor"></div></div></div>
 <div id="rodape"><span id="contagem"></span><span id="aviso"></span></div>
 <script src="ckeditor5.umd.js"></script>

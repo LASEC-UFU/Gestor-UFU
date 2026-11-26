@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:gestor_ufu/modules/elabora_relato/application/parecer_service.dart';
+import 'package:gestor_ufu/modules/elabora_relato/application/processos_parecer_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/application/sei_arvore_service.dart';
 import 'package:gestor_ufu/modules/elabora_relato/elabora_relato_module.dart';
 import 'package:gestor_ufu/modules/elabora_relato/pages/elabora_relato_page.dart';
@@ -74,15 +75,15 @@ void main() {
   group('comandos', () {
     late Map<String, ModuleCommand> commands;
     late SeiArvoreService service;
+    late ProcessosParecerService processos;
 
     setUp(() {
       SharedPreferences.setMockInitialValues({});
       service = SeiArvoreService();
+      final parecer = ParecerService(arvore: service);
+      processos = ProcessosParecerService(parecer: parecer);
       commands = {
-        for (final c in elaboraRelatoCommands(
-          service,
-          ParecerService(arvore: service),
-        ))
+        for (final c in elaboraRelatoCommands(service, parecer, processos))
           c.id: c,
       };
     });
@@ -103,6 +104,8 @@ void main() {
     });
 
     test('relatório salva .txt', () async {
+      // Sem processo aberto, o comando cria e abre um.
+      await processos.garantirAtivo();
       service.definirDocumentos([
         SeiDocumento.fromTree(1, 'Despacho (7654321)'),
       ]);
@@ -134,20 +137,40 @@ void main() {
         create: (_) => ThemeController(isLight: true),
         child: MaterialApp(
           home: ElaboraRelatoPage(
-            parecer: ParecerService(arvore: SeiArvoreService()),
+            processos: ProcessosParecerService(
+              parecer: ParecerService(arvore: SeiArvoreService()),
+            ),
           ),
         ),
       ),
     );
-    // O editor (WebView2) não existe em testes: só alguns quadros.
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.text('Parecer / Relato'), findsOneWidget);
-    expect(find.byType(Tab), findsNWidgets(3));
+    // Primeiro a lista de processos.
+    expect(find.text('Nenhum processo cadastrado'), findsOneWidget);
+    await tester.tap(find.text('Novo processo').first);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(find.byType(TextField).first, 'Estágio Mecânica');
+    await tester.tap(find.text('Salvar'));
+    // O editor (WebView2) não existe em testes: só alguns quadros.
+    for (var i = 0; i < 8; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Estágio Mecânica'), findsOneWidget);
+    expect(find.text('Inserir no SEI'), findsOneWidget);
+    expect(find.byType(Tab), findsNWidgets(4));
     expect(find.text('II. FUNDAMENTAÇÃO E ANÁLISE'), findsOneWidget);
     expect(find.text('III. CONCLUSÃO'), findsOneWidget);
     expect(find.text('1 · Extrair árvore'), findsOneWidget);
     expect(find.text('Extrair árvore'), findsOneWidget);
+
+    // Aba dos documentos do processo (leitura e marcação).
+    await tester.tap(find.text('Documentos do processo'));
+    for (var i = 0; i < 6; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.text('Anexar documento'), findsWidgets);
+    expect(find.text('Documentos do processo'), findsWidgets);
   });
 }

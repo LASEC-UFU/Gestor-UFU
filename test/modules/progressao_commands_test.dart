@@ -78,6 +78,16 @@ void main() {
     expect(itens.every((i) => i['tabela'] == 'A1.1'), isTrue);
   });
 
+  test(
+    'montagem do SEI fica disponível ao agente com aprovação obrigatória',
+    () {
+      final command = commands['progressao.montarProcessoSei']!;
+      expect(command.approval, CommandApproval.required);
+      expect(command.mutates, isTrue);
+      expect(command.inputSchema['required'], contains('processoId'));
+    },
+  );
+
   test('gera o PDF, duplica e excluir exige aprovação', () async {
     final created = await run('progressao.criar', {
       'pastaComprovantes': dir.path,
