@@ -1,4 +1,5 @@
 import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
+import 'package:gestor_ufu/modules/equivalencia/data/curriculo_eca_2020.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 /// Persistência da Equivalência de Alunos.
@@ -13,10 +14,11 @@ class EquivalenciaRepository {
   /// migrar; nunca apagada.
   static const legacyKey = 'student_equivalencies.v1';
 
-  static const defaultCurriculum = Curriculum(
+  static final defaultCurriculum = Curriculum(
     id: 'eca-2020',
     course: 'Engenharia de Controle e Automação',
     name: 'Currículo Proposto (2020/1)',
+    subjects: eca2020Subjects,
   );
 
   Future<EquivalenciaState> load() async {
@@ -49,13 +51,48 @@ class EquivalenciaRepository {
         cases = migrated.cases;
       }
     }
-    if (curricula.isEmpty) curricula = [defaultCurriculum];
+    if (!curricula.any((c) => c.id == defaultCurriculum.id)) {
+      curricula = [...curricula, defaultCurriculum];
+    } else {
+      curricula = [
+        for (final curriculum in curricula)
+          curriculum.id == defaultCurriculum.id
+              ? curriculum.copyWith(
+                  subjects: mergeSubjects([
+                    ...curriculum.subjects,
+                    ...defaultCurriculum.subjects,
+                  ]),
+                )
+              : curriculum,
+      ];
+    }
     currentId ??= curricula.first.id;
-    return EquivalenciaState(
+    final state = EquivalenciaState(
       curricula: curricula,
       cases: cases,
       currentId: currentId,
     );
+    var needsSave = data is! Map;
+    if (data is Map) {
+      final oldDefault = (data['curricula'] as List? ?? const [])
+          .whereType<Map>()
+          .where((c) => c['id'] == defaultCurriculum.id)
+          .firstOrNull;
+      final oldSubjects = (oldDefault?['subjects'] as List? ?? const [])
+          .whereType<Map>();
+      needsSave =
+          oldDefault == null ||
+          defaultCurriculum.subjects.any(
+            (subject) => !oldSubjects.any(
+              (old) =>
+                  old['code'] == subject.code &&
+                  old['name'] == subject.name &&
+                  old['period'] == subject.period,
+            ),
+          );
+    }
+    if (needsSave) await save(state);
+    return state;
   }
 
   Future<void> save(EquivalenciaState state) => _store.writeJson(key, {

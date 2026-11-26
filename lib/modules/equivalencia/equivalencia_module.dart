@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_commands.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_service.dart';
 import 'package:gestor_ufu/modules/equivalencia/data/equivalencia_repository.dart';
+import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
 import 'package:gestor_ufu/modules/equivalencia/equivalencia_skill.dart';
 import 'package:gestor_ufu/modules/equivalencia/pages/equivalencia_page.dart';
+import 'package:gestor_ufu/modules/equivalencia/pages/equivalencia_history_window.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/module/gestor_module.dart';
 import 'package:gestor_ufu/platform/services/gestor_services.dart';
@@ -71,4 +73,26 @@ class EquivalenciaModule extends GestorModule {
 
   @override
   List<ModuleTemplate> get templates => equivalenciaTemplates();
+
+  @override
+  Map<String, ModuleWindowBuilder> get windows => {
+    'equivalenciaHistory': (payload) => ModuleWindow(
+      title: 'Histórico visual',
+      size: const Size(1580, 920),
+      minimumSize: const Size(980, 650),
+      app: EquivalenciaHistoryWindowApp(
+        caseId: payload['caseId'] as String,
+        student: payload['student'] as String? ?? '',
+        entries: (payload['entries'] as List)
+            .map(
+              (entry) => HistoricalSubject.fromJson(
+                Map<String, dynamic>.from(entry as Map),
+              ),
+            )
+            .toList(),
+        channelName: payload['channel'] as String,
+        isLight: payload['isLight'] as bool? ?? false,
+      ),
+    ),
+  };
 }

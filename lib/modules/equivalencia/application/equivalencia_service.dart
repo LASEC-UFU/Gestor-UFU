@@ -22,7 +22,7 @@ class EquivalenciaService extends ChangeNotifier {
 
   EquivalenciaState get state =>
       _state ??
-      const EquivalenciaState(
+      EquivalenciaState(
         curricula: [EquivalenciaRepository.defaultCurriculum],
         cases: [],
         currentId: 'eca-2020',

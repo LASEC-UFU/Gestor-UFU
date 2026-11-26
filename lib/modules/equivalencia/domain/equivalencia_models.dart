@@ -8,9 +8,11 @@ class Subject {
     required this.name,
     required this.theoretical,
     required this.practical,
+    this.period = '',
   });
 
   final String code, name;
+  final String period;
   final int theoretical, practical;
 
   int get hours => theoretical + practical;
@@ -20,6 +22,7 @@ class Subject {
     'name': name,
     'theoretical': theoretical,
     'practical': practical,
+    'period': period,
   };
 
   factory Subject.fromJson(Map<String, dynamic> j) => Subject(
@@ -27,6 +30,7 @@ class Subject {
     name: j['name'] ?? '',
     theoretical: j['theoretical'] ?? 0,
     practical: j['practical'] ?? 0,
+    period: j['period'] ?? '',
   );
 }
 
@@ -101,6 +105,39 @@ class EquivalenceBlock {
   );
 }
 
+/// Disciplina exibida no histórico visual do aluno.
+class HistoricalSubject {
+  const HistoricalSubject({required this.subject, this.status = 'Não cursada'});
+
+  final Subject subject;
+  final String status;
+
+  HistoricalSubject copyWith({String? status}) =>
+      HistoricalSubject(subject: subject, status: status ?? this.status);
+
+  Map<String, dynamic> toJson() => {
+    'subject': subject.toJson(),
+    'status': status,
+  };
+
+  factory HistoricalSubject.fromJson(Map<String, dynamic> json) {
+    final rawStatus = json['status'] as String?;
+    final status = switch (rawStatus) {
+      'Não cursada' || 'Matriculado' || 'Aprovado' => rawStatus!,
+      _ =>
+        json['equivalent'] == true || rawStatus == 'Aprovado'
+            ? 'Aprovado'
+            : 'Não cursada',
+    };
+    return HistoricalSubject(
+      subject: Subject.fromJson(
+        Map<String, dynamic>.from(json['subject'] as Map),
+      ),
+      status: status,
+    );
+  }
+}
+
 /// Análise de transferência de um aluno.
 class EquivalenceCase {
   const EquivalenceCase({
@@ -114,6 +151,7 @@ class EquivalenceCase {
     required this.blocks,
     this.currentCatalog = const [],
     this.priorCatalog = const [],
+    this.history = const [],
   });
 
   static const statuses = ['Em análise', 'Deferida', 'Indeferida'];
@@ -127,6 +165,7 @@ class EquivalenceCase {
       notes;
   final List<EquivalenceBlock> blocks;
   final List<Subject> currentCatalog, priorCatalog;
+  final List<HistoricalSubject> history;
 
   bool get isApproved => status.trim().toLowerCase() == 'deferida';
 
@@ -141,6 +180,7 @@ class EquivalenceCase {
     'blocks': blocks.map((e) => e.toJson()).toList(),
     'currentCatalog': currentCatalog.map((e) => e.toJson()).toList(),
     'priorCatalog': priorCatalog.map((e) => e.toJson()).toList(),
+    'history': history.map((e) => e.toJson()).toList(),
   };
 
   factory EquivalenceCase.fromJson(Map<String, dynamic> j) {
@@ -168,8 +208,28 @@ class EquivalenceCase {
       blocks: blocks,
       currentCatalog: catalog('currentCatalog', true),
       priorCatalog: catalog('priorCatalog', false),
+      history: (j['history'] as List? ?? const [])
+          .map((e) => HistoricalSubject.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
     );
   }
+
+  EquivalenceCase copyWith({
+    List<HistoricalSubject>? history,
+    List<Subject>? priorCatalog,
+  }) => EquivalenceCase(
+    id: id,
+    student: student,
+    studentId: studentId,
+    currentCurriculumId: currentCurriculumId,
+    priorCurriculumId: priorCurriculumId,
+    status: status,
+    notes: notes,
+    blocks: blocks,
+    currentCatalog: currentCatalog,
+    priorCatalog: priorCatalog ?? this.priorCatalog,
+    history: history ?? this.history,
+  );
 }
 
 /// Tudo que o módulo guarda.

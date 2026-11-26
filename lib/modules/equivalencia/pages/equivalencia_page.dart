@@ -1,10 +1,17 @@
+import 'dart:convert';
+
+import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/certidao_pdf.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_service.dart';
+import 'package:gestor_ufu/modules/equivalencia/data/curriculo_eca_2020.dart';
 import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
+import 'package:gestor_ufu/modules/equivalencia/pages/equivalencia_history_window.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
 
 /// Cadastro de currículos e análise de transferência por blocos curriculares.
@@ -22,6 +29,9 @@ class EquivalenciaPage extends StatefulWidget {
 class _EquivalenciaPageState extends State<EquivalenciaPage> {
   final _search = TextEditingController();
   bool _busy = true;
+  WindowController? _historyController;
+  WindowMethodChannel? _historyChannel;
+  bool _openingHistory = false;
 
   EquivalenciaService get _service => widget.service;
   List<EquivalenceCase> get _cases => _service.state.cases;
@@ -70,6 +80,158 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
     }
   }
 
+  Future<void> _showHistory(EquivalenceCase item) async {
+    final initial = _historyForCase(item);
+    final isDesktop =
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.windows ||
+            defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.linux);
+    if (isDesktop) {
+      try {
+        await _openHistoryWindow(item, initial);
+        return;
+      } catch (error) {
+        _message('Não foi possível abrir outra janela: $error');
+      }
+    }
+    var entries = initial;
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Histórico visual · ${item.student}'),
+          content: SizedBox(
+            width: (MediaQuery.sizeOf(context).width * .9).clamp(720.0, 1450.0),
+            height: (MediaQuery.sizeOf(context).height * .78).clamp(
+              440.0,
+              760.0,
+            ),
+            child: EquivalenciaHistoryGrid(
+              student: item.student,
+              entries: entries,
+              onChanged: (updated) async =>
+                  setDialogState(() => entries = updated),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Salvar histórico'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (shouldSave == true) await _saveHistory(item.id, entries);
+  }
+
+  Future<void> _openHistoryWindow(
+    EquivalenceCase item,
+    List<HistoricalSubject> entries,
+  ) async {
+    final activeChannel = _historyChannel;
+    final activeController = _historyController;
+    if (activeChannel != null && activeController != null) {
+      final windows = await WindowController.getAll();
+      if (windows.any(
+        (window) => window.windowId == activeController.windowId,
+      )) {
+        await activeChannel.invokeMethod<bool>('setHistory', {
+          'caseId': item.id,
+          'student': item.student,
+          'entries': entries.map((entry) => entry.toJson()).toList(),
+        });
+        await activeController.show();
+        return;
+      }
+      await activeChannel.setMethodCallHandler(null);
+      _historyChannel = null;
+      _historyController = null;
+    }
+    if (_openingHistory) return;
+    _openingHistory = true;
+    final channelName =
+        'gestor_ufu_history_${DateTime.now().microsecondsSinceEpoch}';
+    final channel = WindowMethodChannel(
+      channelName,
+      mode: ChannelMode.bidirectional,
+    );
+    try {
+      await channel.setMethodCallHandler((call) async {
+        if (call.method == 'saveHistory') {
+          final payload = Map<String, dynamic>.from(call.arguments as Map);
+          final history = (payload['entries'] as List)
+              .map(
+                (entry) => HistoricalSubject.fromJson(
+                  Map<String, dynamic>.from(entry as Map),
+                ),
+              )
+              .toList();
+          await _saveHistory(payload['caseId'] as String, history);
+          return true;
+        }
+        if (call.method == 'closed') return true;
+        throw MissingPluginException('Método não reconhecido: ${call.method}');
+      });
+      _historyChannel = channel;
+      final controller = await WindowController.create(
+        WindowConfiguration(
+          arguments: jsonEncode({
+            'type': 'equivalenciaHistory',
+            'channel': channelName,
+            'caseId': item.id,
+            'student': item.student,
+            'entries': entries.map((entry) => entry.toJson()).toList(),
+            'isLight': AppTheme.isLight,
+          }),
+        ),
+      );
+      _historyController = controller;
+      await controller.show();
+    } catch (_) {
+      await channel.setMethodCallHandler(null);
+      _historyChannel = null;
+      _historyController = null;
+      rethrow;
+    } finally {
+      _openingHistory = false;
+    }
+  }
+
+  Future<void> _saveHistory(
+    String caseId,
+    List<HistoricalSubject> history,
+  ) async {
+    final item = _service.state.caseById(caseId);
+    if (item == null) return;
+    await _service.saveCase(item.copyWith(history: history));
+  }
+
+  List<HistoricalSubject> _historyForCase(EquivalenceCase item) {
+    final curriculum = _curriculum(item.currentCurriculumId);
+    final saved = {
+      for (final entry in item.history) subjectCatalogKey(entry.subject): entry,
+    };
+    if (curriculum == null) return item.history;
+    return [
+      for (final subject in curriculum.subjects)
+        saved[subjectCatalogKey(subject)] ??
+            HistoricalSubject(
+              subject: subject,
+              status:
+                  item.studentId == eca2020ExampleStudentId &&
+                      eca2020ExampleApprovedCodes.contains(subject.code)
+                  ? 'Aprovado'
+                  : 'Não cursada',
+            ),
+    ];
+  }
+
   Future<void> _removeCase(EquivalenceCase item) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -112,7 +274,7 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
       context: context,
       barrierDismissible: false,
       builder: (_) => _CaseDialog(
-        value: draft,
+        value: draft.copyWith(history: _historyForCase(draft)),
         curricula: _curricula,
         removeCurriculumSubject: _service.removeCurriculumSubject,
       ),
@@ -324,6 +486,11 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
           spacing: 4,
           children: [
             Chip(label: Text(item.status)),
+            IconButton(
+              tooltip: 'Mostrar histórico visual em outra janela',
+              onPressed: () => _showHistory(item),
+              icon: const Icon(Icons.history),
+            ),
             if (item.isApproved)
               IconButton(
                 tooltip: 'Imprimir certidão de estudos em PDF',
@@ -569,6 +736,12 @@ class _CaseDialogState extends State<_CaseDialog> {
     ...widget.value.priorCatalog,
     ...widget.value.blocks.expand((b) => b.prior),
   ]);
+  late final Set<String> _blockedCurrent = {
+    ...widget.value.history
+        .where((e) => e.status != 'Não cursada')
+        .map((e) => subjectCatalogKey(e.subject)),
+    ...widget.value.blocks.expand((b) => b.current).map(subjectCatalogKey),
+  };
   @override
   void dispose() {
     _student.dispose();
@@ -582,13 +755,23 @@ class _CaseDialogState extends State<_CaseDialog> {
       context: context,
       builder: (_) => _BlockDialog(
         value: old,
-        currentCatalog: mergeSubjects([
-          ..._currentCatalog,
-          ...?widget.curricula
-              .where((c) => c.id == _current)
-              .firstOrNull
-              ?.subjects,
-        ]),
+        currentCatalog:
+            mergeSubjects([
+                  ..._currentCatalog,
+                  ...?widget.curricula
+                      .where((c) => c.id == _current)
+                      .firstOrNull
+                      ?.subjects,
+                ])
+                .where(
+                  (s) =>
+                      !_blockedCurrent.contains(subjectCatalogKey(s)) ||
+                      (old?.current.any(
+                            (p) => subjectCatalogKey(p) == subjectCatalogKey(s),
+                          ) ??
+                          false),
+                )
+                .toList(),
         priorCatalog: _priorCatalog,
         removeCurrentSubject: (subject) async {
           final key = subjectCatalogKey(subject);
@@ -655,6 +838,39 @@ class _CaseDialogState extends State<_CaseDialog> {
       );
       return;
     }
+    final alreadyUsed = <String, String>{};
+    for (final block in _blocks) {
+      for (final subject in block.current) {
+        final key = subjectCatalogKey(subject);
+        if (_blockedCurrent.contains(key) &&
+            !widget.value.blocks.any(
+              (old) =>
+                  old.id == block.id &&
+                  old.current.any((s) => subjectCatalogKey(s) == key),
+            )) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Esta disciplina está matriculada ou aprovada no histórico e não pode ser usada em um novo bloco de equivalência.',
+              ),
+            ),
+          );
+          return;
+        }
+        final firstBlock = alreadyUsed[key];
+        if (firstBlock != null && firstBlock != block.id) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Uma disciplina de destino não pode ser usada em mais de um bloco.',
+              ),
+            ),
+          );
+          return;
+        }
+        alreadyUsed[key] = block.id;
+      }
+    }
     Navigator.pop(
       context,
       EquivalenceCase(
@@ -674,8 +890,23 @@ class _CaseDialogState extends State<_CaseDialog> {
               ?.subjects,
         ]),
         priorCatalog: _priorCatalog,
+        history: _historyForSave(),
       ),
     );
+  }
+
+  List<HistoricalSubject> _historyForSave() {
+    final byKey = <String, HistoricalSubject>{
+      for (final entry in widget.value.history)
+        subjectCatalogKey(entry.subject): entry,
+    };
+    for (final subject in _blocks.expand((b) => b.current)) {
+      final key = subjectCatalogKey(subject);
+      byKey[key] = (byKey[key] ?? HistoricalSubject(subject: subject)).copyWith(
+        status: 'Aprovado',
+      );
+    }
+    return byKey.values.toList();
   }
 
   @override
