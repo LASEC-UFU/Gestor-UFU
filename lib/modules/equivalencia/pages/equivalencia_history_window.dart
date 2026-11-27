@@ -119,7 +119,7 @@ class EquivalenciaHistoryGrid extends StatefulWidget {
 
 class _EquivalenciaHistoryGridState extends State<EquivalenciaHistoryGrid> {
   final _horizontalScrollController = ScrollController();
-  static const _statuses = ['Não cursada', 'Matriculado', 'Aprovado'];
+  static const _statuses = ['Não cursada', 'Dispensado', 'Aprovado'];
 
   @override
   void dispose() {
@@ -141,18 +141,18 @@ class _EquivalenciaHistoryGridState extends State<EquivalenciaHistoryGrid> {
   }
 
   Color _color(String status) => switch (status) {
-    'Matriculado' => Colors.blue.shade300,
+    'Dispensado' => Colors.blue.shade300,
     'Aprovado' => Colors.lightGreen.shade400,
     _ => Colors.grey.shade300,
   };
 
   Future<void> _cycle(HistoricalSubject entry) async {
+    if (entry.status == 'Dispensado') return;
     final index = widget.entries.indexOf(entry);
     if (index < 0) return;
-    final current = _statuses.indexOf(entry.status);
     final updated = [...widget.entries];
     updated[index] = entry.copyWith(
-      status: _statuses[(current + 1) % _statuses.length],
+      status: entry.status == 'Aprovado' ? 'Não cursada' : 'Aprovado',
     );
     try {
       await widget.onChanged(updated);
@@ -212,7 +212,7 @@ class _EquivalenciaHistoryGridState extends State<EquivalenciaHistoryGrid> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     const Text(
-                      'Clique em uma disciplina para alternar a situação. Azul e verde não podem entrar em novos blocos de equivalência.',
+                      'Clique para alternar entre não cursada e aprovado. Azul: dispensado por equivalência, com alteração apenas nos blocos. Verde: indisponível para equivalência.',
                     ),
                     for (final status in _statuses)
                       Row(
@@ -281,7 +281,9 @@ class _EquivalenciaHistoryGridState extends State<EquivalenciaHistoryGrid> {
                                   color: _color(entry.status),
                                   clipBehavior: Clip.antiAlias,
                                   child: InkWell(
-                                    onTap: () => _cycle(entry),
+                                    onTap: entry.status == 'Dispensado'
+                                        ? null
+                                        : () => _cycle(entry),
                                     child: Padding(
                                       padding: const EdgeInsets.all(9),
                                       child: Column(
