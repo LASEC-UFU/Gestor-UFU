@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <shellapi.h>
 
 #include "resource.h"
 
@@ -28,6 +29,12 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
+
+constexpr UINT kTrayCallbackMessage = WM_APP + 1;
+constexpr UINT kTrayIconId = 1;
+constexpr UINT kTrayOpenCommand = 1001;
+constexpr UINT kTrayExitCommand = 1002;
+const UINT kTaskbarCreatedMessage = RegisterWindowMessageW(L"TaskbarCreated");
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
 
@@ -179,13 +186,47 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_CLOSE:
+      if (quit_on_close_) {
+        if (!tray_icon_added_ && !AddTrayIcon(hwnd)) {
+          MessageBoxW(hwnd,
+                      L"O Gestor UFU nao conseguiu criar o icone da bandeja. "
+                      L"A janela permanecera aberta.",
+                      L"Gestor UFU", MB_OK | MB_ICONWARNING);
+          return 0;
+        }
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+      }
+      break;
+
+    case kTrayCallbackMessage:
+      if (quit_on_close_) {
+        if (lparam == WM_LBUTTONUP || lparam == WM_LBUTTONDBLCLK) {
+          ShowFromTray();
+        } else if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU) {
+          ShowTrayMenu(hwnd);
+        }
+        return 0;
+      }
+      break;
+
     case WM_DESTROY:
+      RemoveTrayIcon();
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_ENDSESSION:
+      if (wparam != 0 && quit_on_close_) {
+        RemoveTrayIcon();
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      break;
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);
@@ -218,7 +259,69 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
   }
 
+  if (quit_on_close_ && message == kTaskbarCreatedMessage && tray_icon_added_) {
+    tray_icon_added_ = false;
+    AddTrayIcon(hwnd);
+    return 0;
+  }
+
   return DefWindowProc(window_handle_, message, wparam, lparam);
+}
+
+bool Win32Window::AddTrayIcon(HWND window) {
+  NOTIFYICONDATAW icon{};
+  icon.cbSize = sizeof(icon);
+  icon.hWnd = window;
+  icon.uID = kTrayIconId;
+  icon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  icon.uCallbackMessage = kTrayCallbackMessage;
+  icon.hIcon = LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
+  wcscpy_s(icon.szTip,
+           L"Gestor UFU ativo. Clique para abrir; clique direito para sair.");
+  if (!Shell_NotifyIconW(NIM_ADD, &icon)) return false;
+  tray_icon_added_ = true;
+  return true;
+}
+
+void Win32Window::RemoveTrayIcon() {
+  if (!tray_icon_added_) return;
+  NOTIFYICONDATAW icon{};
+  icon.cbSize = sizeof(icon);
+  icon.hWnd = window_handle_;
+  icon.uID = kTrayIconId;
+  Shell_NotifyIconW(NIM_DELETE, &icon);
+  tray_icon_added_ = false;
+}
+
+void Win32Window::ShowFromTray() {
+  if (!window_handle_) return;
+  ShowWindow(window_handle_, SW_RESTORE);
+  SetForegroundWindow(window_handle_);
+  if (child_content_) SetFocus(child_content_);
+}
+
+void Win32Window::ShowTrayMenu(HWND window) {
+  HMENU menu = CreatePopupMenu();
+  if (!menu) return;
+  AppendMenuW(menu, MF_STRING, kTrayOpenCommand, L"Abrir Gestor UFU");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, kTrayExitCommand, L"Sair do Gestor UFU");
+
+  POINT cursor{};
+  GetCursorPos(&cursor);
+  SetForegroundWindow(window);
+  const UINT command = TrackPopupMenu(
+      menu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
+      cursor.x, cursor.y, 0, window, nullptr);
+  DestroyMenu(menu);
+  PostMessageW(window, WM_NULL, 0, 0);
+
+  if (command == kTrayOpenCommand) {
+    ShowFromTray();
+  } else if (command == kTrayExitCommand) {
+    RemoveTrayIcon();
+    DestroyWindow(window);
+  }
 }
 
 void Win32Window::Destroy() {

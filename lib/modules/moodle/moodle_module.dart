@@ -102,7 +102,8 @@ class MoodleModule extends GestorModule {
   ModuleSkill get skill => moodleSkill();
 
   @override
-  List<ModuleCommand> get commands => moodleCommands(config);
+  List<ModuleCommand> get commands =>
+      moodleCommands(config, auth: auth, sync: sync);
 
   @override
   List<ModuleTemplate> get templates => const [

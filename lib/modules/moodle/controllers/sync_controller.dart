@@ -367,8 +367,9 @@ class SyncController extends ChangeNotifier {
   Future<void> syncToMoodle(
     String token,
     String baseUrl,
-    CourseConfig config,
-  ) async {
+    CourseConfig config, {
+    bool Function()? isCancellationRequested,
+  }) async {
     _syncing = true;
     _progress = 0;
     _progressMessage = 'Iniciando sincronização...';
@@ -385,7 +386,17 @@ class SyncController extends ChangeNotifier {
     String?
     firstAccessErrorDetail; // Detalhe do 1º erro de acesso para diagnóstico
 
+    bool stopIfCancelled() {
+      if (isCancellationRequested?.call() != true) return false;
+      _progressMessage = 'Sincronização cancelada entre seções.';
+      _error = 'Cancelada pelo usuário no app remoto.';
+      _syncing = false;
+      notifyListeners();
+      return true;
+    }
+
     for (final match in _matches) {
+      if (stopIfCancelled()) return;
       step++;
       _progress = step / totalSteps;
 
@@ -727,6 +738,7 @@ class SyncController extends ChangeNotifier {
     }
 
     // Recarregar seções do Moodle para refletir o estado pós-sync
+    if (stopIfCancelled()) return;
     _progressMessage = 'Verificando resultado...';
     notifyListeners();
     try {

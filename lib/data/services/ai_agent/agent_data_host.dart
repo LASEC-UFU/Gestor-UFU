@@ -482,6 +482,9 @@ class AgentDataHost {
     }
   }
 
+  /// Invalidates app pages after a command executed by the remote task host.
+  Future<void> notifyDataChanged() => _changed();
+
   // ---------------------------------------------------------------- helpers
 
   String _checkedKey(Map<String, dynamic> input) {

@@ -42,6 +42,7 @@ List<ModuleCommand> ajustaHorariosCommands(
     'turma': e.className,
     'modalidade': e.modality,
     'docentes': e.teacherNames,
+    'teachers': e.teacherNames,
     'sala': e.room,
     'chTeorica': e.theoryHours,
     'chPratica': e.practiceHours,
@@ -49,10 +50,12 @@ List<ModuleCommand> ajustaHorariosCommands(
       for (final cp in e.coursePeriods)
         {'curso': cp.program, 'periodo': cp.period},
     ],
+    'coursePeriods': e.coursePeriods.map((item) => item.toJson()).toList(),
     'horarios': [
       for (final s in e.slots)
         '${horarioDias[s.weekday - 1]} ${horarioFaixas[s.slot - 1]}',
     ],
+    'slots': e.slots.map((item) => item.toJson()).toList(),
   };
 
   Map<String, List<HorarioDisciplina>> grade(
@@ -184,6 +187,210 @@ List<ModuleCommand> ajustaHorariosCommands(
             if (teacher == null || r.teacher == teacher) r.toJson(),
         ];
         return CommandResult.ok(data: {'periodoLetivo': t, 'linhas': rows});
+      },
+    ),
+    ModuleCommand(
+      id: 'ajustaHorarios.editarTurma',
+      title: 'Editar turma e horários',
+      description:
+          'Atualiza sala, docentes, horários ou vínculo curso/período de uma '
+          'turma existente. Consulte ajustaHorarios.listar para obter o ID. '
+          'Horários usam weekday (1=segunda…5=sexta) e slot (1…16).',
+      approval: CommandApproval.required,
+      mutates: true,
+      inputSchema: {
+        'type': 'object',
+        'properties': {
+          ..._termo,
+          'id': {'type': 'string'},
+          'room': {'type': 'string', 'description': 'Nova sala.'},
+          'clearRoom': {
+            'type': 'boolean',
+            'description': 'Marque para remover a sala cadastrada.',
+          },
+          'teachers': {
+            'type': 'array',
+            'items': {'type': 'string'},
+            'description': 'Lista de docentes desta turma.',
+          },
+          'slots': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'weekday': {'type': 'integer', 'minimum': 1, 'maximum': 5},
+                'slot': {'type': 'integer', 'minimum': 1, 'maximum': 16},
+              },
+              'required': ['weekday', 'slot'],
+            },
+            'description': 'Lista de horários; [] remove os horários.',
+          },
+          'coursePeriods': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'properties': {
+                'program': {'type': 'integer'},
+                'period': {'type': 'integer', 'minimum': 1, 'maximum': 11},
+              },
+              'required': ['program', 'period'],
+            },
+            'description': 'Vínculos de curso e período desta turma.',
+          },
+        },
+        'required': ['id'],
+      },
+      run: (input, origin) async {
+        final t = await term(input);
+        final id = input.requireString('id');
+        final entries = await store.load(term: t);
+        final index = entries.indexWhere((entry) => entry.id == id);
+        if (index < 0) {
+          throw CommandException(
+            'turma_nao_encontrada',
+            'A turma "$id" não existe no período $t. Consulte a grade e tente novamente.',
+          );
+        }
+        final current = entries[index];
+        List<String>? teachers;
+        if (input.containsKey('teachers')) {
+          final raw = input['teachers'];
+          if (raw is! List || raw.any((item) => item is! String)) {
+            throw const CommandException(
+              'entrada_invalida',
+              'teachers precisa ser uma lista de nomes em texto.',
+            );
+          }
+          final unique = <String, String>{};
+          for (final item in raw.cast<String>()) {
+            final name = item.trim();
+            if (name.isNotEmpty)
+              unique.putIfAbsent(name.toLowerCase(), () => name);
+          }
+          teachers = unique.values.toList();
+        }
+        List<HorarioSlot>? slots;
+        if (input.containsKey('slots')) {
+          final raw = input['slots'];
+          if (raw is! List) {
+            throw const CommandException(
+              'entrada_invalida',
+              'slots precisa ser uma lista de objetos weekday/slot.',
+            );
+          }
+          final parsed = <HorarioSlot>[];
+          final seen = <String>{};
+          for (final item in raw) {
+            if (item is! Map ||
+                item['weekday'] is! num ||
+                item['slot'] is! num) {
+              throw const CommandException(
+                'entrada_invalida',
+                'Cada horário precisa ter weekday e slot numéricos.',
+              );
+            }
+            final weekday = (item['weekday'] as num).toInt();
+            final slot = (item['slot'] as num).toInt();
+            if (weekday < 1 ||
+                weekday > horarioDias.length ||
+                slot < 1 ||
+                slot > horarioFaixas.length) {
+              throw const CommandException(
+                'horario_invalido',
+                'weekday deve estar entre 1 e 5 e slot entre 1 e 16.',
+              );
+            }
+            final value = HorarioSlot(weekday: weekday, slot: slot);
+            if (!seen.add(value.key)) {
+              throw const CommandException(
+                'horario_duplicado',
+                'A lista contém o mesmo dia e faixa mais de uma vez.',
+              );
+            }
+            parsed.add(value);
+          }
+          slots = parsed;
+        }
+        List<CursoPeriodo>? coursePeriods;
+        if (input.containsKey('coursePeriods')) {
+          final raw = input['coursePeriods'];
+          if (raw is! List) {
+            throw const CommandException(
+              'entrada_invalida',
+              'coursePeriods precisa ser uma lista de objetos program/period.',
+            );
+          }
+          final programs = await store.programs();
+          final parsed = <CursoPeriodo>[];
+          final seen = <String>{};
+          for (final item in raw) {
+            if (item is! Map ||
+                item['program'] is! num ||
+                item['period'] is! num) {
+              throw const CommandException(
+                'entrada_invalida',
+                'Cada vínculo precisa ter program e period numéricos.',
+              );
+            }
+            final program = (item['program'] as num).toInt();
+            final period = (item['period'] as num).toInt();
+            if (!programs.containsKey(program) || period < 1 || period > 11) {
+              throw const CommandException(
+                'curso_periodo_invalido',
+                'O curso precisa existir e o período deve estar entre 1 e 11.',
+              );
+            }
+            final key = '$program:$period';
+            if (!seen.add(key)) {
+              throw const CommandException(
+                'vinculo_duplicado',
+                'A lista contém o mesmo curso/período mais de uma vez.',
+              );
+            }
+            parsed.add(CursoPeriodo(program: program, period: period));
+          }
+          coursePeriods = parsed;
+        }
+        final clearRoom = input.flag('clearRoom');
+        if (clearRoom && input.optionalString('room') != null) {
+          throw const CommandException(
+            'entrada_invalida',
+            'Informe room ou clearRoom, não os dois.',
+          );
+        }
+        if (!input.containsKey('room') &&
+            !clearRoom &&
+            teachers == null &&
+            slots == null &&
+            coursePeriods == null) {
+          throw const CommandException(
+            'entrada_vazia',
+            'Informe pelo menos um campo para atualizar.',
+          );
+        }
+        final room = input.containsKey('room') ? input['room'] : null;
+        if (input.containsKey('room') && room is! String) {
+          throw const CommandException(
+            'entrada_invalida',
+            'room precisa ser texto.',
+          );
+        }
+        entries[index] = current.copyWith(
+          room: clearRoom
+              ? ''
+              : room is String
+              ? room.trim()
+              : null,
+          teachers: teachers,
+          slots: slots,
+          coursePeriods: coursePeriods,
+        );
+        await store.save(entries, term: t);
+        if (changes != null) changes.value++;
+        return CommandResult.ok(
+          message: 'Turma ${current.timetableLabel} atualizada no período $t.',
+          data: {'turma': resumo(entries[index])},
+        );
       },
     ),
     ModuleCommand(

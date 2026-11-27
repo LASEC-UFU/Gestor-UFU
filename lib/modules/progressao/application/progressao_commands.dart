@@ -104,9 +104,14 @@ List<ModuleCommand> progressaoCommands(ProgressaoService service) => [
     id: 'progressao.criar',
     title: 'Criar processo',
     description:
-        'Cria um processo. pastaComprovantes é obrigatória (pasta onde os '
-        'comprovantes serão copiados).',
+        'Cria um processo. No acesso móvel, a pasta de comprovantes é criada automaticamente no computador Windows; arquivos podem ser anexados depois pelo celular.',
     mutates: true,
+    remoteInputSchema: {
+      'type': 'object',
+      'properties': {
+        'docente': {'type': 'string'},
+      },
+    },
     inputSchema: {
       'type': 'object',
       'properties': {

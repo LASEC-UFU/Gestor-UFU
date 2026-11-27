@@ -105,7 +105,10 @@ class SeiArvoreService extends ChangeNotifier {
 
   /// Lê a árvore do processo aberto no Edge. Com [lerConteudo], busca o
   /// texto de cada documento para identificar data e resumo.
-  Future<List<SeiDocumento>> extrair({bool lerConteudo = true}) async {
+  Future<List<SeiDocumento>> extrair({
+    bool lerConteudo = true,
+    CommandExecutionContext? context,
+  }) async {
     if (_extraindo) {
       throw const CommandException(
         'em_andamento',
@@ -141,8 +144,10 @@ class SeiArvoreService extends ChangeNotifier {
         );
       }
       total = nodes.length;
+      context?.reportProgress('Documentos localizados', fraction: 0);
       log('${nodes.length} documento(s) na árvore.');
       for (var i = 0; i < nodes.length; i++) {
+        context?.checkCancellation();
         final node = nodes[i];
         progresso = i + 1;
         etapa = node.text;
@@ -162,6 +167,10 @@ class SeiArvoreService extends ChangeNotifier {
             texto: texto,
             href: node.href,
           ),
+        );
+        context?.reportProgress(
+          'Documento ${i + 1} de ${nodes.length}: ${node.text}',
+          fraction: (i + 1) / nodes.length,
         );
       }
       log('Inventário com ${_documentos.length} documento(s).');
