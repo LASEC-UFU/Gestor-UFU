@@ -212,7 +212,7 @@ class _EquivalenciaHistoryGridState extends State<EquivalenciaHistoryGrid> {
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     const Text(
-                      'Clique para alternar entre não cursada e aprovado. Azul: dispensado por equivalência, com alteração apenas nos blocos. Verde: indisponível para equivalência.',
+                      'Clique para alternar entre Não cursadas e Aprovadas e o Azul é as que vc esta dando equivalências.',
                     ),
                     for (final status in _statuses)
                       Row(
