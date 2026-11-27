@@ -28,6 +28,8 @@ import 'package:gestor_ufu/data/services/ai_agent/agent_text_service.dart';
 import 'package:gestor_ufu/platform/contracts/ai_text.dart';
 import 'package:gestor_ufu/platform/remote/remote_access_server.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:screen_retriever/screen_retriever.dart';
+import 'package:gestor_ufu/platform/shell/module_window_geometry.dart';
 
 String _appVersion = 'desconhecida';
 
@@ -107,15 +109,38 @@ Future<void> main(List<String> args) async {
         AppTheme.isLight = payload['isLight'] as bool? ?? false;
         final window = moduleWindow(payload);
         await windowManager.ensureInitialized();
+        final displays = await screenRetriever.getAllDisplays();
+        final cursor = await screenRetriever.getCursorScreenPoint();
+        final display =
+            displays
+                .where(
+                  (display) => Rect.fromLTWH(
+                    display.visiblePosition?.dx ?? 0,
+                    display.visiblePosition?.dy ?? 0,
+                    display.size.width,
+                    display.size.height,
+                  ).contains(cursor),
+                )
+                .firstOrNull ??
+            await screenRetriever.getPrimaryDisplay();
+        final workArea =
+            (display.visiblePosition ?? Offset.zero) &
+            (display.visibleSize ?? display.size);
+        final bounds = moduleWindowBounds(window.size, workArea);
         unawaited(
           windowManager.waitUntilReadyToShow(
             WindowOptions(
-              size: window.size,
-              minimumSize: window.minimumSize,
-              center: true,
+              size: bounds.size,
+              minimumSize: moduleWindowMinimumSize(
+                window.minimumSize,
+                bounds.size,
+              ),
+              titleBarStyle: TitleBarStyle.normal,
+              windowButtonVisibility: true,
               title: '${window.title} - $appTitle',
             ),
             () async {
+              await windowManager.setPosition(bounds.topLeft);
               await windowManager.show();
               await windowManager.focus();
             },

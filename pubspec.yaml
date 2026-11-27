@@ -31,6 +31,7 @@ dependencies:
   package_info_plus: ^9.0.1
   desktop_multi_window: 0.3.1
   window_manager: ^0.5.2
+  screen_retriever: ^0.2.2
   flutter_markdown_plus: ^1.0.12
   flutter_pty2: ^3.0.0
   xterm2: ^5.5.0
