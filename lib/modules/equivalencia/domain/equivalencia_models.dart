@@ -169,24 +169,29 @@ class EquivalenceCase {
 
   /// A dispensa é derivada dos blocos, inclusive nas análises antigas.
   List<HistoricalSubject> historyFor({Iterable<Subject> subjects = const []}) {
+    String key(Subject subject) => subject.code.trim().isNotEmpty
+        ? subject.code.trim().toLowerCase()
+        : subjectCatalogKey(subject);
     final equivalent = {
       for (final subject in blocks.expand((b) => b.current))
-        subjectCatalogKey(subject): subject,
+        key(subject): subject,
     };
-    final saved = {
-      for (final entry in history) subjectCatalogKey(entry.subject): entry,
-    };
+    final saved = {for (final entry in history) key(entry.subject): entry};
+    // O currículo define a coluna; o bloco fornece somente a dispensa.
+    final catalog = {for (final subject in subjects) key(subject): subject};
+    for (final subject in [
+      ...history.map((e) => e.subject),
+      ...equivalent.values,
+    ]) {
+      catalog.putIfAbsent(key(subject), () => subject);
+    }
     return [
-      for (final subject in mergeSubjects([
-        ...subjects,
-        ...history.map((e) => e.subject),
-        ...equivalent.values,
-      ]))
+      for (final subject in catalog.values)
         HistoricalSubject(
           subject: subject,
-          status: equivalent.containsKey(subjectCatalogKey(subject))
+          status: equivalent.containsKey(key(subject))
               ? 'Dispensado'
-              : saved[subjectCatalogKey(subject)]?.status == 'Aprovado'
+              : saved[key(subject)]?.status == 'Aprovado'
               ? 'Aprovado'
               : 'Não cursada',
         ),

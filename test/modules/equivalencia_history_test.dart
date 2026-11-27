@@ -40,6 +40,33 @@ EquivalenceCase analysis({
 );
 
 void main() {
+  test('dispensa mantém a coluna do currículo mesmo com semestre no bloco', () {
+    const imported = Subject(
+      code: 'CAL1',
+      name: 'Cálculo I importado',
+      theoretical: 60,
+      practical: 0,
+      period: '2018/1º Sem',
+    );
+    final item = analysis(
+      blocks: const [
+        EquivalenceBlock(
+          id: 'importado',
+          period: '2018/1º Sem',
+          current: [imported],
+          prior: [physics],
+        ),
+      ],
+      history: const [HistoricalSubject(subject: imported)],
+    );
+    final entries = item.historyFor(subjects: [calculus, physics]);
+    expect(entries, hasLength(2));
+    expect(entries.first.subject, same(calculus));
+    expect(entries.first.subject.period, '1');
+    expect(entries.first.status, 'Dispensado');
+    expect(entries.map((e) => e.subject.period), everyElement('1'));
+  });
+
   test(
     'blocos antigos viram dispensas sem alterar aprovações independentes',
     () {

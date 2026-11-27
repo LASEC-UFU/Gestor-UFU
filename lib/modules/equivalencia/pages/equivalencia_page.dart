@@ -258,7 +258,17 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
             ...item.history,
           ],
         )
-        .historyFor(subjects: curriculum?.subjects ?? const []);
+        .historyFor(subjects: curriculum?.subjects ?? const [])
+        .where(
+          (entry) =>
+              curriculum == null ||
+              curriculum.subjects.any(
+                (subject) =>
+                    subjectCatalogKey(subject) ==
+                    subjectCatalogKey(entry.subject),
+              ),
+        )
+        .toList();
   }
 
   Future<void> _removeCase(EquivalenceCase item) async {
