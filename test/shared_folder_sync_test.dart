@@ -71,6 +71,7 @@ void main() {
     expect(syncGroupFor('config_moodle_data'), 'moodle');
     expect(syncGroupFor('preenche_diarios_entries_v1'), 'diario');
     expect(syncGroupFor('student_equivalencies.blocks.v1'), 'equivalencia');
+    expect(syncGroupFor('inserir_documentos_sei.projects.v1'), 'acoes-na-web');
     expect(
       syncGroupFor('gestor_ufu_agente_conversa_v1_abc-1'),
       'agente-conversa-abc-1',

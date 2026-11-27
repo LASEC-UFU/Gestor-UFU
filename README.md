@@ -49,6 +49,7 @@ O resultado: o que antes levava horas de cliques manuais agora leva segundos.
 
 | Funcionalidade | Descrição |
 |----------------|-----------|
+| **Criar Ações na Web** | Crie processos pela interface ou pela IA com etapas ordenadas, seleção visual de componentes HTML, valores fixos ou campos de um lote JSON, execução no navegador e registro dos resultados. Inclui um modelo configurável do fluxo Palmelo, sem dados pessoais. |
 | **Criação de configurações** | Crie estruturas de disciplina com seções, atividades, datas e tipos |
 | **Macros de data** | Nomes de atividades com datas dinâmicas (`<DD/MM/YYYY>`, `<DD/MM/YYYY + 7>`) que se atualizam ao mudar o semestre |
 | **Importação de Excel (.xlsx)** | Importe estruturas prontas de planilhas com detecção de duplicatas |

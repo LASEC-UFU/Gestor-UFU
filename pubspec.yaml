@@ -67,6 +67,7 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   assets:
+    - assets/web_automation/
     - assets/equivalencia/
     - assets/adjust_schedule/seed.json
     - assets/parecer_editor/

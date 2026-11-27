@@ -53,6 +53,7 @@ String syncGroupFor(String key) {
     'portal_docente': 'diario',
     'student_equivalencies': 'equivalencia',
     'progressao': 'progressao',
+    'inserir_documentos_sei.': 'acoes-na-web',
     'gestor_ufu_planos_ensino': 'planos-ensino',
     'planos_ensino': 'planos-ensino',
     'gestor_ufu_planos_trabalho': 'planos-trabalho',

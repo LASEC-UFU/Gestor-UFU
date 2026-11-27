@@ -38,7 +38,12 @@ void main() {
       registry.byId('inserir-documentos-sei')!.dashboardKey,
       'module:Inserir Documentos no SEI',
     );
-    expect(registry.byId('inserir-documentos-sei')!.enabled, isFalse);
+    expect(registry.byId('inserir-documentos-sei')!.enabled, isTrue);
+    expect(
+      registry.byId('inserir-documentos-sei')!.title,
+      'Criar Ações na Web',
+    );
+    expect(registry.byRoute('/acoes-na-web')!.id, 'inserir-documentos-sei');
   });
 
   test('cada rota pertence ao módulo certo (foco do agente)', () {

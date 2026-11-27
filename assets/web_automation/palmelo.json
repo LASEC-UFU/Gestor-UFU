@@ -1,0 +1,74 @@
+{
+  "name": "Palmelo",
+  "url": "https://docs.google.com/forms/d/e/1FAIpQLSfs9UtiKDs3hdlCZTeMSjip567uJnJXGIOoaZ9C_DYp3IuLVA/viewform?hl=pt_BR",
+  "successText": "Sua resposta foi registrada",
+  "captureArtifacts": true,
+  "delayMinMs": 1500,
+  "delayMaxMs": 2800,
+  "steps": [
+    {
+      "id": "nome_completo",
+      "name": "Nome completo",
+      "action": "fill",
+      "selector": "[name=\"entry.1900721468\"], [data-params*=\"1900721468\"] input[type=\"text\"], [data-params*=\"1900721468\"] textarea",
+      "value": "{{nome_completo}}",
+      "transform": "none"
+    },
+    {
+      "id": "whatsapp",
+      "name": "Whatsapp",
+      "action": "fill",
+      "selector": "[name=\"entry.28153712\"], [data-params*=\"28153712\"] input[type=\"text\"], [data-params*=\"28153712\"] textarea",
+      "value": "{{whatsapp}}",
+      "transform": "digits"
+    },
+    {
+      "id": "email",
+      "name": "Email",
+      "action": "fill",
+      "selector": "[name=\"entry.703226278\"], [data-params*=\"703226278\"] input[type=\"text\"], [data-params*=\"703226278\"] textarea",
+      "value": "{{email}}",
+      "transform": "none"
+    },
+    {
+      "id": "pais",
+      "name": "Pais",
+      "action": "fill",
+      "selector": "[name=\"entry.1372229500\"], [data-params*=\"1372229500\"] input[type=\"text\"], [data-params*=\"1372229500\"] textarea",
+      "value": "{{pais}}",
+      "transform": "none"
+    },
+    {
+      "id": "cidade",
+      "name": "Cidade",
+      "action": "fill",
+      "selector": "[name=\"entry.1112292212\"], [data-params*=\"1112292212\"] input[type=\"text\"], [data-params*=\"1112292212\"] textarea",
+      "value": "{{cidade}}",
+      "transform": "none"
+    },
+    {
+      "id": "estado",
+      "name": "Estado",
+      "action": "fill",
+      "selector": "[name=\"entry.1041490748\"], [data-params*=\"1041490748\"] input[type=\"text\"], [data-params*=\"1041490748\"] textarea",
+      "value": "{{estado}}",
+      "transform": "none"
+    },
+    {
+      "id": "endereco_completo",
+      "name": "Endereco completo",
+      "action": "fill",
+      "selector": "[name=\"entry.296645159\"], [data-params*=\"296645159\"] input[type=\"text\"], [data-params*=\"296645159\"] textarea",
+      "value": "{{endereco_completo}}",
+      "transform": "none"
+    },
+    {
+      "id": "enviar",
+      "name": "Enviar formulário",
+      "action": "click",
+      "selector": "button, input[type=\"submit\"], [role=\"button\"]",
+      "value": "Enviar"
+    }
+  ],
+  "records": []
+}
