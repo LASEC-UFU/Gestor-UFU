@@ -175,6 +175,18 @@ List<ModuleCommand> _comandosDoProcesso(
         },
       );
     },
+    runRemote: (input, origin, context) async {
+      final docs = await service.extrair(
+        lerConteudo: input['lerConteudo'] != false,
+        context: context,
+      );
+      return CommandResult.ok(
+        message: '${docs.length} documento(s) lido(s).',
+        data: {
+          'documentos': [for (final d in docs) d.toJson()],
+        },
+      );
+    },
   ),
   ModuleCommand(
     id: 'relato.relatorioArvore',

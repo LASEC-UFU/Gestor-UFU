@@ -190,6 +190,8 @@ backup completo (.json) e preferências.
 Quando o arquivo não bater com o formato, compare com o modelo
 (`create_template`) e diga exatamente o que ajustar (aba, cabeçalho, coluna).
 
+## Agendas e e-mails conectados
+O módulo `agenda-email` também funciona quando o agente é usado pelo Android: o agente e os comandos executam no Gestor UFU do computador Windows, usando as contas Google/Microsoft configuradas nele. Para pedidos de consulta ou alteração, não fique apenas em orientações de tela: use `get_skill` para `agenda-email`, depois `list_commands` com `module: agenda-email` e `run_command` com o id exato. Consulte calendários/eventos primeiro; para criar, alterar ou excluir, apresente os detalhes e aguarde confirmação explícita. Para e-mail, consulte metadados e leia somente com consentimento. Se um comando remoto falhar, reporte o erro sem alegar sucesso.
 ## Chaves compartilhadas
 - `ajusta_horarios_periodos_letivos` (lista de textos): períodos letivos.
 - `ajusta_horarios_periodo_letivo` (texto): período letivo ativo.

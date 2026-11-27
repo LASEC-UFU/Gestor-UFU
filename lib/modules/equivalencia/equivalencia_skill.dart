@@ -12,7 +12,7 @@ currículo anterior, com situação e certidão de estudos em PDF.
 
 ## Onde fica cada ação (tela Equivalência de Alunos)
 - "Currículos": cadastra currículos (curso + nome) e suas disciplinas —
-  "Editar e importar disciplinas" (planilha), "Cadastrar disciplina
+  "Editar e importar disciplinas" (planilha ou JSON), "Cadastrar disciplina
   manualmente", remover.
 - "Nova análise" / "Importar planilha" (análise pronta); em cada análise:
   aluno, matrícula, currículo atual e anterior, situação (Em análise,
@@ -39,12 +39,21 @@ atual selecionado. Modelo: `create_template("equivalencia_analise", rows:
 [...], options: {student, student_id, blocks: [[1,2]]})`.
 
 ## Banco
-Chave: `student_equivalencies.blocks.v1` — { "curricula": [ { id, course,
-name, subjects: [ {code, name, theoretical, practical} ] } ], "cases": [ {
+Os currículos ficam somente no banco, que é a fonte de verdade. A abertura
+do módulo preserva as edições e não mescla nem repõe disciplinas da semente.
+O recurso `assets/equivalencia/curriculo_eca_2020.json` só é carregado quando
+não há currículo cadastrado; também pode ser importado pela tela como JSON
+(objeto com subjects ou lista de disciplinas), preservando os períodos.
+Chave: `student_equivalencies.blocks.v1` — { "schemaVersion": 2,
+"currentId": id, "curricula": [ { id, course,
+name, subjects: [ {code, name, theoretical, practical, period} ] } ], "cases": [ {
 id, student, studentId, currentCurriculumId, priorCurriculumId, status ("Em
 análise"|"Deferida"|"Indeferida"), notes, blocks: [ { id, period, current:
 [subject], prior: [subject] } ], currentCatalog: [subject], priorCatalog:
 [subject] } ] }. Cargas (theoretical/practical) são inteiros (horas).
+A migração para schemaVersion 2 corrige uma única vez os sete períodos
+incorretos do ECA 2020, apenas se vazios ou Optativas, e elimina códigos
+duplicados nesse currículo. Edições posteriores são preservadas.
 
 ## Comandos (run_command)
 equivalencia.listar, equivalencia.importarCurriculo, equivalencia.importarAnalise,

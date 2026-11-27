@@ -30,5 +30,7 @@ linter:
 analyzer:
   # Rascunhos locais (ignorados pelo git) e saídas de build.
   exclude:
+    # Projeto Flutter independente, com SDK e dependências próprios.
+    - mobile/**
     - tmp/**
     - build/**

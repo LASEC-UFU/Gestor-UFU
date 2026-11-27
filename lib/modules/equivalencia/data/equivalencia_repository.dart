@@ -1,5 +1,8 @@
+import 'dart:convert';
+
+import 'package:flutter/services.dart';
+
 import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
-import 'package:gestor_ufu/modules/equivalencia/data/curriculo_eca_2020.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 /// Persistência da Equivalência de Alunos.
@@ -14,99 +17,121 @@ class EquivalenciaRepository {
   /// migrar; nunca apagada.
   static const legacyKey = 'student_equivalencies.v1';
 
-  static final defaultCurriculum = Curriculum(
-    id: 'eca-2020',
-    course: 'Engenharia de Controle e Automação',
-    name: 'Currículo Proposto (2020/1)',
-    subjects: eca2020Subjects,
+  static const schemaVersion = 2;
+  static const seedAsset = 'assets/equivalencia/curriculo_eca_2020.json';
+
+  static Future<Curriculum> loadSeed() async => Curriculum.fromJson(
+    jsonDecode(await rootBundle.loadString(seedAsset)) as Map<String, dynamic>,
   );
 
   Future<EquivalenciaState> load() async {
-    var curricula = <Curriculum>[];
-    var cases = <EquivalenceCase>[];
-    String? currentId;
-    final data = await _store.readJson(key);
-    if (data is Map) {
-      try {
-        curricula =
-            [
-              for (final e in data['curricula'] as List? ?? const [])
-                Curriculum.fromJson(Map<String, dynamic>.from(e as Map)),
-            ]..removeWhere(
-              (c) =>
-                  c.id == 'eca-2013' || c.name == 'Currículo Anterior (2013/2)',
-            );
-        cases = [
-          for (final e in data['cases'] as List? ?? const [])
-            EquivalenceCase.fromJson(Map<String, dynamic>.from(e as Map)),
-        ];
-        currentId = data['currentId'] as String?;
-      } on Object {
-        // JSON inválido: mantém o catálogo inicial.
+    final stored = await _store.readJson(key);
+    final data = stored is Map
+        ? Map<String, dynamic>.from(stored)
+        : <String, dynamic>{};
+    var changed = false;
+    if (stored == null && !await _store.contains(key)) {
+      final legacy = await _migrateLegacy();
+      if (legacy != null) {
+        data.addAll({
+          'curricula': legacy.curricula.map((c) => c.toJson()).toList(),
+          'cases': legacy.cases.map((c) => c.toJson()).toList(),
+          'currentId': legacy.currentId,
+        });
       }
-    } else {
-      final migrated = await _migrateLegacy();
-      if (migrated != null) {
-        curricula = migrated.curricula;
-        cases = migrated.cases;
-      }
+      changed = true;
+    } else if (stored is! Map) {
+      // Não substitui um banco inválido por uma semente silenciosamente.
+      throw const FormatException('Banco de equivalência inválido.');
     }
-    if (!curricula.any((c) => c.id == defaultCurriculum.id)) {
-      curricula = [...curricula, defaultCurriculum];
-    } else {
-      curricula = [
-        for (final curriculum in curricula)
-          curriculum.id == defaultCurriculum.id
-              ? curriculum.copyWith(
-                  subjects: mergeSubjects([
-                    ...curriculum.subjects,
-                    ...defaultCurriculum.subjects,
-                  ]),
-                )
-              : curriculum,
-      ];
+
+    final curricula = data['curricula'] as List? ?? [];
+    if (curricula.isEmpty) {
+      final seed = await loadSeed();
+      data['curricula'] = [seed.toJson()];
+      data.putIfAbsent('currentId', () => seed.id);
+      changed = true;
     }
-    currentId ??= curricula.first.id;
-    final state = EquivalenciaState(
-      curricula: curricula,
-      cases: cases,
-      currentId: currentId,
+    data.putIfAbsent('cases', () => []);
+    if ((data['schemaVersion'] as int? ?? 1) < schemaVersion) {
+      _migratePeriods(data);
+      data['schemaVersion'] = schemaVersion;
+      changed = true;
+    }
+    // A migração opera no JSON, preservando cases e campos desconhecidos.
+    if (changed) await _store.writeJson(key, data);
+    return EquivalenciaState(
+      curricula: [
+        for (final c in data['curricula'] as List)
+          Curriculum.fromJson(Map<String, dynamic>.from(c as Map)),
+      ],
+      cases: [
+        for (final c in data['cases'] as List)
+          EquivalenceCase.fromJson(Map<String, dynamic>.from(c as Map)),
+      ],
+      currentId: data['currentId'] as String?,
     );
-    var needsSave = data is! Map;
-    if (data is Map) {
-      final oldDefault = (data['curricula'] as List? ?? const [])
-          .whereType<Map>()
-          .where((c) => c['id'] == defaultCurriculum.id)
-          .firstOrNull;
-      final oldSubjects = (oldDefault?['subjects'] as List? ?? const [])
-          .whereType<Map>();
-      needsSave =
-          oldDefault == null ||
-          defaultCurriculum.subjects.any(
-            (subject) => !oldSubjects.any(
-              (old) =>
-                  old['code'] == subject.code &&
-                  old['name'] == subject.name &&
-                  old['period'] == subject.period,
-            ),
-          );
-    }
-    if (needsSave) await save(state);
-    return state;
   }
 
-  Future<void> save(EquivalenciaState state) => _store.writeJson(key, {
-    'curricula': state.curricula.map((e) => e.toJson()).toList(),
-    'cases': state.cases.map((e) => e.toJson()).toList(),
-    'currentId': state.currentId,
-  });
+  Future<void> save(EquivalenciaState state) async {
+    final stored = await _store.readJson(key);
+    await _store.writeJson(key, {
+      if (stored is Map) ...Map<String, dynamic>.from(stored),
+      'curricula': state.curricula.map((e) => e.toJson()).toList(),
+      'cases': state.cases.map((e) => e.toJson()).toList(),
+      'currentId': state.currentId,
+    });
+  }
+
+  /// Reparo único da classificação incorreta no catálogo ECA 2020.
+  /// Valores personalizados e os demais currículos não são alterados.
+  static void _migratePeriods(Map<String, dynamic> data) {
+    const periods = {
+      'INFIS39032': '1º Período',
+      'INFIS31402': '2º Período',
+      'INFIS39056': '2º Período',
+      'FEELT32301': '3º Período',
+      'INFIS39034': '4º Período',
+      'FEELT32401': '4º Período',
+      'FEELT32602': '6º Período',
+    };
+    bool customized(Map subject) {
+      final period = (subject['period'] as String? ?? '').trim();
+      return period.isNotEmpty && period != 'Optativas';
+    }
+
+    for (final curriculum in data['curricula'] as List) {
+      if (curriculum['id'] != 'eca-2020') continue;
+      final subjects = <Map<String, dynamic>>[];
+      final byCode = <String, int>{};
+      for (final raw in curriculum['subjects'] as List? ?? []) {
+        final subject = Map<String, dynamic>.from(raw as Map);
+        final code = subject['code'] as String? ?? '';
+        final index = code.isEmpty ? null : byCode[code];
+        if (index == null) {
+          if (code.isNotEmpty) byCode[code] = subjects.length;
+          subjects.add(subject);
+        } else if (!customized(subjects[index]) && customized(subject)) {
+          // Em duplicatas, prioriza um período já corrigido pelo usuário.
+          subjects[index] = subject;
+        }
+      }
+      for (final subject in subjects) {
+        final period = periods[subject['code']];
+        if (period != null && !customized(subject)) {
+          subject['period'] = period;
+        }
+      }
+      curriculum['subjects'] = subjects;
+    }
+  }
 
   /// Converte as análises da versão anterior em blocos de uma disciplina de
   /// cada lado e grava no formato novo (sem apagar a chave antiga).
   Future<EquivalenciaState?> _migrateLegacy() async {
     final legacy = await _store.readJson(legacyKey);
     if (legacy is! List) return null;
-    final curricula = <Curriculum>[defaultCurriculum];
+    final curricula = <Curriculum>[];
     final cases = <EquivalenceCase>[];
     try {
       for (final entry in legacy) {
@@ -171,9 +196,8 @@ class EquivalenciaRepository {
     final state = EquivalenciaState(
       curricula: curricula,
       cases: cases,
-      currentId: curricula.first.id,
+      currentId: curricula.firstOrNull?.id,
     );
-    if (cases.isNotEmpty) await save(state);
     return state;
   }
 }

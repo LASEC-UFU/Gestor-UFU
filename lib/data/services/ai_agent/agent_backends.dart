@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:gestor_ufu/data/services/ai_agent/agent_mcp_server.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_settings.dart';
 import 'package:gestor_ufu/data/services/ai_agent/agent_tools.dart';
+import 'package:gestor_ufu/platform/services/gestor_process_environment.dart';
 
 /// Anexo enviado junto com uma mensagem. Textos (planilhas convertidas,
 /// CSV, JSON…) vão em [text]; imagens e PDFs em [bytes].
@@ -683,12 +684,17 @@ abstract class CliAgentBackend extends AgentBackend {
 
   Future<Process> _start(List<String> args) async {
     final exe = await executable();
+    final workingDirectory = await this.workingDirectory();
     return Process.start(
       exe,
       args,
       runInShell: exe.toLowerCase().endsWith('.cmd'),
-      workingDirectory: await workingDirectory(),
-      environment: {...environment, ...profileEnvironment},
+      workingDirectory: workingDirectory,
+      environment: {
+        ...GestorProcessEnvironment.variablesFor(workingDirectory),
+        ...environment,
+        ...profileEnvironment,
+      },
     );
   }
 
@@ -704,11 +710,15 @@ abstract class CliAgentBackend extends AgentBackend {
 
   /// Instala o CLI oficial com o npm (requer Node.js).
   Future<void> install(void Function(String line) onOutput) async {
-    final process = await Process.start('npm', [
-      'install',
-      '-g',
-      provider.npmPackage,
-    ], runInShell: true);
+    final process = await Process.start(
+      'npm',
+      ['install', '-g', provider.npmPackage],
+      runInShell: true,
+      environment: {
+        if (provider == AgentProvider.copilot)
+          'npm_config_ignore_scripts': 'false',
+      },
+    );
     final output = _merge(process)
         .transform(utf8.decoder)
         .transform(const LineSplitter())
@@ -810,15 +820,9 @@ abstract class CliAgentBackend extends AgentBackend {
   /// Pasta usada fora do modo "Só o Gestor".
   Future<String> _userWorkDir() async {
     final configured = workDir.trim();
-    final home =
-        Platform.environment['USERPROFILE'] ?? Directory.systemTemp.path;
-    final dir = Directory(
-      configured.isNotEmpty
-          ? configured
-          : p.join(home, 'Documents', 'GestorUFU Agente'),
+    return GestorProcessEnvironment.workspaceDirectory(
+      preferred: configured.isNotEmpty ? configured : null,
     );
-    await dir.create(recursive: true);
-    return dir.path;
   }
 
   /// Salva em arquivo temporário um anexo binário colado (sem caminho), para
@@ -1695,10 +1699,8 @@ class CodexCliBackend extends CliAgentBackend {
   }
 }
 
-/// Gemini pelo Antigravity CLI (`agy`), o sucessor oficial do Gemini CLI
-/// para contas Google pessoais (Google AI Pro etc.). Sessão contínua com
-/// `--input-format stream-json`; as ferramentas do Gestor entram por um
-/// `.agents/mcp_config.json` na pasta de trabalho.
+/// Gemini pela CLI oficial do Google, com autenticacao da assinatura Google.
+/// Cada mensagem usa o modo headless JSONL e retoma a sess?o pelo ID.
 class GeminiCliBackend extends CliAgentBackend {
   GeminiCliBackend({
     required super.mcp,
@@ -1707,221 +1709,112 @@ class GeminiCliBackend extends CliAgentBackend {
   }) : super(provider: AgentProvider.gemini);
 
   Process? _session;
-  Completer<void>? _turn;
   AgentEventSink? _emit;
-  String? _turnError;
   bool _cancelled = false;
-  bool _instructionsSent = false;
-  int? _textStep;
   final _stderr = StringBuffer();
 
   @override
-  String get label => 'Gemini (assinatura via Antigravity CLI)';
+  String get label => 'Gemini CLI (assinatura Google)';
 
   @override
   bool get reportsTools => true;
 
-  static String get _dataDir => p.join(
-    Platform.environment['USERPROFILE'] ?? '',
-    '.gemini',
-    'antigravity-cli',
-  );
+  static String get _dataDir =>
+      p.join(Platform.environment['USERPROFILE'] ?? '', '.gemini');
 
   @override
   Future<bool> isLoggedIn() async {
-    try {
-      final process = await _start(['models']);
-      await process.stdin.close();
-      final out = await _merge(process)
-          .transform(utf8.decoder)
-          .join()
-          .timeout(
-            const Duration(seconds: 40),
-            onTimeout: () {
-              process.kill();
-              return '';
-            },
-          );
-      final code = await process.exitCode;
-      return code == 0 && !out.toLowerCase().contains('sign in');
-    } catch (_) {
-      return false;
+    if ((Platform.environment['GEMINI_API_KEY'] ?? '').trim().isNotEmpty ||
+        (Platform.environment['GOOGLE_API_KEY'] ?? '').trim().isNotEmpty) {
+      return true;
     }
+    return File(p.join(_dataDir, 'oauth_creds.json')).exists();
   }
 
-  /// Instala pelo winget (pacote oficial do Google).
-  @override
-  Future<void> install(void Function(String line) onOutput) async {
-    final process = await Process.start('winget', [
-      'install',
-      '--id',
-      'Google.AntigravityCLI',
-      '-e',
-      '--accept-package-agreements',
-      '--accept-source-agreements',
-      '--silent',
-    ], runInShell: true);
-    final output = _merge(process)
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen((line) {
-          if (line.trim().isNotEmpty) onOutput(line.trim());
-        });
-    final code = await process.exitCode;
-    await output.cancel();
-    _resolved = null;
-    if (code != 0) {
-      throw AgentException(
-        'Não foi possível instalar o Antigravity CLI (winget terminou com '
-        'código $code).',
-      );
-    }
-  }
-
-  /// O login do Antigravity é feito no modo interativo: abre um terminal
-  /// com o `agy`, que leva ao navegador, e espera a conta ficar disponível.
   @override
   Future<void> loginWithBrowser(void Function(String line) onOutput) async {
     await openLoginTerminal();
     onOutput(
-      'Entre com sua conta Google no terminal/navegador que foi aberto e '
-      'feche o terminal ao terminar.',
+      'Na janela aberta, inicie o Gemini CLI e escolha ?Sign in with Google?. '
+      'Depois retorne ao Gestor UFU.',
     );
     for (var i = 0; i < 120; i++) {
       await Future<void>.delayed(const Duration(seconds: 3));
       if (await isLoggedIn()) return;
     }
-    throw AgentException('Tempo esgotado aguardando o login no Antigravity.');
+    throw AgentException(
+      'Login Google nao detectado. Conclua a autenticacao interativa no Gemini CLI.',
+    );
   }
 
   @override
   Future<String> verify() async {
     final exe = await executable();
-    final result = await Process.run(exe, ['--version']);
+    final result = await Process.run(exe, [
+      '--version',
+    ], runInShell: exe.toLowerCase().endsWith('.cmd'));
     if (result.exitCode != 0) {
       throw AgentException('Falha ao executar $exe: ${result.stderr}');
     }
     if (!await isLoggedIn()) {
       throw AgentException(
-        'Entre com sua conta Google no Antigravity para usar o Gemini.',
+        'Entre com sua conta Google no Gemini CLI. Se o login n?o for detectado, confira ~/.gemini/oauth_creds.json.',
       );
     }
-    return 'Antigravity CLI ${'${result.stdout}'.trim()} encontrado.';
+    return 'Gemini CLI ${'${result.stdout}'.trim()} encontrado.';
   }
 
   @override
-  Future<List<AgentModel>> listModels() async {
-    final models = <AgentModel>[
-      const AgentModel('', 'Padrão do Antigravity', isDefault: true),
-    ];
-    try {
-      final process = await _start(['models']);
-      await process.stdin.close();
-      final out = await process.stdout.transform(utf8.decoder).join();
-      await process.exitCode;
-      for (final line in const LineSplitter().convert(out)) {
-        final parts = line.split('\t');
-        if (parts.length < 2 || parts.first.trim().isEmpty) continue;
-        models.add(AgentModel(parts.first.trim(), parts[1].trim()));
-      }
-    } catch (_) {}
-    return models;
-  }
+  Future<List<AgentModel>> listModels() async => [
+    const AgentModel('', 'Padr?o do Gemini CLI', isDefault: true),
+    if (model.isNotEmpty) AgentModel(model, model),
+  ];
 
   @override
-  Future<bool> canResume(String id) =>
-      CliAgentBackend._sessionFileExists(p.join(_dataDir, 'conversations'), id);
+  Future<bool> canResume(String id) async =>
+      await CliAgentBackend._sessionFileExists(p.join(_dataDir, 'tmp'), id) ||
+      await CliAgentBackend._sessionFileExists(p.join(_dataDir, 'chats'), id);
 
-  /// Pasta de trabalho com o `.agents/mcp_config.json` do Gestor (só para
-  /// esta pasta; a configuração global do usuário não é alterada).
   @override
   Future<String> workingDirectory() async {
     final dir = access == AgentAccess.gestor
-        ? p.join(Directory.systemTemp.path, 'gestor_ufu_agy')
+        ? p.join(Directory.systemTemp.path, 'gestor_ufu_gemini')
         : await _userWorkDir();
     await Directory(dir).create(recursive: true);
     String? url;
     try {
       url = mcp.url;
     } on StateError {
-      url = null; // verificação de login: o servidor MCP ainda não subiu
+      url = null;
     }
     if (url != null) {
-      final config = File(p.join(dir, '.agents', 'mcp_config.json'));
+      final config = File(p.join(dir, '.gemini', 'settings.json'));
       await config.parent.create(recursive: true);
-      await config.writeAsString(
-        jsonEncode({
-          'mcpServers': {
-            AgentMcpServer.serverName: {'serverUrl': url},
-            for (final extra in extraMcpServers.entries)
-              extra.key: {'serverUrl': extra.value},
-          },
-        }),
+      Map<String, dynamic> settings = {};
+      if (await config.exists()) {
+        try {
+          settings = Map<String, dynamic>.from(
+            jsonDecode(await config.readAsString()) as Map,
+          );
+        } catch (_) {}
+      }
+      final servers = Map<String, dynamic>.from(
+        settings['mcpServers'] as Map? ?? const {},
       );
+      servers[AgentMcpServer.serverName] = {'type': 'http', 'url': url};
+      for (final extra in extraMcpServers.entries) {
+        servers[extra.key] = {'type': 'http', 'url': extra.value};
+      }
+      settings['mcpServers'] = servers;
+      await config.writeAsString(jsonEncode(settings));
     }
     return dir;
   }
 
-  Future<Process> _ensureSession() async {
-    final running = _session;
-    if (running != null) return running;
-    final args = [
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--settings',
-      jsonEncode({
-        'permissions': {
-          'allow': ['mcp(${AgentMcpServer.serverName}/*)'],
-        },
-      }),
-      ...switch (access) {
-        AgentAccess.bypass => ['--dangerously-skip-permissions'],
-        AgentAccess.acceptEdits => ['--mode', 'accept-edits'],
-        AgentAccess.plan => ['--mode', 'plan'],
-        AgentAccess.auto => ['--mode', 'auto'],
-        _ => const <String>[],
-      },
-      if (model.isNotEmpty) ...['--model', model],
-      if (effort.isNotEmpty) ...['--effort', effort],
-      if (sessionId != null) ...['--conversation', sessionId!],
-      '-p=',
-    ];
-    final process = await _start(args);
-    _session = process;
-    _instructionsSent = sessionId != null;
-    _stderr.clear();
-    process.stderr.transform(utf8.decoder).listen((chunk) {
-      if (_stderr.length < 20000) _stderr.write(chunk);
-    });
-    process.stdout
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())
-        .listen(_onLine);
-    unawaited(
-      process.exitCode.then((code) {
-        if (_session == process) _session = null;
-        final turn = _turn;
-        if (turn == null || turn.isCompleted) return;
-        final detail = _stderr.toString().trim();
-        _turnError ??= _cancelled
-            ? 'Cancelado.'
-            : 'O Antigravity terminou (código $code)'
-                  '${detail.isEmpty ? '' : ':\n$detail'}';
-        turn.complete();
-      }),
-    );
-    return process;
-  }
-
-  void _onLine(String line) {
+  void _handleLine(String line, StringBuffer response) {
     final trimmed = line.trim();
     if (!trimmed.startsWith('{')) {
-      // Avisos do CLI (ex.: ação negada por falta de permissão).
-      if (trimmed.isNotEmpty && _emit != null && trimmed.contains('denied')) {
-        _emit!(AgentInfoEvent(trimmed));
-      }
+      if (trimmed.isNotEmpty) _stderr.writeln(trimmed);
       return;
     }
     Map<String, dynamic> event;
@@ -1931,85 +1824,43 @@ class GeminiCliBackend extends CliAgentBackend {
       return;
     }
     final emit = _emit;
-    switch (event['event']) {
+    switch (event['type']) {
       case 'init':
-        final id = event['conversation_id'];
-        if (id is String && id.isNotEmpty) sessionId = id;
-        final init = event['init'] as Map? ?? const {};
-        if (init['model'] is String) activeModel = init['model'] as String;
-      case 'step_update':
-        final step = event['step_update'] as Map? ?? const {};
-        final id = step['conversation_id'];
-        if (id is String && id.isNotEmpty) sessionId = id;
+        if (event['session_id'] is String) {
+          sessionId = event['session_id'] as String;
+        }
+        if (event['model'] is String) activeModel = event['model'] as String;
+      case 'message':
+        if (event['role'] != 'assistant') return;
+        final content = event['content'];
+        if (content is String) {
+          response.write(content);
+          emit?.call(AgentTextDeltaEvent(content));
+        }
+      case 'tool_use':
         if (emit == null) return;
-        final index = step['step_index'] as int? ?? -1;
-        final state = '${step['state'] ?? ''}';
-        switch (step['step_type']) {
-          case 'agent_response':
-            final delta = step['text_delta'];
-            if (delta is String && delta.isNotEmpty) {
-              if (_textStep != index) {
-                _textStep = index;
-                emit(const AgentTextBreakEvent());
-              }
-              emit(AgentTextDeltaEvent(delta));
-            } else if (state == 'ACTIVE') {
-              emit(const AgentThinkingEvent());
-            }
-          case 'tool':
-            final info = step['tool_info'] as Map? ?? const {};
-            final params = Map<String, dynamic>.from(
-              info['parameters'] as Map? ?? const {},
-            );
-            final isMcp = step['tool_name'] == 'call_mcp_tool';
-            final name = isMcp
-                ? (params['ServerName'] == AgentMcpServer.serverName
-                      ? '${params['ToolName']}'
-                      : '${params['ServerName']} · ${params['ToolName']}')
-                : '${step['tool_name'] ?? info['name']}';
-            final input = isMcp
-                ? Map<String, dynamic>.from(params['Arguments'] as Map? ?? {})
-                : params;
-            final toolId = 'step$index';
-            if (state == 'ACTIVE') {
-              emit(AgentToolEvent(toolId, name, input));
-            } else {
-              final error = info['error'];
-              emit(
-                AgentToolResultEvent(
-                  toolId,
-                  error is Map
-                      ? '${error['message']}'
-                      : '${info['output'] ?? ''}',
-                  isError: state == 'ERROR',
-                ),
-              );
-            }
-          default:
-            if (state == 'ACTIVE') emit(const AgentThinkingEvent());
-        }
+        final name = '${event['tool_name'] ?? 'Ferramenta'}';
+        final input = Map<String, dynamic>.from(
+          event['parameters'] as Map? ?? const {},
+        );
+        emit(AgentToolEvent('${event['tool_id'] ?? name}', name, input));
+      case 'tool_result':
+        emit?.call(
+          AgentToolResultEvent(
+            '${event['tool_id'] ?? ''}',
+            '${event['output'] ?? event['error'] ?? ''}',
+            isError: event['status'] == 'error' || event['error'] != null,
+          ),
+        );
+      case 'error':
+        final message =
+            '${event['message'] ?? event['error'] ?? 'Erro no Gemini CLI.'}';
+        if (event['severity'] == 'error') _stderr.writeln(message);
+        emit?.call(AgentInfoEvent(message));
       case 'result':
-        final result = event['result'] as Map? ?? const {};
-        final id = result['conversation_id'];
-        if (id is String && id.isNotEmpty) sessionId = id;
-        if (result['status'] == 'ERROR') {
-          _turnError = _cancelled
-              ? 'Cancelado.'
-              : 'Antigravity: ${result['error'] ?? 'erro desconhecido'}';
+        if (event['status'] == 'error') {
+          _stderr.writeln('${event['error'] ?? 'A solicitacao falhou.'}');
         }
-        final denied = result['denied_actions'];
-        if (denied is List && denied.isNotEmpty && emit != null) {
-          emit(
-            AgentInfoEvent(
-              'Ações negadas neste modo: '
-              '${denied.whereType<Map>().map((d) => d['display_name'] ?? d['action']).join(', ')}. '
-              'Use "Ignorar permissões" ou "Editar automaticamente" para '
-              'liberá-las.',
-            ),
-          );
-        }
-        final turn = _turn;
-        if (turn != null && !turn.isCompleted) turn.complete();
     }
   }
 
@@ -2019,67 +1870,78 @@ class GeminiCliBackend extends CliAgentBackend {
     List<AgentAttachment> attachments,
     AgentEventSink emit,
   ) async {
-    final process = await _ensureSession();
+    final cwd = await workingDirectory();
     final text = await _composePrompt(
       prompt,
       attachments,
-      withInstructions: !_instructionsSent,
+      withInstructions: sessionId == null,
     );
-    _instructionsSent = true;
-    final turn = _turn = Completer<void>();
+    final args = <String>[
+      '--output-format',
+      'stream-json',
+      if (model.isNotEmpty) ...['--model', model],
+      if (sessionId != null) ...['--resume', sessionId!],
+      '--prompt',
+      text,
+    ];
+    final process = await Process.start(
+      await executable(),
+      args,
+      runInShell: (await executable()).toLowerCase().endsWith('.cmd'),
+      workingDirectory: cwd,
+      environment: {
+        ...GestorProcessEnvironment.variablesFor(cwd),
+        ...environment,
+        ...profileEnvironment,
+        'GEMINI_CLI_TRUST_WORKSPACE': 'true',
+      },
+    );
+    _session = process;
     _emit = emit;
-    _turnError = null;
     _cancelled = false;
-    _textStep = null;
-    process.stdin.writeln(
-      jsonEncode({
-        'event': 'user',
-        'message': {
-          'role': 'user',
-          'content': [
-            {'type': 'text', 'text': text},
-          ],
-        },
-      }),
-    );
-    await process.stdin.flush();
-    try {
-      await turn.future;
-    } finally {
-      _emit = null;
-      _turn = null;
+    _stderr.clear();
+    final response = StringBuffer();
+    final output = process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) => _handleLine(line, response));
+    final errors = process.stderr.transform(utf8.decoder).listen((chunk) {
+      if (_stderr.length < 20000) _stderr.write(chunk);
+    });
+    final code = await process.exitCode;
+    await output.cancel();
+    await errors.cancel();
+    _session = null;
+    _emit = null;
+    if (_cancelled) throw AgentException('Cancelado.');
+    if (code != 0) {
+      throw AgentException(
+        'Gemini CLI terminou (codigo $code)${_stderr.isEmpty ? '' : ':\n${_stderr.toString().trim()}'}',
+      );
     }
-    final error = _turnError;
-    if (error != null) throw AgentException(error);
+    if (response.isEmpty) {
+      throw AgentException(
+        _stderr.isEmpty
+            ? 'Gemini CLI nao devolveu resposta.'
+            : _stderr.toString().trim(),
+      );
+    }
   }
 
-  /// Interrompe encerrando o processo; a conversa continua com
-  /// `--conversation` na próxima mensagem.
   @override
   Future<void> cancel() async {
-    if (_turn == null) return;
     _cancelled = true;
-    _closeSession();
+    _session?.kill();
   }
 
-  void _closeSession() {
-    final process = _session;
+  @override
+  void reset() => sessionId = null;
+
+  @override
+  Future<void> dispose() async {
+    _session?.kill();
     _session = null;
-    process?.kill();
   }
-
-  @override
-  void reset() {
-    _closeSession();
-    sessionId = null;
-    _instructionsSent = false;
-  }
-
-  @override
-  void refreshSession() => _closeSession();
-
-  @override
-  Future<void> dispose() async => _closeSession();
 }
 
 /// GitHub Copilot (assinatura Copilot Pro) pelo GitHub Copilot CLI no modo

@@ -254,6 +254,16 @@ class _DashboardHeader extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               OutlinedButton.icon(
+                onPressed: () => context.go('/remote-access'),
+                icon: const Icon(Icons.phone_android_rounded, size: 17),
+                label: const Text('Acesso móvel'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(0, 40),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                ),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton.icon(
                 onPressed: onSettingsPressed,
                 icon: const Icon(Icons.storage_rounded, size: 17),
                 label: const Text('Configurações'),

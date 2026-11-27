@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -22,11 +23,7 @@ class EquivalenciaService extends ChangeNotifier {
 
   EquivalenciaState get state =>
       _state ??
-      EquivalenciaState(
-        curricula: [EquivalenciaRepository.defaultCurriculum],
-        cases: [],
-        currentId: 'eca-2020',
-      );
+      const EquivalenciaState(curricula: [], cases: [], currentId: null);
 
   /// Relê o banco (o agente ou outro computador podem ter alterado).
   Future<EquivalenciaState> load() async {
@@ -85,9 +82,21 @@ class EquivalenciaService extends ChangeNotifier {
     );
   }
 
-  /// Lê as disciplinas de uma planilha de currículo (sem gravar).
-  List<Subject> parseCurriculum(Uint8List bytes) =>
-      EquivalenciaPlanilhas.curriculumSubjects(bytes);
+  /// Lê uma planilha ou um currículo JSON (sem gravar).
+  List<Subject> parseCurriculum(Uint8List bytes) {
+    if (bytes.length >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4b) {
+      return EquivalenciaPlanilhas.curriculumSubjects(bytes);
+    }
+    final data = jsonDecode(utf8.decode(bytes));
+    final subjects = data is Map ? data['subjects'] : data;
+    if (subjects is! List) {
+      throw const FormatException('O currículo JSON precisa de subjects.');
+    }
+    return mergeSubjects([
+      for (final subject in subjects)
+        Subject.fromJson(Map<String, dynamic>.from(subject as Map)),
+    ]);
+  }
 
   /// Importa as disciplinas da planilha para um currículo existente
   /// ([curriculumId]) ou novo ([course] + [name]). [replace] troca a lista;

@@ -1,0 +1,679 @@
+{
+  "id": "eca-2020",
+  "course": "Engenharia de Controle e Automação",
+  "name": "Currículo Proposto (2020/1)",
+  "subjects": [
+    {
+      "code": "FEMEC39101",
+      "name": "Expressão Gráfica",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "1º Período"
+    },
+    {
+      "code": "FEELT31105",
+      "name": "Introdução à Engenharia de Controle e Automação",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "1º Período"
+    },
+    {
+      "code": "FAMAT31011",
+      "name": "Cálculo Diferencial e Integral I",
+      "theoretical": 90,
+      "practical": 0,
+      "period": "1º Período"
+    },
+    {
+      "code": "FAMAT31021",
+      "name": "Geometria Analítica",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "1º Período"
+    },
+    {
+      "code": "FEELT31107",
+      "name": "Programação Script",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "1º Período"
+    },
+    {
+      "code": "INFIS39031",
+      "name": "Física Básica: Mecânica",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "1º Período"
+    },
+    {
+      "code": "FAMAT31012",
+      "name": "Cálculo Diferencial e Integral II",
+      "theoretical": 90,
+      "practical": 0,
+      "period": "2º Período"
+    },
+    {
+      "code": "FAMAT31022",
+      "name": "Álgebra Linear",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT31201",
+      "name": "Programação Procedimental",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT31204",
+      "name": "Metrologia",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT31409",
+      "name": "Sistemas Digitais",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT31410",
+      "name": "Experimental de Sistemas Digitais",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT31301",
+      "name": "Circuitos Elétricos I",
+      "theoretical": 75,
+      "practical": 0,
+      "period": "3º Período"
+    },
+    {
+      "code": "FEELT31302",
+      "name": "Experimental de Circuitos Elétricos I",
+      "theoretical": 0,
+      "practical": 15,
+      "period": "3º Período"
+    },
+    {
+      "code": "FEQUI39401",
+      "name": "Fenômenos de Transporte",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "3º Período"
+    },
+    {
+      "code": "FEMEC39102",
+      "name": "Mecânica dos Sólidos",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "3º Período"
+    },
+    {
+      "code": "FAMAT31013",
+      "name": "Cálculo Diferencial e Integral III",
+      "theoretical": 90,
+      "practical": 0,
+      "period": "3º Período"
+    },
+    {
+      "code": "FAMAT31033",
+      "name": "Estatística",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "3º Período"
+    },
+    {
+      "code": "FEELT31401",
+      "name": "Eletrônica Analógica I",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "4º Período"
+    },
+    {
+      "code": "FEELT31402",
+      "name": "Experimental de Eletrônica Analógica I",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "4º Período"
+    },
+    {
+      "code": "FEELT31403",
+      "name": "Circuitos Elétricos II",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "4º Período"
+    },
+    {
+      "code": "FEELT31404",
+      "name": "Experimental de Circuitos Elétricos II",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "4º Período"
+    },
+    {
+      "code": "FAMAT31031",
+      "name": "Métodos Matemáticos",
+      "theoretical": 75,
+      "practical": 0,
+      "period": "4º Período"
+    },
+    {
+      "code": "INFIS39033",
+      "name": "Física Básica: Eletricidade e Magnetismo",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "4º Período"
+    },
+    {
+      "code": "FEELT31502",
+      "name": "Experimental de Eletrônica Analógica II",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT31523",
+      "name": "Sistemas Embarcados I",
+      "theoretical": 45,
+      "practical": 30,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT32501",
+      "name": "Conversão de Energia e Transformadores",
+      "theoretical": 60,
+      "practical": 30,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT32502",
+      "name": "Eletrônica Analógica II",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT32503",
+      "name": "Instrumentação Industrial I",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT32504",
+      "name": "Sinais e Sistemas",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "5º Período"
+    },
+    {
+      "code": "FEELT31603",
+      "name": "Instalações Elétricas",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEELT31604",
+      "name": "Experimental de Instalações Elétricas",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEELT31605",
+      "name": "Máquinas Elétricas",
+      "theoretical": 60,
+      "practical": 30,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEELT39015",
+      "name": "Sistemas Embarcados II",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEELT32603",
+      "name": "Sistemas de Controle Realimentado",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEELT32601",
+      "name": "Experimental de Sistemas de Controle Realimentado",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "6º Período"
+    },
+    {
+      "code": "FEMEC42073",
+      "name": "Processos de Fabricação Mecânica",
+      "theoretical": 60,
+      "practical": 15,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEELT31701",
+      "name": "Instalações Industriais",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEELT31713",
+      "name": "Redes Industriais para Controle e Automação I",
+      "theoretical": 60,
+      "practical": 15,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEQUI39048",
+      "name": "Química Tecnológica",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEELT32701",
+      "name": "Sistemas de Controle Moderno",
+      "theoretical": 45,
+      "practical": 45,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEELT32702",
+      "name": "Projeto Interdisciplinar de Engenharia de Controle e Automação",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "7º Período"
+    },
+    {
+      "code": "FEMEC41080",
+      "name": "Sistemas de Controle Hidráulicos e Pneumáticos",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "8º Período"
+    },
+    {
+      "code": "FEELT31811",
+      "name": "Eletrônica Industrial e Acionamentos",
+      "theoretical": 60,
+      "practical": 30,
+      "period": "8º Período"
+    },
+    {
+      "code": "FEELT31722",
+      "name": "Robótica",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "8º Período"
+    },
+    {
+      "code": "FEELT32801",
+      "name": "Redes Industriais para Controle e Automação II",
+      "theoretical": 30,
+      "practical": 60,
+      "period": "8º Período"
+    },
+    {
+      "code": "FAGEN39901",
+      "name": "Administração",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "9º Período"
+    },
+    {
+      "code": "FADIR39901",
+      "name": "Ciências Sociais e Jurídicas",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "9º Período"
+    },
+    {
+      "code": "IERI39001",
+      "name": "Ciências Econômicas",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "9º Período"
+    },
+    {
+      "code": "FEELT32901",
+      "name": "Modelagem e Simulação de Sistemas a Eventos Discretos",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "9º Período"
+    },
+    {
+      "code": "FEELT32902",
+      "name": "Trabalho de Conclusão de Curso",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "9º Período"
+    },
+    {
+      "code": "FEELT32002",
+      "name": "Estágio Supervisionado Obrigatório",
+      "theoretical": 0,
+      "practical": 160,
+      "period": "10º Período"
+    },
+    {
+      "code": "INFIS39032",
+      "name": "Experimental de Física Básica: Mecânica",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "1º Período"
+    },
+    {
+      "code": "INFIS31402",
+      "name": "Física Básica: Oscilações, Ondas e Óptica",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT32301",
+      "name": "Informática Industrial I",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "3º Período"
+    },
+    {
+      "code": "INFIS39034",
+      "name": "Experimental de Física Básica: Eletricidade e Magnetismo",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "4º Período"
+    },
+    {
+      "code": "FEELT32602",
+      "name": "Instrumentação Industrial II",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "6º Período"
+    },
+    {
+      "code": "INFIS39056",
+      "name": "Experimental de Física Básica: Oscilações, Ondas e Óptica",
+      "theoretical": 0,
+      "practical": 30,
+      "period": "2º Período"
+    },
+    {
+      "code": "FEELT32401",
+      "name": "Informática Industrial II",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "4º Período"
+    },
+    {
+      "code": "LIBRAS01",
+      "name": "Língua Brasileira de Sinais - Libras I",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEMEC42081",
+      "name": "Gestão dos Sistemas de Produção",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEMEC41094",
+      "name": "Fabricação Assistida por Computador",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT31514",
+      "name": "Programação Orientada a Objetos",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT31717",
+      "name": "Processamento Digital de Sinais",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39020",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação II",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT31525",
+      "name": "Arquitetura e Organização de Computadores",
+      "theoretical": 30,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT31725",
+      "name": "Sistemas Computacionais em Tempo Real",
+      "theoretical": 30,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT31830",
+      "name": "Sistemas Distribuídos",
+      "theoretical": 30,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39045",
+      "name": "Automação Residencial e Predial",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39046",
+      "name": "Eficiência em Sistemas de Energia",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39047",
+      "name": "Fontes Renováveis não Convencionais - Técnicas e",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39048",
+      "name": "Materiais e Equipamentos Elétricos e Eletrônicos",
+      "theoretical": 45,
+      "practical": 15,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39050",
+      "name": "Metodologia da Pesquisa e Escrita Científica",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39051",
+      "name": "Sistemas de Gestão e Manutenção na Automação",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39020C",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação II: C",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019F",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I: F",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053A",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: A",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019I",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I: I",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019J",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I: J",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053B",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: B",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053C",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: C",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019K",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I: K",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052A",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: A",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053D",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: D",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053E",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: E",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39053F",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação IV: F",
+      "theoretical": 30,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39020E",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação II: E",
+      "theoretical": 60,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052B",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: B",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052C",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: C",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052D",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: D",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39019L",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação I: L",
+      "theoretical": 30,
+      "practical": 30,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052E",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: E",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    },
+    {
+      "code": "FEELT39052F",
+      "name": "Tópicos Especiais em Engenharia de Controle e Automação III: F",
+      "theoretical": 45,
+      "practical": 0,
+      "period": "Optativas"
+    }
+  ]
+}

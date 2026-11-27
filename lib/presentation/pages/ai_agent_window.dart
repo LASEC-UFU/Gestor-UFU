@@ -2185,89 +2185,57 @@ class _AiAgentPageState extends State<AiAgentPage> {
   /// Abas no topo, como "Chat · Codex · Claude Code" do VS Code.
   Widget _tabs(VsColors vs) => Padding(
     padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-    child: Row(
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(5),
-            onTap: () => setState(() {
-              _powerShellTab = true;
-              _orqTab = false;
-            }),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: _powerShellTab ? vs.tab : null,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                'PowerShell',
-                style: TextStyle(fontSize: 13, color: vs.text),
-              ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: 4),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(5),
-            onTap: () => setState(() {
-              _powerShellTab = false;
-              _orqTab = true;
-            }),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                color: _orqTab && !_powerShellTab ? vs.tab : null,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Orquestrador',
-                    style: TextStyle(fontSize: 13, color: vs.text),
-                  ),
-                  if (_orq.activeCount > 0 || _orq.coordinatorBusy) ...[
-                    const SizedBox(width: 6),
-                    const PulsingDot(color: Color(0xFF0A6ED1)),
-                  ] else if (_orq.approvals.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    TimelineDot(vs.accent),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-        for (final provider in AgentProvider.values)
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: InkWell(
               borderRadius: BorderRadius.circular(5),
-              onTap: _connecting ? null : () => _selectProvider(provider),
+              onTap: () => setState(() {
+                _powerShellTab = true;
+                _orqTab = false;
+              }),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: !_orqTab && provider == _settings.provider
-                      ? vs.tab
-                      : null,
+                  color: _powerShellTab ? vs.tab : null,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+                child: Text(
+                  'PowerShell',
+                  style: TextStyle(fontSize: 13, color: vs.text),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(5),
+              onTap: () => setState(() {
+                _powerShellTab = false;
+                _orqTab = true;
+              }),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _orqTab && !_powerShellTab ? vs.tab : null,
                   borderRadius: BorderRadius.circular(5),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      provider.tabLabel,
+                      'Orquestrador',
                       style: TextStyle(fontSize: 13, color: vs.text),
                     ),
-                    // Agente trabalhando em segundo plano nesta aba.
-                    if (_sessions[provider]?.busy ?? false) ...[
+                    if (_orq.activeCount > 0 || _orq.coordinatorBusy) ...[
                       const SizedBox(width: 6),
-                      const PulsingDot(color: Color(0xFFD97757)),
-                    ] else if ((_sessions[provider]?.approvals.isNotEmpty ??
-                        false)) ...[
+                      const PulsingDot(color: Color(0xFF0A6ED1)),
+                    ] else if (_orq.approvals.isNotEmpty) ...[
                       const SizedBox(width: 6),
                       TimelineDot(vs.accent),
                     ],
@@ -2276,22 +2244,60 @@ class _AiAgentPageState extends State<AiAgentPage> {
               ),
             ),
           ),
-        const Spacer(),
-        if (_undoCount > 0)
-          Badge(
-            label: Text('$_undoCount'),
-            child: VsIconButton(
-              icon: Icons.undo_rounded,
-              tooltip: 'Desfazer a última alteração do agente no Gestor',
-              onPressed: _busy ? null : _undo,
+          for (final provider in AgentProvider.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(5),
+                onTap: _connecting ? null : () => _selectProvider(provider),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: !_orqTab && provider == _settings.provider
+                        ? vs.tab
+                        : null,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        provider.tabLabel,
+                        style: TextStyle(fontSize: 13, color: vs.text),
+                      ),
+                      // Agente trabalhando em segundo plano nesta aba.
+                      if (_sessions[provider]?.busy ?? false) ...[
+                        const SizedBox(width: 6),
+                        const PulsingDot(color: Color(0xFFD97757)),
+                      ] else if ((_sessions[provider]?.approvals.isNotEmpty ??
+                          false)) ...[
+                        const SizedBox(width: 6),
+                        TimelineDot(vs.accent),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ),
+          if (_undoCount > 0)
+            Badge(
+              label: Text('$_undoCount'),
+              child: VsIconButton(
+                icon: Icons.undo_rounded,
+                tooltip: 'Desfazer a última alteração do agente no Gestor',
+                onPressed: _busy ? null : _undo,
+              ),
+            ),
+          VsIconButton(
+            icon: Icons.settings_outlined,
+            tooltip: 'Configurações do agente',
+            onPressed: _busy ? null : _openSettings,
           ),
-        VsIconButton(
-          icon: Icons.settings_outlined,
-          tooltip: 'Configurações do agente',
-          onPressed: _busy ? null : _openSettings,
-        ),
-      ],
+        ],
+      ),
     ),
   );
 
@@ -2967,8 +2973,7 @@ class _AiAgentPageState extends State<AiAgentPage> {
               if (provider == AgentProvider.gemini) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Usa o Antigravity CLI do Google, que aceita contas pessoais '
-                  '(Google AI Pro e gratuitas).',
+                  'Usa a CLI oficial do Google. Entre com sua conta Google no terminal que será aberto.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 11.5, color: vs.muted),
                 ),
@@ -3086,6 +3091,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       p: TextEditingController(text: widget.settings.cliPathFor(p)),
   };
   late final _workDir = TextEditingController(text: widget.settings.workDir);
+  late AgentProvider _selectedProvider = widget.settings.provider;
   String? _message;
 
   @override
@@ -3129,13 +3135,21 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
   }
 
   Future<void> _login(AgentProvider provider) async {
-    final backend = cliBackendFor(
-      provider,
-      mcp: AgentMcpServer((_, _) async => '{}'),
-      path: _paths[provider]!.text.trim(),
-      model: '',
-    );
+    final backend =
+        cliBackendFor(
+              provider,
+              mcp: AgentMcpServer((_, _) async => '{}'),
+              path: _paths[provider]!.text.trim(),
+              model: '',
+            )
+            as CliAgentBackend;
     try {
+      if (!await backend.isInstalled()) {
+        setState(() => _message = 'Instalando ${provider.cliProductName}...');
+        await backend.install((line) {
+          if (mounted) setState(() => _message = line);
+        });
+      }
       await openCliLogin(backend);
       setState(() => _message = provider.loginHint);
     } on Object catch (error) {
@@ -3190,34 +3204,43 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
           ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _keys[provider],
-          obscureText: true,
-          decoration: InputDecoration(
-            labelText: hasKey
-                ? 'Chave de API (salva — preencha para trocar)'
-                : 'Chave de API',
-            isDense: true,
-            suffixIcon: hasKey
-                ? IconButton(
-                    tooltip: 'Apagar chave salva',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      await AgentSettings.writeApiKey(provider, null);
-                      setState(() => _hasKey[provider] = false);
-                    },
-                  )
-                : null,
+        if (provider == AgentProvider.copilot)
+          const Padding(
+            padding: EdgeInsets.only(top: 10),
+            child: Text(
+              'O Copilot usa apenas o login do GitHub CLI. Use Entrar para instalar e autenticar.',
+            ),
+          )
+        else ...[
+          TextField(
+            controller: _keys[provider],
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: hasKey
+                  ? 'Chave de API (salva — preencha para trocar)'
+                  : 'Chave de API',
+              isDense: true,
+              suffixIcon: hasKey
+                  ? IconButton(
+                      tooltip: 'Apagar chave salva',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        await AgentSettings.writeApiKey(provider, null);
+                        setState(() => _hasKey[provider] = false);
+                      },
+                    )
+                  : null,
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: _models[(provider, AgentAuthMode.apiKey)],
-          decoration: InputDecoration(
-            labelText: 'Modelo na API (padrão ${provider.defaultApiModel})',
-            isDense: true,
+          const SizedBox(height: 6),
+          TextField(
+            controller: _models[(provider, AgentAuthMode.apiKey)],
+            decoration: InputDecoration(
+              labelText: 'Modelo na API (padrão ${provider.defaultApiModel})',
+              isDense: true,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -3251,11 +3274,24 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
               ),
             ),
             const SizedBox(height: 16),
-            for (final provider in AgentProvider.values) ...[
-              if (provider != AgentProvider.values.first)
-                const Divider(height: 32),
-              _providerSection(provider),
-            ],
+            DropdownButtonFormField<AgentProvider>(
+              initialValue: _selectedProvider,
+              decoration: const InputDecoration(labelText: 'Configurar agente'),
+              items: [
+                for (final provider in AgentProvider.values)
+                  DropdownMenuItem(
+                    value: provider,
+                    child: Text(provider.tabLabel),
+                  ),
+              ],
+              onChanged: (provider) {
+                if (provider != null) {
+                  setState(() => _selectedProvider = provider);
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+            _providerSection(_selectedProvider),
             if (_message != null) ...[
               const SizedBox(height: 16),
               Text(
