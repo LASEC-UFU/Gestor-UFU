@@ -11,10 +11,12 @@ import 'package:gestor_ufu/modules/equivalencia/application/certidao_pdf.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_commands.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_service.dart';
 import 'package:gestor_ufu/modules/equivalencia/data/equivalencia_repository.dart';
+import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
 import 'package:gestor_ufu/platform/command/module_command.dart';
 import 'package:gestor_ufu/platform/services/key_value_store.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   // create_template usa os modelos declarados pelos módulos instalados.
   setUpAll(() {
     ModuleRegistry.instance.clear();
@@ -51,6 +53,210 @@ void main() {
     expect(state.curricula.single.id, 'eca-2020');
     expect(state.currentId, 'eca-2020');
     expect(state.cases, isEmpty);
+  });
+
+  group('currículos no banco e migração de períodos', () {
+    const expectedPeriods = {
+      'INFIS39032': '1º Período',
+      'INFIS31402': '2º Período',
+      'INFIS39056': '2º Período',
+      'FEELT32301': '3º Período',
+      'INFIS39034': '4º Período',
+      'FEELT32401': '4º Período',
+      'FEELT32602': '6º Período',
+    };
+
+    Map<String, dynamic> subject(String code, {String period = 'Optativas'}) =>
+        {
+          'code': code,
+          'name': 'Disciplina $code',
+          'theoretical': 45,
+          'practical': 15,
+          'period': period,
+          'observacao': 'preservar',
+        };
+
+    Map<String, dynamic> database(List<Map<String, dynamic>> subjects) => {
+      'curricula': [
+        {
+          'id': 'eca-2020',
+          'course': 'Curso editado',
+          'name': 'Nome editado',
+          'subjects': subjects,
+          'extra': true,
+        },
+      ],
+      'cases': [
+        {
+          'id': 'a1',
+          'student': 'Ana',
+          'priorCurriculumId': 'origem',
+          'history': [],
+          'blocks': [],
+          'notasExtras': 'preservar',
+        },
+      ],
+      'currentId': 'eca-2020',
+      'campoExtra': {'valor': 42},
+    };
+
+    Future<void> write(Map<String, dynamic> data) =>
+        KeyValueStore().writeJson(EquivalenciaRepository.key, data);
+
+    Future<Map> read() async =>
+        (await KeyValueStore().readJson(EquivalenciaRepository.key)) as Map;
+
+    test(
+      'load preserva currículo editado sem repor disciplinas da semente',
+      () async {
+        final data = database([subject('INFIS39032', period: '8º Período')]);
+        data['schemaVersion'] = 2;
+        await write(data);
+        final state = await service.load();
+        expect(state.curricula.single.course, 'Curso editado');
+        expect(state.curricula.single.subjects.single.period, '8º Período');
+        expect(await read(), data);
+        await service.load();
+        expect(await read(), data);
+      },
+    );
+
+    test(
+      'banco vazio recebe semente corrigida uma vez e conserva exclusões',
+      () async {
+        final repository = EquivalenciaRepository(KeyValueStore());
+        final initial = await repository.load();
+        for (final entry in expectedPeriods.entries) {
+          expect(
+            initial.curricula.single.subjects
+                .singleWhere((s) => s.code == entry.key)
+                .period,
+            entry.value,
+          );
+        }
+        expect((await read())['schemaVersion'], 2);
+        await repository.save(
+          initial.copyWith(
+            curricula: [
+              initial.curricula.single.copyWith(
+                subjects: [
+                  const Subject(
+                    code: 'NOVO',
+                    name: 'Manual',
+                    theoretical: 10,
+                    practical: 20,
+                    period: 'Livre',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+        final loaded = await EquivalenciaRepository(KeyValueStore()).load();
+        expect(loaded.curricula.single.subjects.single.code, 'NOVO');
+        expect(loaded.curricula.single.subjects.single.period, 'Livre');
+        expect((await read())['schemaVersion'], 2);
+      },
+    );
+
+    test('não adiciona ECA quando outro currículo já existe', () async {
+      final data = database([subject('EX1')]);
+      data['curricula'][0]['id'] = 'personalizado';
+      data['currentId'] = 'personalizado';
+      await write(data);
+      final state = await service.load();
+      expect(state.curricula.single.id, 'personalizado');
+      expect(state.curricula.single.subjects.single.period, 'Optativas');
+    });
+
+    test(
+      'migra sete períodos e remove duplicata de código com nome diferente',
+      () async {
+        final subjects = [
+          for (final code in expectedPeriods.keys) subject(code),
+          {
+            ...subject('INFIS39056'),
+            'name': 'Experimental de Física Básica:Oscilações, Ondas e Óptica',
+          },
+          subject('SEM_PERIODO', period: ''),
+        ];
+        subjects[0]['period'] = '';
+        final data = database(subjects);
+        await write(data);
+        final state = await service.load();
+        expect(state.curricula.single.subjects, hasLength(8));
+        for (final entry in expectedPeriods.entries) {
+          expect(
+            state.curricula.single.subjects
+                .singleWhere((s) => s.code == entry.key)
+                .period,
+            entry.value,
+          );
+        }
+        final saved = await read();
+        expect(saved['schemaVersion'], 2);
+        expect(saved['cases'], data['cases']);
+        expect(saved['currentId'], data['currentId']);
+        expect(saved['campoExtra'], data['campoExtra']);
+        expect(saved['curricula'][0]['extra'], true);
+        expect(saved['curricula'][0]['subjects'][0]['observacao'], 'preservar');
+        expect(state.curricula.single.subjects.last.period, '');
+      },
+    );
+
+    test(
+      'migração preserva período personalizado inclusive em duplicatas',
+      () async {
+        await write(
+          database([
+            subject('INFIS39056'),
+            subject('INFIS39056', period: '9º Período'),
+            subject('INFIS39032', period: 'Integral'),
+          ]),
+        );
+        final state = await service.load();
+        expect(state.curricula.single.subjects.map((s) => s.period), [
+          '9º Período',
+          'Integral',
+        ]);
+      },
+    );
+
+    test('migração não roda novamente após edições e salvamento', () async {
+      final repository = EquivalenciaRepository(KeyValueStore());
+      await write(database([subject('INFIS39032')]));
+      final migrated = await repository.load();
+      await repository.save(
+        migrated.copyWith(
+          curricula: [
+            migrated.curricula.single.copyWith(
+              subjects: [
+                Subject.fromJson(subject('INFIS39032')),
+                Subject.fromJson(subject('INFIS39056', period: '')),
+              ],
+            ),
+          ],
+        ),
+      );
+      final loaded = await EquivalenciaRepository(KeyValueStore()).load();
+      expect(loaded.curricula.single.subjects.map((s) => s.period), [
+        'Optativas',
+        '',
+      ]);
+      expect((await read())['schemaVersion'], 2);
+    });
+
+    test('semente JSON pode ser importada preservando os períodos', () async {
+      final bytes = await File(EquivalenciaRepository.seedAsset).readAsBytes();
+      final imported = service.parseCurriculum(bytes);
+      for (final entry in expectedPeriods.entries) {
+        expect(
+          imported.singleWhere((s) => s.code == entry.key).period,
+          entry.value,
+        );
+      }
+      expect(imported.map((s) => s.code).toSet(), hasLength(imported.length));
+    });
   });
 
   test('importa o modelo de currículo do agente (create_template)', () async {

@@ -9,7 +9,7 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:gestor_ufu/core/theme/app_theme.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/certidao_pdf.dart';
 import 'package:gestor_ufu/modules/equivalencia/application/equivalencia_service.dart';
-import 'package:gestor_ufu/modules/equivalencia/data/curriculo_eca_2020.dart';
+import 'package:gestor_ufu/modules/equivalencia/data/historico_exemplo.dart';
 import 'package:gestor_ufu/modules/equivalencia/domain/equivalencia_models.dart';
 import 'package:gestor_ufu/modules/equivalencia/pages/equivalencia_history_window.dart';
 import 'package:gestor_ufu/platform/shell/module_scaffold.dart';
@@ -589,7 +589,7 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
     final picked = await FilePicker.platform.pickFiles(
       dialogTitle: 'Importar disciplinas do currículo',
       type: FileType.custom,
-      allowedExtensions: const ['xlsx', 'xlsm'],
+      allowedExtensions: const ['xlsx', 'xlsm', 'json'],
       withData: true,
     );
     if (picked == null) return;
@@ -602,7 +602,9 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
       final parsed = widget.service.parseCurriculum(bytes);
       setState(() => _subjects = mergeSubjects([..._subjects, ...parsed]));
       _notice(
-        '${_subjects.length} disciplinas importadas. Equivalências automáticas, estágio, atividades complementares e optativas foram ignoradas.',
+        picked.files.single.extension?.toLowerCase() == 'json'
+            ? '${parsed.length} disciplinas importadas do JSON, incluindo os períodos.'
+            : '${parsed.length} disciplinas importadas. Equivalências automáticas, estágio, atividades complementares e optativas foram ignoradas.',
       );
     } on Object catch (e) {
       _notice('Falha ao importar disciplinas: $e');
@@ -641,8 +643,8 @@ class _CurriculumDialogState extends State<_CurriculumDialog> {
               icon: const Icon(Icons.upload_file),
               label: Text(
                 _subjects.isEmpty
-                    ? 'Carregar disciplinas da planilha'
-                    : 'Planilha carregada · ${_subjects.length} disciplinas',
+                    ? 'Importar disciplinas (planilha ou JSON)'
+                    : 'Disciplinas carregadas · ${_subjects.length} disciplinas',
               ),
             ),
           ),
