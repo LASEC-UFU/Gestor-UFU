@@ -171,6 +171,7 @@ class EquivalenciaService extends ChangeNotifier {
   /// Insere ou atualiza uma análise (novas entram no topo da lista).
   Future<void> saveCase(EquivalenceCase item) async {
     final current = await _ensure();
+    item = item.copyWith(history: item.historyFor());
     final cases = [...current.cases];
     final index = cases.indexWhere((c) => c.id == item.id);
     if (index < 0) {

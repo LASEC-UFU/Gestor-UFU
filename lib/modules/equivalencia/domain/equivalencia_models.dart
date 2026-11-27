@@ -123,7 +123,7 @@ class HistoricalSubject {
   factory HistoricalSubject.fromJson(Map<String, dynamic> json) {
     final rawStatus = json['status'] as String?;
     final status = switch (rawStatus) {
-      'Não cursada' || 'Matriculado' || 'Aprovado' => rawStatus!,
+      'Não cursada' || 'Dispensado' || 'Aprovado' => rawStatus!,
       _ =>
         json['equivalent'] == true || rawStatus == 'Aprovado'
             ? 'Aprovado'
@@ -167,6 +167,32 @@ class EquivalenceCase {
   final List<Subject> currentCatalog, priorCatalog;
   final List<HistoricalSubject> history;
 
+  /// A dispensa é derivada dos blocos, inclusive nas análises antigas.
+  List<HistoricalSubject> historyFor({Iterable<Subject> subjects = const []}) {
+    final equivalent = {
+      for (final subject in blocks.expand((b) => b.current))
+        subjectCatalogKey(subject): subject,
+    };
+    final saved = {
+      for (final entry in history) subjectCatalogKey(entry.subject): entry,
+    };
+    return [
+      for (final subject in mergeSubjects([
+        ...subjects,
+        ...history.map((e) => e.subject),
+        ...equivalent.values,
+      ]))
+        HistoricalSubject(
+          subject: subject,
+          status: equivalent.containsKey(subjectCatalogKey(subject))
+              ? 'Dispensado'
+              : saved[subjectCatalogKey(subject)]?.status == 'Aprovado'
+              ? 'Aprovado'
+              : 'Não cursada',
+        ),
+    ];
+  }
+
   bool get isApproved => status.trim().toLowerCase() == 'deferida';
 
   Map<String, dynamic> toJson() => {
@@ -197,7 +223,7 @@ class EquivalenceCase {
       return mergeSubjects(values);
     }
 
-    return EquivalenceCase(
+    final item = EquivalenceCase(
       id: j['id'] ?? '',
       student: j['student'] ?? '',
       studentId: j['studentId'] ?? '',
@@ -212,9 +238,11 @@ class EquivalenceCase {
           .map((e) => HistoricalSubject.fromJson(Map<String, dynamic>.from(e)))
           .toList(),
     );
+    return item.copyWith(history: item.historyFor());
   }
 
   EquivalenceCase copyWith({
+    List<EquivalenceBlock>? blocks,
     List<HistoricalSubject>? history,
     List<Subject>? priorCatalog,
   }) => EquivalenceCase(
@@ -225,7 +253,7 @@ class EquivalenceCase {
     priorCurriculumId: priorCurriculumId,
     status: status,
     notes: notes,
-    blocks: blocks,
+    blocks: blocks ?? this.blocks,
     currentCatalog: currentCatalog,
     priorCatalog: priorCatalog ?? this.priorCatalog,
     history: history ?? this.history,

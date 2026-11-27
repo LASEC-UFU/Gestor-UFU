@@ -32,6 +32,8 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
   WindowController? _historyController;
   WindowMethodChannel? _historyChannel;
   bool _openingHistory = false;
+  String? _historyCaseId;
+  EquivalenceCase? _historyPreview;
 
   EquivalenciaService get _service => widget.service;
   List<EquivalenceCase> get _cases => _service.state.cases;
@@ -55,6 +57,27 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
 
   void _onChanged() {
     if (mounted) setState(() {});
+    final item = _service.state.caseById(_historyCaseId ?? '');
+    if (item != null) {
+      _syncHistory(
+        _historyPreview?.id == item.id
+            ? item.copyWith(blocks: _historyPreview!.blocks)
+            : item,
+      );
+    }
+  }
+
+  Future<void> _syncHistory(EquivalenceCase item) async {
+    if (_historyCaseId != item.id || _historyChannel == null) return;
+    try {
+      await _historyChannel!.invokeMethod<bool>('setHistory', {
+        'caseId': item.id,
+        'student': item.student,
+        'entries': _historyForCase(item).map((e) => e.toJson()).toList(),
+      });
+    } catch (_) {
+      // A janela pode ter sido fechada pelo usuário.
+    }
   }
 
   Future<void> _load() async {
@@ -95,6 +118,7 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
         _message('Não foi possível abrir outra janela: $error');
       }
     }
+    if (!mounted) return;
     var entries = initial;
     final shouldSave = await showDialog<bool>(
       context: context,
@@ -134,6 +158,7 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
     EquivalenceCase item,
     List<HistoricalSubject> entries,
   ) async {
+    _historyCaseId = item.id;
     final activeChannel = _historyChannel;
     final activeController = _historyController;
     if (activeChannel != null && activeController != null) {
@@ -217,19 +242,23 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
     final saved = {
       for (final entry in item.history) subjectCatalogKey(entry.subject): entry,
     };
-    if (curriculum == null) return item.history;
-    return [
-      for (final subject in curriculum.subjects)
-        saved[subjectCatalogKey(subject)] ??
-            HistoricalSubject(
-              subject: subject,
-              status:
-                  item.studentId == eca2020ExampleStudentId &&
-                      eca2020ExampleApprovedCodes.contains(subject.code)
-                  ? 'Aprovado'
-                  : 'Não cursada',
-            ),
-    ];
+    return item
+        .copyWith(
+          history: [
+            for (final subject in curriculum?.subjects ?? const <Subject>[])
+              saved[subjectCatalogKey(subject)] ??
+                  HistoricalSubject(
+                    subject: subject,
+                    status:
+                        item.studentId == eca2020ExampleStudentId &&
+                            eca2020ExampleApprovedCodes.contains(subject.code)
+                        ? 'Aprovado'
+                        : 'Não cursada',
+                  ),
+            ...item.history,
+          ],
+        )
+        .historyFor(subjects: curriculum?.subjects ?? const []);
   }
 
   Future<void> _removeCase(EquivalenceCase item) async {
@@ -277,9 +306,22 @@ class _EquivalenciaPageState extends State<EquivalenciaPage> {
         value: draft.copyWith(history: _historyForCase(draft)),
         curricula: _curricula,
         removeCurriculumSubject: _service.removeCurriculumSubject,
+        latestValue: () {
+          final latest = _service.state.caseById(draft.id) ?? draft;
+          return latest.copyWith(history: _historyForCase(latest));
+        },
+        onBlocksChanged: (blocks) {
+          _historyPreview = (_service.state.caseById(draft.id) ?? draft)
+              .copyWith(blocks: [...blocks]);
+          return _syncHistory(_historyPreview!);
+        },
       ),
     );
-    if (result == null || !mounted) return;
+    _historyPreview = null;
+    if (result == null || !mounted) {
+      await _syncHistory(_service.state.caseById(draft.id) ?? draft);
+      return;
+    }
     await _service.saveCase(result);
   }
 
@@ -710,9 +752,13 @@ class _CaseDialog extends StatefulWidget {
     required this.value,
     required this.curricula,
     required this.removeCurriculumSubject,
+    required this.onBlocksChanged,
+    required this.latestValue,
   });
   final EquivalenceCase value;
   final List<Curriculum> curricula;
+  final Future<void> Function(List<EquivalenceBlock>) onBlocksChanged;
+  final EquivalenceCase Function() latestValue;
   final Future<void> Function(String curriculumId, Subject subject)
   removeCurriculumSubject;
   @override
@@ -738,11 +784,16 @@ class _CaseDialogState extends State<_CaseDialog> {
     ...widget.value.priorCatalog,
     ...widget.value.blocks.expand((b) => b.prior),
   ]);
-  late final Set<String> _blockedCurrent = {
-    ...widget.value.history
-        .where((e) => e.status != 'Não cursada')
+  Set<String> get _approvedCurrent => {
+    ...widget
+        .latestValue()
+        .history
+        .where((e) => e.status == 'Aprovado')
         .map((e) => subjectCatalogKey(e.subject)),
-    ...widget.value.blocks.expand((b) => b.current).map(subjectCatalogKey),
+  };
+  Set<String> get _blockedCurrent => {
+    ..._approvedCurrent,
+    ..._blocks.expand((b) => b.current).map(subjectCatalogKey),
   };
   @override
   void dispose() {
@@ -767,11 +818,14 @@ class _CaseDialogState extends State<_CaseDialog> {
                 ])
                 .where(
                   (s) =>
-                      !_blockedCurrent.contains(subjectCatalogKey(s)) ||
-                      (old?.current.any(
-                            (p) => subjectCatalogKey(p) == subjectCatalogKey(s),
-                          ) ??
-                          false),
+                      !_approvedCurrent.contains(subjectCatalogKey(s)) &&
+                      (!_blockedCurrent.contains(subjectCatalogKey(s)) ||
+                          (old?.current.any(
+                                (p) =>
+                                    subjectCatalogKey(p) ==
+                                    subjectCatalogKey(s),
+                              ) ??
+                              false)),
                 )
                 .toList(),
         priorCatalog: _priorCatalog,
@@ -793,6 +847,7 @@ class _CaseDialogState extends State<_CaseDialog> {
           _blocks[i] = value;
         }
       });
+      await widget.onBlocksChanged(_blocks);
     }
   }
 
@@ -844,16 +899,11 @@ class _CaseDialogState extends State<_CaseDialog> {
     for (final block in _blocks) {
       for (final subject in block.current) {
         final key = subjectCatalogKey(subject);
-        if (_blockedCurrent.contains(key) &&
-            !widget.value.blocks.any(
-              (old) =>
-                  old.id == block.id &&
-                  old.current.any((s) => subjectCatalogKey(s) == key),
-            )) {
+        if (_approvedCurrent.contains(key)) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Esta disciplina está matriculada ou aprovada no histórico e não pode ser usada em um novo bloco de equivalência.',
+                'Esta disciplina está aprovada no histórico e não pode ser usada em um bloco de equivalência.',
               ),
             ),
           );
@@ -898,17 +948,9 @@ class _CaseDialogState extends State<_CaseDialog> {
   }
 
   List<HistoricalSubject> _historyForSave() {
-    final byKey = <String, HistoricalSubject>{
-      for (final entry in widget.value.history)
-        subjectCatalogKey(entry.subject): entry,
-    };
-    for (final subject in _blocks.expand((b) => b.current)) {
-      final key = subjectCatalogKey(subject);
-      byKey[key] = (byKey[key] ?? HistoricalSubject(subject: subject)).copyWith(
-        status: 'Aprovado',
-      );
-    }
-    return byKey.values.toList();
+    return widget.value
+        .copyWith(blocks: _blocks, history: widget.latestValue().history)
+        .historyFor(subjects: _currentCatalog);
   }
 
   @override
@@ -1111,7 +1153,10 @@ class _CaseDialogState extends State<_CaseDialog> {
                   icon: const Icon(Icons.edit_outlined),
                 ),
                 IconButton(
-                  onPressed: () => setState(() => _blocks.remove(b)),
+                  onPressed: () async {
+                    setState(() => _blocks.remove(b));
+                    await widget.onBlocksChanged(_blocks);
+                  },
                   icon: const Icon(Icons.delete_outline),
                 ),
               ],
