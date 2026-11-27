@@ -264,8 +264,9 @@ List<ModuleCommand> ajustaHorariosCommands(
           final unique = <String, String>{};
           for (final item in raw.cast<String>()) {
             final name = item.trim();
-            if (name.isNotEmpty)
+            if (name.isNotEmpty) {
               unique.putIfAbsent(name.toLowerCase(), () => name);
+            }
           }
           teachers = unique.values.toList();
         }

@@ -33,11 +33,12 @@ class CommandExecutionContext {
   bool get cancellationRequested => isCancellationRequested();
 
   void checkCancellation() {
-    if (cancellationRequested)
+    if (cancellationRequested) {
       throw const CommandException(
         'cancelled',
         'Operação cancelada pelo usuário.',
       );
+    }
   }
 }
 

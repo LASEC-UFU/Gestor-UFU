@@ -137,8 +137,9 @@ class RemoteAccessServer {
   }
 
   Future<String?> configureWindowsFirewall({required bool remove}) async {
-    if (!Platform.isWindows)
+    if (!Platform.isWindows) {
       return 'A regra de Firewall está disponível apenas no Windows.';
+    }
     final prefs = await SharedPreferences.getInstance();
     final port = prefs.getInt(portKey) ?? portDefault;
     final cidrs = prefs.getStringList(allowedCidrsKey) ?? const <String>[];
@@ -219,7 +220,7 @@ class RemoteAccessServer {
       final sourceAddress = request.connectionInfo?.remoteAddress.address;
       await _json(request.response, HttpStatus.forbidden, {
         'error': 'Origem fora da faixa de rede autorizada.',
-        if (sourceAddress != null) 'sourceAddress': sourceAddress,
+        'sourceAddress': ?sourceAddress,
       });
       return;
     }
@@ -512,8 +513,9 @@ class RemoteAccessServer {
   Future<bool> _authorized(HttpRequest request) async {
     final expected = await _vault.read(key: tokenKey);
     final supplied = request.headers.value(HttpHeaders.authorizationHeader);
-    if (expected == null || supplied == null || !supplied.startsWith('Bearer '))
+    if (expected == null || supplied == null || !supplied.startsWith('Bearer ')) {
       return false;
+    }
     final a = sha256.convert(utf8.encode(supplied.substring(7))).bytes;
     final b = sha256.convert(utf8.encode(expected)).bytes;
     var difference = a.length ^ b.length;
@@ -942,14 +944,15 @@ class RemoteAccessServer {
         }
         final id = value.substring('upload://'.length);
         final file = _uploadedFiles[id];
-        if (file == null || !file.existsSync())
+        if (file == null || !file.existsSync()) {
           throw const CommandException(
             'arquivo_remoto_expirado',
             'O arquivo enviado não está mais disponível. Envie-o novamente.',
           );
+        }
         return file.path;
       }
-      if (value is Map)
+      if (value is Map) {
         return {
           for (final entry in value.entries)
             '${entry.key}': resolve(
@@ -957,8 +960,10 @@ class RemoteAccessServer {
               key: '${entry.key}'.toLowerCase(),
             ),
         };
-      if (value is List)
+      }
+      if (value is List) {
         return value.map((item) => resolve(item, key: key)).toList();
+      }
       return value;
     }
 
@@ -1113,11 +1118,13 @@ class RemoteAccessServer {
         final task = _RemoteTask.fromJson(
           Map<String, dynamic>.from(row as Map),
         );
-        if (task.status == 'running' || task.status == 'queued')
+        if (task.status == 'running' || task.status == 'queued') {
           task.status = 'interrupted';
+        }
         _tasks[task.id] = task;
-        if (task.idempotencyKey != null)
+        if (task.idempotencyKey != null) {
           _idempotency[task.idempotencyKey!] = task.id;
+        }
       } catch (_) {}
     }
     await _persistTasks();
@@ -1161,8 +1168,9 @@ class RemoteAccessServer {
       );
       for (final entry in rows.entries) {
         final path = entry.value;
-        if (path is String && await File(path).exists())
+        if (path is String && await File(path).exists()) {
           _outputFiles[entry.key] = File(path);
+        }
       }
     } catch (_) {}
   }
@@ -1213,8 +1221,9 @@ class RemoteAccessServer {
     }
     final text = utf8.decode(bytes.takeBytes());
     final data = jsonDecode(text);
-    if (data is! Map)
+    if (data is! Map) {
       throw const FormatException('Corpo JSON deve ser um objeto.');
+    }
     return Map<String, dynamic>.from(data);
   }
 

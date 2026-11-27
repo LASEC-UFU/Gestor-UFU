@@ -3285,8 +3285,9 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
                   ),
               ],
               onChanged: (provider) {
-                if (provider != null)
+                if (provider != null) {
                   setState(() => _selectedProvider = provider);
+                }
               },
             ),
             const SizedBox(height: 16),

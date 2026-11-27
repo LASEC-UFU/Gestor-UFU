@@ -49,14 +49,16 @@ class RemoteAgentService {
   }
 
   Future<void> selectProvider(String id) async {
-    if (_busy)
+    if (_busy) {
       throw AgentException('Aguarde a tarefa atual antes de trocar de agente.');
+    }
     final provider = AgentProvider.values.where((item) => item.name == id);
     if (provider.isEmpty) throw AgentException('Agente desconhecido: $id.');
     if (!_stateLoaded) await _loadState();
     if ((_remoteProvider ?? (await AgentSettings.load()).provider) ==
-        provider.first)
+        provider.first) {
       return;
+    }
     await _backend?.dispose();
     await _mcp?.stop();
     _backend = null;
@@ -100,10 +102,11 @@ class RemoteAgentService {
     AgentBackend backend;
     if (mode == AgentAuthMode.apiKey) {
       final key = await AgentSettings.readApiKey(provider);
-      if (key == null)
+      if (key == null) {
         throw AgentException(
           'O provedor do Agente ainda não tem uma chave de API configurada no Windows.',
         );
+      }
       Future<String> caller(String name, Map<String, dynamic> input) =>
           _callTool(name, input, settings);
       backend = switch (provider) {
@@ -167,12 +170,14 @@ class RemoteAgentService {
   }
 
   Future<bool> send(String text) async {
-    if (text.trim().isEmpty)
+    if (text.trim().isEmpty) {
       throw AgentException('Diga ou escreva uma solicitação.');
-    if (_busy)
+    }
+    if (_busy) {
       throw AgentException(
         'O Agente já está atendendo outra solicitação neste celular.',
       );
+    }
     _busy = true;
     _cancelRequested = false;
     _lastError = null;
@@ -235,8 +240,9 @@ class RemoteAgentService {
         }
       });
       if (_cancelRequested) return false;
-      if (output.isEmpty)
+      if (output.isEmpty) {
         throw AgentException('O agente não devolveu resposta.');
+      }
       _history.add({
         'role': 'assistant',
         'text': output.toString().trim(),
@@ -324,10 +330,11 @@ class RemoteAgentService {
     Map<String, dynamic> input,
     AgentSettings settings,
   ) async {
-    if (!_gestorTools.contains(name))
+    if (!_gestorTools.contains(name)) {
       return jsonEncode({
         'error': 'Ferramenta não permitida na conexão remota.',
       });
+    }
     if (name == 'list_commands') {
       final moduleId = '${input['module'] ?? ''}'.trim();
       return jsonEncode({

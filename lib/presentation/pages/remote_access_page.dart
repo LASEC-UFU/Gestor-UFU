@@ -165,18 +165,20 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
       _certificate = certificateFile.path;
       _privateKey = keyPem;
       await _calculateFingerprint(certificateFile.path);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _busy = false;
           _message =
               'Certificado autoassinado criado. Copie o fingerprint ao configurar o Android.';
         });
+      }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _busy = false;
           _message = 'Falha ao gerar certificado: $error';
         });
+      }
     }
   }
 
@@ -186,8 +188,9 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
       r'-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----',
       dotAll: true,
     ).firstMatch(pem);
-    if (match == null)
+    if (match == null) {
       throw const FormatException('Certificado PEM não encontrado.');
+    }
     final hash = sha256
         .convert(base64Decode(match.group(1)!.replaceAll(RegExp(r'\s'), '')))
         .toString();
@@ -211,8 +214,9 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
         if (mounted) setState(() => _privateKey = keyPem);
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(() => _message = 'Falha ao carregar chave TLS: $error');
+      }
     }
   }
 
@@ -220,11 +224,12 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
     try {
       await _activateRemoteAccess();
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _busy = false;
           _message = 'Falha ao ativar o acesso remoto: $error';
         });
+      }
     }
   }
 
@@ -254,8 +259,9 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(RemoteAccessServer.portKey, port);
     await prefs.setStringList(RemoteAccessServer.allowedCidrsKey, cidrs);
-    if (_certificate != null)
+    if (_certificate != null) {
       await prefs.setString(RemoteAccessServer.certificateKey, _certificate!);
+    }
     if (_privateKey != null) {
       const vault = FlutterSecureStorage();
       await vault.write(
@@ -284,10 +290,11 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
 
   Future<void> _rotateToken() async {
     _token.text = await RemoteAccessServer.instance.rotateToken();
-    if (mounted)
+    if (mounted) {
       setState(
         () => _message = 'Token substituído. Atualize o cadastro no Android.',
       );
+    }
   }
 
   Future<void> _firewall(bool remove) async {
@@ -298,7 +305,7 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
     final error = await RemoteAccessServer.instance.configureWindowsFirewall(
       remove: remove,
     );
-    if (mounted)
+    if (mounted) {
       setState(() {
         _busy = false;
         _message =
@@ -307,6 +314,7 @@ class _RemoteAccessPageState extends State<RemoteAccessPage> {
                 ? 'Regra removida do Firewall do Windows.'
                 : 'Regra criada para uma única porta e as faixas CIDR informadas.');
       });
+    }
   }
 
   @override
