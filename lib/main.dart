@@ -153,19 +153,24 @@ Future<void> main(List<String> args) async {
     await windowManager.ensureInitialized();
     await windowManager.setTitle(appTitle);
   }
+  debugPrint('[Inicialização] Carregando preferências');
   final preferences = await SharedPreferences.getInstance();
   final sharedDatabase = SharedPreferencesSyncService();
+  debugPrint('[Inicialização] Sincronizando banco compartilhado');
   await sharedDatabase.initialize();
   // Ativa os módulos DEPOIS de trazer o banco compartilhado: as migrações e
   // os dados iniciais dos módulos não podem sobrescrever o que veio de lá.
   final services = GestorServices();
   // Períodos letivos da janela principal: o seletor do cabeçalho de todos os
   // módulos usa esta instância; trocar o período vale para todas as telas.
+  debugPrint('[Inicialização] Carregando período letivo');
   await services.terms.load();
   AcademicTermService.shared = services.terms;
   // Ponte com o Agente de IA para os módulos (ex.: resumos de documentos).
   services.registerContract<AiTextService>(const AgentTextService());
+  debugPrint('[Inicialização] Ativando módulos');
   await ModuleRegistry.instance.activateAll(services);
+  debugPrint('[Inicialização] Módulos ativados');
   final themeCtrl = ThemeController(
     isLight: preferences.getBool(ThemeController.storageKey) ?? false,
   );
@@ -180,6 +185,7 @@ Future<void> main(List<String> args) async {
         await module.onExternalDataChanged();
       }
     };
+  debugPrint('[Inicialização] Conectando agente');
   if (Platform.isWindows) await agentHost.start();
   // Dados vindos de outro computador pela pasta compartilhada: mesma
   // recarga das alterações feitas pelo agente.
@@ -193,6 +199,7 @@ Future<void> main(List<String> args) async {
   final filesMirror = SharedFilesMirror(sharedDatabase);
   filesMirror.start();
 
+  debugPrint('[Inicialização] Preparando acesso remoto');
   final remoteAccess = RemoteAccessServer.instance
     ..onDataChanged = () async {
       await services.terms.load();
@@ -218,6 +225,7 @@ Future<void> main(List<String> args) async {
     }());
   }
 
+  debugPrint('[Inicialização] Montando interface');
   runApp(
     MultiProvider(
       providers: [

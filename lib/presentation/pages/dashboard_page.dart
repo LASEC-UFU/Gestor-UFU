@@ -122,7 +122,7 @@ class _DashboardPageState extends State<DashboardPage> {
               return CustomScrollView(
                 slivers: [
                   SliverToBoxAdapter(
-                    child: _DashboardHeader(
+                    child: DashboardHeader(
                       compact: compact,
                       onSettingsPressed: _openSettings,
                     ),
@@ -195,8 +195,9 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-class _DashboardHeader extends StatelessWidget {
-  const _DashboardHeader({
+class DashboardHeader extends StatelessWidget {
+  const DashboardHeader({
+    super.key,
     required this.compact,
     required this.onSettingsPressed,
   });
@@ -206,78 +207,110 @@ class _DashboardHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(compact ? 20 : 36, 22, compact ? 20 : 36, 0),
-      child: Row(
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primary.withAlpha(65),
-                  blurRadius: 22,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: const Icon(Icons.auto_awesome_rounded, color: Colors.white),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+        final iconsOnly =
+            constraints.maxWidth < 1050 * textScale.clamp(1.0, 2.0);
+        final hideBrandText =
+            constraints.maxWidth < 460 * textScale.clamp(1.0, 2.0);
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 20 : 36,
+            22,
+            compact ? 20 : 36,
+            0,
           ),
-          SizedBox(width: 13),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Text(
-                'Gestor UFU',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 16,
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(15),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primary.withAlpha(65),
+                      blurRadius: 22,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.auto_awesome_rounded,
+                  color: Colors.white,
                 ),
               ),
-              Text(
-                'CENTRAL DE UTILIDADES',
-                style: TextStyle(
-                  color: AppTheme.textSecondary.withAlpha(210),
-                  fontSize: 9,
-                  letterSpacing: 1.4,
-                  fontWeight: FontWeight.w600,
+              SizedBox(width: 13),
+              if (!hideBrandText)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Gestor UFU',
+                      style: TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      'CENTRAL DE UTILIDADES',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary.withAlpha(210),
+                        fontSize: 9,
+                        letterSpacing: 1.4,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
+              const Spacer(),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (iconsOnly)
+                    IconButton.outlined(
+                      onPressed: () => context.go('/remote-access'),
+                      tooltip: 'Acesso móvel',
+                      icon: const Icon(Icons.phone_android_rounded, size: 18),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: () => context.go('/remote-access'),
+                      icon: const Icon(Icons.phone_android_rounded, size: 17),
+                      label: const Text('Acesso móvel'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                    ),
+                  SizedBox(width: iconsOnly ? 6 : 10),
+                  if (iconsOnly)
+                    IconButton.outlined(
+                      onPressed: onSettingsPressed,
+                      tooltip: 'Configurações',
+                      icon: const Icon(Icons.storage_rounded, size: 18),
+                    )
+                  else
+                    OutlinedButton.icon(
+                      onPressed: onSettingsPressed,
+                      icon: const Icon(Icons.storage_rounded, size: 17),
+                      label: const Text('Configurações'),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                    ),
+                  SizedBox(width: iconsOnly ? 6 : 10),
+                  ThemeSelector(compact: iconsOnly),
+                ],
               ),
             ],
           ),
-          const Spacer(),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => context.go('/remote-access'),
-                icon: const Icon(Icons.phone_android_rounded, size: 17),
-                label: const Text('Acesso móvel'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 40),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(width: 10),
-              OutlinedButton.icon(
-                onPressed: onSettingsPressed,
-                icon: const Icon(Icons.storage_rounded, size: 17),
-                label: const Text('Configurações'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 40),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(width: 10),
-              const ThemeSelector(),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

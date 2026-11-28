@@ -102,6 +102,30 @@ class WebProcessService extends ChangeNotifier {
     return saveProcess(json);
   }
 
+  Future<WebProcess> duplicateProcess(
+    String id, {
+    String? name,
+    bool includeData = false,
+  }) async {
+    _idle();
+    final original = project(id);
+    final json = original.toJson()..remove('id');
+    json['name'] = name?.trim().isNotEmpty == true
+        ? name!.trim()
+        : '${original.name} - cópia';
+    json['records'] = includeData
+        ? original.records
+              .map(
+                (row) => WebRecord(
+                  id: _uuid.v4(),
+                  values: Map.of(row.values),
+                ).toJson(),
+              )
+              .toList()
+        : [];
+    return saveProcess(json);
+  }
+
   Future<void> removeProcess(String id) async {
     _idle();
     project(id);

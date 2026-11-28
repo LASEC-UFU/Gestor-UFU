@@ -222,6 +222,32 @@ List<ModuleCommand> webProcessCommands(WebProcessService service) {
       mutates: true,
       approval: true,
     ),
+    command(
+      'duplicarProcesso',
+      'Criar processo usando qualquer processo existente como modelo',
+      (input) async {
+        final item = await service.duplicateProcess(
+          input.requireString('processId'),
+          name: input.optionalString('name'),
+          includeData: input.flag('includeData'),
+        );
+        return CommandResult.ok(
+          message: 'Processo criado a partir do modelo.',
+          data: {'processId': item.id},
+        );
+      },
+      properties: {
+        'processId': pid,
+        'name': {'type': 'string'},
+        'includeData': {
+          'type': 'boolean',
+          'description':
+              'Copiar o lote com novos IDs e todos os registros pendentes. Padrão: false.',
+        },
+      },
+      required: ['processId'],
+      mutates: true,
+    ),
     command('modeloPalmelo', 'Criar processo a partir do modelo Palmelo', (
       input,
     ) async {

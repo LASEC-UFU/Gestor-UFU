@@ -10,6 +10,8 @@ Novo processo: nome, URL http/https, texto que confirma a conclusão (opcional),
 intervalo entre registros e pasta de resultados. Cada etapa tem action,
 selector (ID, #id ou CSS), value (texto ou {{campo}} do lote), nome e tempo limite.
 A interface permite selecionar o componente no navegador e reordenar etapas.
+Usar processo como modelo permite escolher qualquer processo já cadastrado,
+dar outro nome e, opcionalmente, copiar seu lote como novos registros pendentes.
 O ID interno do módulo continua inserir-documentos-sei para preservar cadastros.
 
 ## Ações
@@ -27,6 +29,8 @@ acoesWeb.salvarProcesso recebe process:{name,url,steps,successText,...}; omitir 
 cria um processo, informar id atualiza. steps pode ser uma sequência completa.
 acoesWeb.adicionarEtapa, atualizarEtapa, reordenarEtapas (stepIds), removerEtapa
 permitem montar a sequência aos poucos. Use processId de listar e os IDs das etapas.
+acoesWeb.duplicarProcesso recebe processId, name opcional e includeData (false
+por padrão). A cópia tem novo ID e não herda resultados ou sessão do navegador.
 acoesWeb.salvarRegistro recebe values e recordId opcional. importarDados lê uma
 lista JSON de objetos; os campos são livres. exportarDados gera dados.json.
 exportarProcesso/importarProcesso compartilham só configuração e etapas.

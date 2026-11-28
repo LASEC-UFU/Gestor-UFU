@@ -416,6 +416,38 @@ void main() {
     );
   });
 
+  test(
+    'qualquer processo vira modelo sem herdar resultados ou IDs dos registros',
+    () async {
+      final original = await create();
+      await service.saveRecord(original.id, {
+        'nome_completo': 'Teste',
+        'whatsapp': '1',
+      });
+      await service.run(original.id);
+      final source = service.project(original.id);
+      final configuration = await service.duplicateProcess(
+        source.id,
+        name: 'Outro processo',
+      );
+      expect(configuration.id, isNot(source.id));
+      expect(configuration.records, isEmpty);
+      expect(
+        configuration.steps.map((s) => s.toJson()),
+        source.steps.map((s) => s.toJson()),
+      );
+      final withData = await service.duplicateProcess(
+        source.id,
+        includeData: true,
+      );
+      expect(withData.records.single.id, isNot(source.records.single.id));
+      expect(withData.records.single.values, source.records.single.values);
+      expect(withData.records.single.status, 'pending');
+      expect(withData.records.single.outputPath, isEmpty);
+      expect(service.project(source.id).records.single.status, 'success');
+    },
+  );
+
   test('pausa inválida é detectada antes de qualquer ação no site', () async {
     final item = await create(
       steps: [

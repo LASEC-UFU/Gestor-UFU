@@ -274,8 +274,82 @@ class _WebProcessPageState extends State<WebProcessPage> {
     });
   }
 
-  Future<void> _palmelo() => _guard(() async {
-    final item = await service.addPalmeloTemplate();
+  Future<void> _useProcessTemplate([WebProcess? source]) => _guard(() async {
+    if (service.projects.isEmpty) return;
+    var sourceId = source?.id ?? service.projects.first.id;
+    final name = TextEditingController(
+      text: '${service.project(sourceId).name} - cópia',
+    );
+    var includeData = false;
+    final result = await _editorDialog<Map<String, dynamic>>(
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Usar processo como modelo'),
+          content: SizedBox(
+            width: 600,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: sourceId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Processo existente',
+                  ),
+                  items: service.projects
+                      .map(
+                        (p) =>
+                            DropdownMenuItem(value: p.id, child: Text(p.name)),
+                      )
+                      .toList(),
+                  onChanged: (id) => update(() {
+                    sourceId = id!;
+                    name.text = '${service.project(sourceId).name} - cópia';
+                  }),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: name,
+                  decoration: const InputDecoration(
+                    labelText: 'Nome do novo processo',
+                  ),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: includeData,
+                  onChanged: (v) => update(() => includeData = v ?? false),
+                  title: const Text('Copiar também os dados do lote'),
+                  subtitle: const Text(
+                    'Os registros copiados começarão como pendentes.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, {
+                'processId': sourceId,
+                'name': name.text,
+                'includeData': includeData,
+              }),
+              child: const Text('Criar processo'),
+            ),
+          ],
+        ),
+      ),
+    );
+    name.dispose();
+    if (result == null) return;
+    final item = await service.duplicateProcess(
+      result['processId'] as String,
+      name: result['name'] as String,
+      includeData: result['includeData'] as bool,
+    );
     if (mounted) {
       setState(() {
         _selected = item.id;
@@ -775,6 +849,13 @@ class _WebProcessPageState extends State<WebProcessPage> {
                     icon: const Icon(Icons.download),
                     label: const Text('Exportar processo'),
                   ),
+                  OutlinedButton.icon(
+                    onPressed: service.busy
+                        ? null
+                        : () => _useProcessTemplate(item),
+                    icon: const Icon(Icons.copy_outlined),
+                    label: const Text('Usar processo como modelo'),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -1126,7 +1207,7 @@ class _WebProcessPageState extends State<WebProcessPage> {
         PopupMenuButton<String>(
           enabled: !service.busy,
           onSelected: (action) => _guard(() async {
-            if (action == 'template') await _palmelo();
+            if (action == 'template') await _useProcessTemplate();
             if (action == 'import') await _importProject();
             if (action == 'remove' &&
                 item != null &&
@@ -1135,9 +1216,10 @@ class _WebProcessPageState extends State<WebProcessPage> {
             }
           }),
           itemBuilder: (context) => [
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'template',
-              child: Text('Usar modelo Palmelo'),
+              enabled: service.projects.isNotEmpty,
+              child: const Text('Usar processo como modelo'),
             ),
             const PopupMenuItem(
               value: 'import',
@@ -1172,8 +1254,8 @@ class _WebProcessPageState extends State<WebProcessPage> {
                         child: const Text('Novo processo'),
                       ),
                       OutlinedButton(
-                        onPressed: _palmelo,
-                        child: const Text('Usar modelo Palmelo'),
+                        onPressed: _importProject,
+                        child: const Text('Importar processo'),
                       ),
                     ],
                   ),
