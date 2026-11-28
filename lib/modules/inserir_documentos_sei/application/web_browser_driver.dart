@@ -210,19 +210,32 @@ class PuppeteerWebBrowserDriver implements WebBrowserDriver {
     final selector = await _resolveSelector(frame, step.selector, timeout);
     if (step.action == WebAction.waitText) {
       final handle = await frame.waitForFunction(
-        '(selector, text) => (document.querySelector(selector)?.innerText || document.querySelector(selector)?.textContent || "").includes(text)',
+        '(selector, text) => [...document.querySelectorAll(selector)].some(el => el.getClientRects().length && getComputedStyle(el).visibility !== "hidden" && (el.innerText || el.textContent || "").includes(text))',
         args: [selector, value],
         timeout: timeout,
       );
       await handle.dispose();
       return null;
     }
-    final element = await frame.waitForSelector(
-      selector,
-      visible: step.action == WebAction.upload ? null : true,
+    // Google Forms também mantém inputs ocultos com o mesmo identificador.
+    // Resolva o componente visível entre todos os resultados do seletor.
+    final handle = await frame.waitForFunction(
+      r'''(selector, allowHidden, editable) => [...document.querySelectorAll(selector)].find(el => {
+        if (allowHidden) return true;
+        const style = getComputedStyle(el);
+        return el.getClientRects().length > 0 && style.visibility !== 'hidden' && style.visibility !== 'collapse' && el.type !== 'hidden'
+          && (!editable || (!el.disabled && !el.readOnly && el.getAttribute('aria-disabled') !== 'true'));
+      }) || false''',
+      args: [
+        selector,
+        step.action == WebAction.upload,
+        step.action == WebAction.fill,
+      ],
       timeout: timeout,
     );
+    final element = handle.asElement;
     if (element == null) {
+      await handle.dispose();
       throw const CommandException(
         'elemento_ausente',
         'Componente HTML não encontrado.',
@@ -243,7 +256,17 @@ class PuppeteerWebBrowserDriver implements WebBrowserDriver {
             el.dispatchEvent(new Event('input', {bubbles:true}));
             el.dispatchEvent(new Event('change', {bubbles:true}));
           }''');
-          if (value.isNotEmpty) await frame.type(selector, value);
+          if (value.isNotEmpty) await element.type(value);
+          final filled = await element.evaluate<bool>(
+            '(el, value) => (el.isContentEditable ? el.textContent : el.value) === value',
+            args: [value],
+          );
+          if (filled != true) {
+            throw const CommandException(
+              'preenchimento_incompleto',
+              'O campo não recebeu o valor completo. O processo foi interrompido antes das próximas etapas.',
+            );
+          }
         case WebAction.click:
           if (value.isEmpty) {
             await _click(frame, element);
@@ -252,6 +275,10 @@ class PuppeteerWebBrowserDriver implements WebBrowserDriver {
             var found = false;
             try {
               for (final button in buttons) {
+                final visible = await button.evaluate<bool>(
+                  'el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden"',
+                );
+                if (visible != true) continue;
                 final label = await button.evaluate<String>(
                   'el => (el.innerText || el.value || el.textContent || "").trim()',
                 );

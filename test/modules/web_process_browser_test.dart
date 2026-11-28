@@ -82,7 +82,7 @@ void main() {
     }
   });
   test(
-    'modelo Palmelo localiza campos anônimos pelos identificadores originais',
+    'modelo Palmelo preenche campos visíveis mesmo com inputs ocultos primeiro',
     () async {
       if (!available) {
         markTestSkipped('Edge/Chrome não instalado.');
@@ -101,10 +101,13 @@ void main() {
           .toList();
       final html = steps.map((s) {
         final id = RegExp(r'entry\.(\d+)').firstMatch(s.selector)![1];
-        return '<section data-params="%.@.[[$id,null,true]]"><input type="text"></section>';
+        return '<input type="hidden" name="entry.$id" value="oculto">'
+            '<section data-params="%.@.[[$id,null,true]]">'
+            '<input type="text" style="display:none" value="invisível">'
+            '<input type="text" readonly></section>';
       }).join();
       await page.evaluate(
-        '(html) => { document.body.innerHTML = html; }',
+        '(html) => { document.body.innerHTML = html; setTimeout(() => document.querySelectorAll("input[readonly]").forEach(e => e.readOnly = false), 200); }',
         args: [html],
       );
       final driver = PuppeteerWebBrowserDriver(
@@ -118,9 +121,15 @@ void main() {
       }
       expect(
         await page.evaluate<List>(
-          '() => [...document.querySelectorAll("input")].map(e=>e.value)',
+          '() => [...document.querySelectorAll("section input:not([style])")].map(e=>e.value)',
         ),
         List.generate(7, (i) => 'valor $i'),
+      );
+      expect(
+        await page.evaluate<List>(
+          '() => [...document.querySelectorAll("input[type=hidden]")].map(e=>e.value)',
+        ),
+        List.filled(7, 'oculto'),
       );
       expect(posted, isEmpty);
     },
